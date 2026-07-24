@@ -1,0 +1,9 @@
+﻿# Public product repo: docs only. Never add source or binaries.
+*
+!.gitignore
+!.gitattributes
+!README.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!.github/
+!.github/**

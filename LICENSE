@@ -1,0 +1,78 @@
+SpeakRect Proprietary License
+Copyright (c) 2026 Carey L. Brooks. All rights reserved.
+
+## Summary
+
+SpeakRect (the application, source code, and related materials owned by the
+copyright holders — the "Software") is proprietary software. Source code is
+not licensed for open redistribution. You may use the Software free of charge
+for personal and non-commercial purposes under the terms below.
+
+This license does not apply to third-party components bundled or used with
+SpeakRect (for example KoboldCpp or model weights). Those keep their own
+licenses — see THIRD_PARTY_NOTICES.md (if present) and the Credits section of
+the README.
+
+## Grant of rights
+
+Subject to full compliance with this license, you are granted a free,
+non-exclusive, non-transferable, revocable license to:
+
+1. Install and run the Software on devices you own or control;
+2. Use the Software for personal, educational, accessibility, and other
+   non-commercial purposes;
+3. Make reasonable backup copies of the distributed binaries for your own use.
+
+## Restrictions
+
+You may not, without prior written permission from the copyright holders:
+
+1. Use the Software for commercial purposes (including selling, renting,
+   licensing, or offering the Software or access to it as a paid product or
+   service, or using it as a core part of a commercial product or service);
+2. Copy, distribute, publish, or sublicense the Software (or substantial
+   portions of it) to others, except as needed for personal backup;
+3. Reverse engineer, decompile, or disassemble the Software, except to the
+   extent applicable law expressly allows despite this restriction;
+4. Modify the Software or create derivative works for distribution;
+5. Remove or alter copyright, trademark, or attribution notices;
+6. Claim ownership of the Software or misrepresent its origin.
+
+## No source license
+
+Nothing in this license grants you rights to the source code of SpeakRect.
+Source code remains closed and is not offered under an open-source license.
+
+## Third-party software
+
+The Software may install or invoke third-party programs and model files
+(including but not limited to KoboldCpp and GLM-OCR weights). Those components
+are provided under their own licenses. Your use of those components is subject
+to those licenses. This proprietary license does not relicense third-party
+code or models.
+
+## Disclaimer of warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. YOU USE THE SOFTWARE
+AT YOUR OWN RISK.
+
+## Limitation of liability
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR AUTHORS BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE — INCLUDING ANY LOSS OF DATA, LOSS OF
+PROFITS, OR BUSINESS INTERRUPTION — TO THE MAXIMUM EXTENT PERMITTED BY LAW.
+
+## Termination
+
+This license ends automatically if you breach it. Upon termination you must
+stop using the Software and destroy copies in your possession, except where
+the law requires otherwise. Third-party licenses continue to apply to
+third-party components.
+
+## Contact
+
+For commercial licensing or other permissions, contact the copyright holders.
