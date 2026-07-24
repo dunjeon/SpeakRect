@@ -35,6 +35,46 @@ If Windows can show it in a normal (non-exclusive) window or on the desktop, Spe
 
 No separate model download is required for the complete release package.
 
+### Windows SmartScreen / “Unknown publisher”
+
+Windows may block or warn when you first run **`SpeakRect.exe`** (or open the zip). Common messages:
+
+- **“Windows protected your PC”** / SmartScreen
+- **“Unknown publisher”**
+- Browser download warnings for an unsigned app
+
+**That is expected.** SpeakRect is free and distributed as an unsigned zip from GitHub Releases. It is **not** code-signed with a paid certificate, so Windows cannot show a verified publisher name. The warning means “Microsoft doesn’t know this publisher,” **not** that the file was found to be malware.
+
+#### How to run it anyway
+
+1. On the blue/red SmartScreen window, click **More info**.
+2. Click **Run anyway**.
+
+If Explorer still treats the file as blocked after download:
+
+1. Right-click **`SpeakRect.exe`** (or the zip) → **Properties**.
+2. If you see **Unblock** at the bottom, check it → **OK**.
+3. Run the app again.
+
+Or in PowerShell, from the folder you extracted to:
+
+```powershell
+Unblock-File -Path .\SpeakRect.exe
+Get-ChildItem -Recurse | Unblock-File
+```
+
+#### What is in the package (and why Windows is cautious)
+
+The release zip is a full local install: **`SpeakRect.exe`**, a **KoboldCpp** host, and large **on-device model files**. Nothing is required to call a cloud AI service for recognition — work stays on your PC. Screen capture and hotkeys are normal for this kind of accessibility tool; Windows still treats new unsigned downloads carefully.
+
+Only download from the official [Releases](https://github.com/dunjeon/SpeakRect/releases) page on this repository. If a release lists a **SHA-256** checksum, you can verify the zip before extracting:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\SpeakRect-*-win-x64.zip
+```
+
+Code signing may come later; until then, SmartScreen warnings are a normal side effect of shipping free, unsigned software.
+
 ---
 
 ## Why it exists
