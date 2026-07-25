@@ -2,9 +2,9 @@
 
 **Draw regions on your screen. Hear the text read aloud.**
 
-SpeakRect is a free Windows accessibility app for people with **visual impairments**. It captures text from whatever is on your screen — games, comics, browsers, menus, subtitles, and more — recognizes it with a **local LLM** on your PC, and reads it with Windows speech.
+SpeakRect is a free Windows accessibility app for people with **visual impairments**. It captures text from whatever is on your screen — games, comics, browsers, menus, subtitles, and more — recognizes it with a **local LLM** on your PC, and reads it aloud with **Windows speech by default** (optional SAPI 5 for advanced setups).
 
-No cloud AI is required. Recognition stays on your machine.
+No cloud AI is required for recognition. Speech works offline with the built-in Windows engine.
 
 ---
 
@@ -13,9 +13,9 @@ No cloud AI is required. Recognition stays on your machine.
 - **Up to 8 saved regions** — pin dialogue, menus, choices, captions, or panels each to its own hotkey
 - **Follow mode** — a ninth reader that tracks the mouse (or locks in place)
 - **Local recognition** — KoboldCpp + GLM-OCR (Q8_0) bundled in the release zip
-- **Windows TTS** — pick voice, rate, pitch, and volume
+- **Windows TTS by default** — works out of the box; optional **SAPI 5** for classic voices and third-party engines
 - **Keyboard + gamepad** — remappable bindings, optional custom actions
-- **Profiles** — save different layouts and hotkeys per game or workflow
+- **Profiles** — save layouts, hotkeys, modes, and voice (including TTS engine) per game
 - **Comic Book mode** — better handling of panels and balloons (with Fast / Faster options)
 
 If Windows can show it in a normal window or on the desktop, SpeakRect can try to read it. Prefer **borderless windowed** or **windowed** mode — exclusive fullscreen often cannot be captured.
@@ -141,7 +141,7 @@ For games, use **borderless windowed** so capture works.
 | Menu | What it does |
 |------|----------------|
 | **Show Overlay** | Opens the selection overlay |
-| **Settings…** | Profiles, Key Map, Regions, Voice, Follow, Help |
+| **Settings…** | Profiles, Key Map, Regions, Voice, Follow, Analytics, Help |
 | **Profiles** | Load / save named setups |
 | **Exit** | Quit SpeakRect and stop the local LLM |
 
@@ -260,10 +260,12 @@ One primary mode is always selected (also toggleable with global hotkeys):
 
 | Mode | Default hotkey | When to use |
 |------|----------------|-------------|
-| **Default** | **Shift+D** | Games, menus, subtitles, plain UI |
-| **Comic Book** | **Shift+B** | Panels, balloons, multi-caption pages |
-| **Fast** | **Shift+N** | With Comic Book: quicker reads |
-| **Faster** | **Shift+M** | With Comic Book: snappiest option |
+| **Default** | **Ctrl+D** | Games, menus, subtitles, plain UI |
+| **Comic Book** | **Ctrl+B** | Panels, balloons, multi-caption pages |
+| **Fast** | **Ctrl+N** | With Comic Book: quicker reads |
+| **Faster** | **Ctrl+M** | With Comic Book: snappiest option |
+
+Mode toggles use **Ctrl+letter**, not Shift+letter: a global **Shift+D** (etc.) would fire while typing capitals.
 
 - **Default** and **Comic Book** are opposites — only one primary style at a time.
 - **Fast** / **Faster** only apply with Comic Book and are mutually exclusive; enabling either also turns Comic Book on.
@@ -277,18 +279,49 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 |-----|----------------|
 | **Key Map** | Keyboard + gamepad bindings; custom actions |
 | **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
-| **Voice** | Windows TTS voice, rate, pitch, volume, silence |
+| **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
+| **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
 | **Help** | Getting started, features, default hotkeys, open README |
 
-#### Voice
+#### Voice (speech)
+
+**Default: Windows (UWP / OneCore).** Fresh installs and **Reset** use this engine so SpeakRect speaks immediately with the voices Windows already provides. You do **not** need SAPI, Narrator packs, or any adapter for a normal setup.
 
 | Control | Effect |
 |---------|--------|
-| **Voice** | Installed Windows voices (blank = system default) |
+| **Engine** | **Windows** (default) or **SAPI 5** (optional) |
+| **Voice** | Voices for the selected engine (blank = that engine’s system default) |
 | **Rate** / **Pitch** / **Volume** | Speaking style |
-| **Silence** options | Gaps after phrases / around punctuation |
+| **Silence** options | End / punctuation gaps (**Windows** engine only) |
 | **Preview** | Sample with current settings |
+
+**More Windows voices (still on the default engine)**  
+**Settings → Time & language → Speech** (or Language packs) → download additional speech voices, then reopen SpeakRect’s Voice tab.
+
+##### Optional: SAPI 5 (natural / adapter voices)
+
+SAPI 5 is for people who want **classic Control Panel voices** or a **third-party SAPI engine**. Microsoft’s **Narrator “Natural” voices** are *not* exposed to normal apps by Windows; SpeakRect cannot list them on the Windows engine. Some community tools register those (or similar) voices as **SAPI 5** so apps can use them.
+
+**Example path — NaturalVoiceSAPIAdapter (unofficial)**
+
+1. Install and test [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter) from its [Releases](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/releases) (run **Installer.exe** as admin; install **both 32-bit and 64-bit** on 64-bit Windows if you want every app covered).  
+2. Enable **local Narrator voices** in the adapter if that is what you want; follow the project README / [wiki](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/wiki) (some newer Narrator packs need a [last working voice download](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/wiki/Narrator-natural-voice-download-links)).  
+3. Confirm voices appear in Windows **Control Panel → Speech Recognition → Text to Speech**, or the adapter’s test app.  
+4. In SpeakRect: **Settings → Voice → Engine → SAPI 5 (classic + adapters)** → pick a voice → **Preview**.  
+5. **Save** your **profile** so `TtsEngine` and the SAPI voice name are stored (profiles include the full Voice section).
+
+**Important**
+
+| | |
+|--|--|
+| **Default** | Windows engine — always the out-of-the-box path |
+| **Adapter tools** | Third-party, not shipped with SpeakRect, not endorsed by Microsoft |
+| **Stability** | Adapters can break after Windows updates; switch Engine back to **Windows** if speech fails |
+| **Online adapter options** | Edge/Azure voices via an adapter may need the network; local Narrator models stay offline when configured that way |
+| **Profiles** | Engine + voice + rate/pitch/volume are saved with the profile |
+
+SpeakRect does **not** bundle or install SAPI adapters. If SAPI is selected but no usable voice is registered, switch back to **Windows**.
 
 #### Key Map
 
@@ -303,20 +336,22 @@ Tips:
 
 ### Profiles
 
-Save hotkeys, modes, regions, Follow size, and related prefs:
+Save hotkeys, modes, regions, Follow size, **voice (engine + voice + rate/pitch/volume)**, and related prefs:
 
 1. Tray → **Profiles** → **Save current…** / **Save as…**, or use the profile bar in **Settings**.
 2. Load from the tray menu or the Settings profile list.
+
+If you switch to **SAPI 5** or change the spoken voice, **Save** the profile again so that setup is restored next time.
 
 ### Default hotkey cheat sheet
 
 | Action | Default |
 |--------|---------|
 | Show / hide overlay | **Shift+Tab** |
-| Default mode | **Shift+D** |
-| Comic Book mode | **Shift+B** |
-| Fast | **Shift+N** |
-| Faster | **Shift+M** |
+| Default mode | **Ctrl+D** |
+| Comic Book mode | **Ctrl+B** |
+| Fast | **Ctrl+N** |
+| Faster | **Ctrl+M** |
 | Speak region 1–8 | **Shift+F1** … **Shift+F8** |
 | Speak Follow (at mouse) | **Shift+F9** |
 | Shape: Rectangle / Oval / Lasso | **R** / **O** / **L** (overlay) |
@@ -390,7 +425,7 @@ These numbers are from internal runs, not a formal benchmark. Hardware, region s
 
 ## Privacy
 
-Recognition uses a **local LLM** on your machine. SpeakRect does not send screen captures to a cloud AI API. Speech uses Windows TTS on the same PC.
+Recognition uses a **local LLM** on your machine. SpeakRect does not send screen captures to a cloud AI API. Speech uses **on-device** TTS (Windows UWP by default, or optional SAPI 5 / a registered local engine). If you enable an adapter’s *online* voices, that path is outside SpeakRect and may use the network — keep the Windows engine or local-only SAPI voices for fully offline speech.
 
 ---
 
