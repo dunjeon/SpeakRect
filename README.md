@@ -158,7 +158,7 @@ Right-click the tray icon:
 | Menu | What it does |
 |------|----------------|
 | **Show Overlay** | Opens the selection overlay (same as the overlay hotkey) |
-| **Settings…** | Profiles, Key Map, Voice, and Follow in one window |
+| **Settings…** | Profiles, Key Map, Regions map, Voice, Follow, and Help in one window |
 | **Profiles** | Load / save named setups (hotkeys, modes, regions, etc.) |
 | **Exit** | Quit SpeakRect and stop the local LLM |
 
@@ -310,7 +310,7 @@ Regions are saved in settings and can be stored in **Profiles** (e.g. one profil
 | **Down** (overlay) | Turn Follow off (overlay stays open) |
 | **Enter** (while Follow is on) | **Lock** the box in place / unlock back to floating — does **not** speak |
 | Sidebar **FOLLOW** | Click = on/off; **Ctrl+click** = Settings → Follow tab |
-| Sidebar **SETTINGS** | Opens Settings (profiles, Key Map, Voice, Follow) |
+| Sidebar **SETTINGS** | Opens Settings (profiles, Key Map, Regions, Voice, Follow, Help) |
 
 **Follow settings** (size, rectangle vs oval, X/Y offset from the cursor): open with **Ctrl+click FOLLOW**, tray **Settings…** → **Follow** tab, or overlay **SETTINGS**.
 
@@ -343,8 +343,10 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 | Tab | What it does |
 |-----|----------------|
 | **Key Map** | Remap keyboard + gamepad; custom actions |
+| **Regions** | Map of fixed slots 1–8 (Shift+F1–F8): where each saved capture sits, hotkey, shape; clear a slot |
 | **Voice** | Windows TTS voice, rate, pitch, volume, silence |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
+| **Help** | Getting started, what the app can do, default hotkey cheat sheet, open README |
 
 Mode toggles (Default / Comic / Fast / Faster) and the Follow **on/off** control stay on the overlay sidebar.
 
