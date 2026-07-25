@@ -17,6 +17,7 @@ No cloud AI is required for recognition. Speech works offline with the built-in 
 - **Keyboard + gamepad** — remappable bindings, optional custom actions
 - **Profiles** — save layouts, hotkeys, modes, and voice (including TTS engine) per game
 - **Comic Book mode** — better handling of panels and balloons (with Fast / Faster options)
+- **Natural TTS pacing** — keeps contractions (`don't`, `aren't`, …); pauses after commas and sentence ends so dialogue is easier to follow
 
 If Windows can show it in a normal window or on the desktop, SpeakRect can try to read it. Prefer **borderless windowed** or **windowed** mode — exclusive fullscreen often cannot be captured.
 
