@@ -16,7 +16,7 @@ No cloud AI is required for recognition. Speech works offline with the built-in 
 - **Windows TTS by default** — works out of the box; optional **SAPI 5** for classic voices and third-party engines
 - **Keyboard + gamepad** — remappable bindings, optional custom actions
 - **Profiles** — save layouts, hotkeys, modes, and voice (including TTS engine) per game
-- **Comic Book mode** — better handling of panels and balloons (with Fast / Faster options)
+- **Comic Book mode** — better handling of panels and balloons
 - **Natural TTS pacing** — keeps contractions (`don't`, `aren't`, …); pauses after commas and sentence ends so dialogue is easier to follow
 
 If Windows can show it in a normal window or on the desktop, SpeakRect can try to read it. Prefer **borderless windowed** or **windowed** mode — exclusive fullscreen often cannot be captured.
@@ -263,13 +263,10 @@ One primary mode is always selected (also toggleable with global hotkeys):
 |------|----------------|-------------|
 | **Default** | **Ctrl+D** | Games, menus, subtitles, plain UI |
 | **Comic Book** | **Ctrl+B** | Panels, balloons, multi-caption pages |
-| **Fast** | **Ctrl+N** | With Comic Book: quicker reads |
-| **Faster** | **Ctrl+M** | With Comic Book: snappiest option |
 
 Mode toggles use **Ctrl+letter**, not Shift+letter: a global **Shift+D** (etc.) would fire while typing capitals.
 
 - **Default** and **Comic Book** are opposites — only one primary style at a time.
-- **Fast** / **Faster** only apply with Comic Book and are mutually exclusive; enabling either also turns Comic Book on.
 - When the overlay is hidden, mode hotkeys are announced with a short TTS phrase.
 
 ### Settings
@@ -351,8 +348,6 @@ If you switch to **SAPI 5** or change the spoken voice, **Save** the profile aga
 | Show / hide overlay | **Shift+Tab** |
 | Default mode | **Ctrl+D** |
 | Comic Book mode | **Ctrl+B** |
-| Fast | **Ctrl+N** |
-| Faster | **Ctrl+M** |
 | Speak region 1–8 | **Shift+F1** … **Shift+F8** |
 | Speak Follow (at mouse) | **Shift+F9** |
 | Shape: Rectangle / Oval / Lasso | **R** / **O** / **L** (overlay) |
@@ -377,7 +372,7 @@ Overlay → draw → **Enter**. Hide with **Escape** when done.
 Follow settings → size the box → point → **Shift+F9**.
 
 **Comic page**  
-Comic Book **on** (optional Fast/Faster) → draw panel or page → **Enter**. Reuse the same region hotkey if layout stays put.
+Comic Book **on** → draw panel or page → **Enter**. Reuse the same region hotkey if layout stays put.
 
 **Controller-only**  
 Key Map → bind overlay and region slots to the pad; optionally add stick/mouse custom actions.
@@ -399,7 +394,7 @@ Key Map → bind overlay and region slots to the pad; optionally add stick/mouse
 
 ## Accuracy
 
-SpeakRect aims to be **usable**, not perfect. Internal debug sessions (mostly English comics with Comic Book + Faster) give a ballpark:
+SpeakRect aims to be **usable**, not perfect. Internal debug sessions (mostly English comics with Comic Book mode) give a ballpark:
 
 | Metric | Result |
 |--------|--------|
