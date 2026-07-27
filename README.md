@@ -281,7 +281,7 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 | **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
 | **Speech** | Name rules, pipeline text rules (regex), and OCR prompts — all editable with reset to defaults |
 | **Image** | Capture prep pipeline (letterbox, long-edge scale, ink gray, denoise, levels, sharpen) with live preview |
-| **Balloons** | Comic Book balloon detect tuning + green-box preview and Speak test |
+| **Balloons** | Comic Book balloon detect tuning + green-box preview; drag/resize/add/delete/reorder refine; Speak test |
 | **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
 | **Help** | Getting started, features, default hotkeys, open README |
 
