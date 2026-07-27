@@ -279,7 +279,7 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 | **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
 | **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
-| **Speech** | Find/replace pronunciation rules before TTS |
+| **Speech** | Name rules, pipeline text rules (regex), and OCR prompts — all editable with reset to defaults |
 | **Image** | Capture prep pipeline (letterbox, long-edge scale, ink gray, denoise, levels, sharpen) with live preview |
 | **Balloons** | Comic Book balloon detect tuning + green-box preview and Speak test |
 | **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
