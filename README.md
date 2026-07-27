@@ -142,7 +142,7 @@ For games, use **borderless windowed** so capture works.
 | Menu | What it does |
 |------|----------------|
 | **Show Overlay** | Opens the selection overlay |
-| **Settings…** | Profiles, Key Map, Regions, Voice, Follow, Analytics, Help |
+| **Settings…** | Profiles, Key Map, Regions, Follow, Voice, Speech, Image, Balloons, Analytics, Help |
 | **Profiles** | Load / save named setups |
 | **Exit** | Quit SpeakRect and stop the local LLM |
 
@@ -277,10 +277,15 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 |-----|----------------|
 | **Key Map** | Keyboard + gamepad bindings; custom actions |
 | **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
-| **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
+| **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
+| **Speech** | Find/replace pronunciation rules before TTS |
+| **Image** | Capture prep pipeline (letterbox, long-edge scale, ink gray, denoise, levels, sharpen) with live preview |
+| **Balloons** | Comic Book balloon detect tuning + green-box preview and Speak test |
 | **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
 | **Help** | Getting started, features, default hotkeys, open README |
+
+Settings remembers the **last tab** you used. Image and Balloons share a working image (last OCR capture when available, or a sample panel).
 
 #### Voice (speech)
 
@@ -334,7 +339,7 @@ Tips:
 
 ### Profiles
 
-Save hotkeys, modes, regions, Follow size, **voice (engine + voice + rate/pitch/volume)**, and related prefs:
+Save hotkeys, modes, regions, Follow size, **voice**, **speech rules**, **image prep**, **balloon detect**, and related prefs:
 
 1. Tray → **Profiles** → **Save current…** / **Save as…**, or use the profile bar in **Settings**.
 2. Load from the tray menu or the Settings profile list.
