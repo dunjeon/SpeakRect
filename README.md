@@ -353,6 +353,7 @@ If you switch to **SAPI 5** or change the spoken voice, **Save** the profile aga
 | Show / hide overlay | **Shift+Tab** |
 | Default mode | **Ctrl+D** |
 | Comic Book mode | **Ctrl+B** |
+| Stop speech (abort TTS) | **Ctrl+Shift+S** |
 | Speak region 1–8 | **Shift+F1** … **Shift+F8** |
 | Speak Follow (at mouse) | **Shift+F9** |
 | Shape: Rectangle / Oval / Lasso | **R** / **O** / **L** (overlay) |
