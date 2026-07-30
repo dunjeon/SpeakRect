@@ -30,7 +30,7 @@ If Windows can show it in a normal window or on the desktop, SpeakRect can try t
 | **Package** | One zip: `SpeakRect.exe` + local LLM host + **Q8_0** model files |
 | **Source** | This repository (**GPLv2**) — full application source |
 
-Large Local-LLM binaries are **not** in the git clone; they ship inside the [release zip](https://github.com/dunjeon/SpeakRect/releases).
+Source clones include the Local-LLM host + models under `koboldcpp\` (**Git LFS** — run `git lfs install` before clone). Ready-to-run zips remain on [Releases](https://github.com/dunjeon/SpeakRect/releases).
 
 ### Install
 

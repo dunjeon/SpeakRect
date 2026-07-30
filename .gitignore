@@ -23,9 +23,8 @@ look/
 **/smoke_err.txt
 **/smoke_out.txt
 
-## Local-LLM payload (release zip / Fetch only — not in git)
-koboldcpp/*.gguf
-koboldcpp/koboldcpp.exe
+## Local-LLM: host + GGUFs tracked via Git LFS (.gitattributes).
+## Ignore only logs / generated runtime config.
 koboldcpp/*.log
 koboldcpp/ocr.runtime.kcpps
 

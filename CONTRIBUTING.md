@@ -4,20 +4,22 @@
 
 - Windows 10/11 **x64**
 - .NET **10** SDK (`net10.0-windows10.0.26100.0`)
-- Optional: GPU + Local-LLM files under `koboldcpp\` for live recognition
+- [Git LFS](https://git-lfs.com/) (host + GGUF models live under `koboldcpp\`)
+- GPU recommended for live Local-LLM recognition
 
 ## Clone and build
 
 ```powershell
+git lfs install
 git clone https://github.com/dunjeon/SpeakRect.git
 cd SpeakRect
+# Confirm payload present (not LFS pointer stubs):
+#   koboldcpp\koboldcpp.exe, glmocr-Q8_0.gguf, mmproj-glmocr-Q8_0.gguf, ocr.kcpps
 dotnet build SpeakRect.sln -c Debug
 dotnet run --project SpeakRect.csproj -c Debug
 ```
 
-Large Local-LLM binaries are **not** in git. For live recognition, extract a [release zip](https://github.com/dunjeon/SpeakRect/releases) so `koboldcpp\` (host + GGUFs) is available next to the app / repo.
-
-On-disk folder name stays `koboldcpp\`. Small config `koboldcpp/ocr.kcpps` is in the repo.
+If files under `koboldcpp\` are tiny text pointers, run `git lfs pull`.
 
 ## Tests
 

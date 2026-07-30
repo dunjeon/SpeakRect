@@ -62,13 +62,20 @@ Single-instance mutex: `Global\SpeakRect_SingleInstance_2026`.
 dotnet test tests/SpeakRect.Tests
 ```
 
-## Local-LLM binaries (not in git)
+## Local-LLM payload (`koboldcpp\`)
 
-Clone is **source only**. Place host + GGUFs under `koboldcpp\` by extracting a [release zip](https://github.com/dunjeon/SpeakRect/releases).
+Tracked in git via **Git LFS**:
 
-Tracked: `koboldcpp/ocr.kcpps` only. Ignored: `*.gguf`, `koboldcpp.exe`.
+| File | Role |
+|------|------|
+| `koboldcpp.exe` | Local inference host |
+| `glmocr-Q8_0.gguf` | Vision / OCR model |
+| `mmproj-glmocr-Q8_0.gguf` | Multimodal projector |
+| `ocr.kcpps` | Host config (normal git) |
 
-App-only publish (no payload): `dotnet publish -p:SkipKoboldPayload=true`. Official releases ship **unobfuscated** single-file + ReadyToRun.
+Clone with `git lfs install` first. Ignored: `*.log`, `ocr.runtime.kcpps`.
+
+App-only publish (no payload copy): `dotnet publish -p:SkipKoboldPayload=true`. Official releases ship **unobfuscated** single-file + ReadyToRun.
 
 ## Third-party
 

@@ -7,16 +7,22 @@
 | `*.cs`, `SpeakRect.csproj`, `SpeakRect.sln` | Application source |
 | `tests/` | Unit tests + optional smokes |
 | `docs/` | Architecture, speak-path, smoke runbook |
-| `koboldcpp/ocr.kcpps` | Small host config sample |
+| `koboldcpp/` | Local-LLM host + GGUF models (**Git LFS**) + `ocr.kcpps` |
 | `.github/workflows/ci.yml` | Pure unit-test CI |
 | `LICENSE`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, … | Project meta |
 
 | Not in git (local only) | Purpose |
 |-------------------------|---------|
-| `koboldcpp/*.gguf`, `koboldcpp.exe` | Multi-GB Local-LLM payload |
-| `scripts/` | Maintainer packaging / bootstrap helpers |
+| `scripts/` | Maintainer packaging helpers |
 | `publish/` | Release zip output |
 | `bin/`, `obj/`, `_debug_view/` | Build / debug outputs |
+| `koboldcpp/*.log`, `ocr.runtime.kcpps` | Host runtime noise |
 
-**Users** download the complete zip from [Releases](https://github.com/dunjeon/SpeakRect/releases).  
-**Contributors** clone source, run unit tests without models; add `koboldcpp\` from a release zip only if they need live recognition.
+**Clone requires [Git LFS](https://git-lfs.com/)** so `koboldcpp.exe` and the GGUFs download with the tree:
+
+```powershell
+git lfs install
+git clone https://github.com/dunjeon/SpeakRect.git
+```
+
+**Users** can still download a ready-to-run zip from [Releases](https://github.com/dunjeon/SpeakRect/releases).
