@@ -1,0 +1,3 @@
+# Public OSS tree does not track multi-GB Local-LLM binaries.
+# Host + GGUFs ship via GitHub Releases / Fetch-LocalLlm.ps1 only.
+# (Historical private LFS pointers are not part of the public source start.)

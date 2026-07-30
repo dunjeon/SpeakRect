@@ -1,0 +1,1912 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace SpeakRect
+{
+    /// <summary>
+    /// Settings tab: Comic Book balloon / OCR region detect tuning + live preview.
+    /// Writes to AppSettings / SpeakRect.ini [COMIC_REGIONS] (and named profiles).
+    /// </summary>
+    public sealed class frm_ComicRegions : Form
+    {
+        private readonly CheckBox _chkFog;
+        private readonly TrackBar _trkFogAmount;
+        private readonly Label _lblFogAmountVal;
+
+        private readonly TrackBar _trkClusterX;
+        private readonly Label _lblClusterXVal;
+        private readonly TrackBar _trkClusterY;
+        private readonly Label _lblClusterYVal;
+
+        private readonly TrackBar _trkInflateX;
+        private readonly Label _lblInflateXVal;
+        private readonly TrackBar _trkInflateY;
+        private readonly Label _lblInflateYVal;
+        private readonly TrackBar _trkPadding;
+        private readonly Label _lblPaddingVal;
+
+        private readonly TrackBar _trkDenseCount;
+        private readonly Label _lblDenseCountVal;
+
+        private readonly CheckBox _chkSplitLarge;
+        private readonly CheckBox _chkMergeOverlap;
+
+        private readonly TrackBar _trkOrphan;
+        private readonly Label _lblOrphanVal;
+
+        private readonly TrackBar _trkMinAlnum;
+        private readonly Label _lblMinAlnumVal;
+
+        private readonly CheckBox _chkSequential;
+
+        private readonly RegionRefineSurface _refine;
+        private readonly Label _lblPreviewStatus;
+        private readonly TextBox _txtDetail;
+        private readonly Button _btnOpenImage;
+        private readonly Button _btnUseLast;
+        private readonly Button _btnSnapRegion;
+        private readonly Button _btnPreview;
+        private readonly Button _btnSpeak;
+        private readonly Button _btnStop;
+        private readonly Button _btnReset;
+        private readonly Button _btnRedetect;
+        private readonly Button _btnRegionUp;
+        private readonly Button _btnRegionDown;
+        private readonly Button _btnRegionDelete;
+        private readonly Label _lblStatus;
+        private readonly ThemeProgressBar _progress;
+        private readonly Button? _btnClose;
+        private readonly Action? _onRequestClose;
+        private readonly Func<Task<(Bitmap? Bitmap, string Error)>>? _onCaptureActiveRegion;
+        private readonly bool _embedded;
+        private bool _snapBusy;
+
+        private bool _loading;
+        /// <summary>True during Speak (locks UI). Live preview does not set this.</summary>
+        private bool _speakBusy;
+        /// <summary>In-flight OCR detect previews (live or manual). Used for Stop enable.</summary>
+        private int _previewInFlight;
+        private Bitmap? _sourceImage;
+        private CancellationTokenSource? _workCts;
+        private string _sourceLabel = "(no image)";
+        /// <summary>When preview is "last capture", stamp of <see cref="OcrProcessor.LastResult"/> we loaded.</summary>
+        private DateTime _lastCaptureStamp;
+        private readonly System.Windows.Forms.Timer _liveTimer;
+        private readonly System.Windows.Forms.Timer _diskSaveTimer;
+        private int _liveGeneration;
+        private bool _diskSavePending;
+        /// <summary>
+        /// When true, next live-timer tick only rebuilds detect-view base (fog)
+        /// without re-running OCR detect (locked refine / fog-only updates).
+        /// </summary>
+        private bool _detectViewOnly;
+
+        // Track scales (integer) ↔ real values
+        // Fog amount: 0..100 → 0.00..1.00
+        // Cluster: 25..300 → 0.25..3.00
+        // Inflate: 0..80 → 0.00..0.80
+        // Pad: 0..64 px
+        // Dense: 0..20
+        // Orphan: 0..16
+        // Min alnum: 0..40 (0 = off)
+
+        public frm_ComicRegions(
+            bool embedded = false,
+            Action? onRequestClose = null,
+            Func<Task<(Bitmap? Bitmap, string Error)>>? onCaptureActiveRegion = null)
+        {
+            _embedded = embedded;
+            _onRequestClose = onRequestClose;
+            _onCaptureActiveRegion = onCaptureActiveRegion;
+
+            AutoScaleMode = AutoScaleMode.Font;
+            AutoScaleDimensions = new SizeF(7F, 15F);
+
+            Text = "SpeakRect — Balloons";
+            if (_embedded)
+            {
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                TopMost = false;
+                ControlBox = false;
+            }
+            else
+            {
+                FormBorderStyle = FormBorderStyle.SizableToolWindow;
+                StartPosition = FormStartPosition.CenterScreen;
+                MinimumSize = new Size(720, 560);
+                ClientSize = new Size(900, 700);
+                TopMost = true;
+                ShowInTaskbar = false;
+                MinimizeBox = false;
+                MaximizeBox = false;
+            }
+            KeyPreview = true;
+            BackColor = UiTheme.Bg;
+            ForeColor = UiTheme.Fg;
+            Font = new Font("Segoe UI", 9f);
+            UiTheme.ApplyForm(this);
+
+            // Debounced live region preview when an image is loaded.
+            _liveTimer = new System.Windows.Forms.Timer { Interval = 450 };
+            _liveTimer.Tick += async (_, _) =>
+            {
+                _liveTimer.Stop();
+                if (_speakBusy || _sourceImage == null || IsDisposed)
+                    return;
+                if (_detectViewOnly)
+                {
+                    _detectViewOnly = false;
+                    await RefreshDetectViewBaseAsync().ConfigureAwait(true);
+                    return;
+                }
+                await RunPreviewAsync(fromLive: true);
+            };
+
+            // Memory knobs update every tick; disk write is debounced so drag stays snappy.
+            _diskSaveTimer = new System.Windows.Forms.Timer { Interval = 400 };
+            _diskSaveTimer.Tick += (_, _) =>
+            {
+                _diskSaveTimer.Stop();
+                FlushDiskSave(force: false);
+            };
+
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 2,
+                Padding = new Padding(12, 10, 12, 8),
+                BackColor = UiTheme.Bg,
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 360f));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+
+            // ---- Left: scrollable controls ----
+            var scroll = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(0, 0, 6, 0),
+            };
+            var body = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(0, 0, 4, 4),
+            };
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118f));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            int row = 0;
+            void AddRow(Control label, Control field, int height = 36)
+            {
+                body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+                body.Controls.Add(label, 0, row);
+                body.Controls.Add(field, 1, row);
+                row++;
+            }
+
+            void AddFull(Control c, int height)
+            {
+                body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+                body.SetColumnSpan(c, 2);
+                body.Controls.Add(c, 0, row);
+                row++;
+            }
+
+            AddFull(MakeSection("COMIC BOOK — BALLOON DETECT"), 22);
+            AddFull(MakeHint(
+                "Comic Book mode only. Tune how OCR finds speech balloons. " +
+                "Preview shows the detect image (gray fog when on) plus green boxes. Profile-backed."),
+                52);
+
+            // 1) Detect fog
+            AddFull(MakeSection("1 · DETECT FOG"), 20);
+            _chkFog = new CheckBox
+            {
+                Text = "Gray fog for OCR detect",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkFog.CheckedChanged += (_, _) =>
+            {
+                OnFieldChanged();
+                ApplyKeyboardTabOrder();
+            };
+            AddFull(_chkFog, 28);
+
+            _trkFogAmount = MakeTrack(0, 100, 35);
+            _lblFogAmountVal = MakeValueLabel();
+            AddRow(MakeLabel("Fog strength"), WrapTrack(_trkFogAmount, _lblFogAmountVal), 42);
+            AddFull(MakeHint(
+                "Softens art so ink plates stand out. Preview shows this fog; " +
+                "speech OCR still reads the clear tone image."),
+                40);
+
+            // 2) Line merge
+            AddFull(MakeSection("2 · LINE MERGE"), 20);
+            _trkClusterX = MakeTrack(25, 300, 105);
+            _lblClusterXVal = MakeValueLabel();
+            AddRow(MakeLabel("Sideways"), WrapTrack(_trkClusterX, _lblClusterXVal), 42);
+            _trkClusterY = MakeTrack(25, 300, 115);
+            _lblClusterYVal = MakeValueLabel();
+            AddRow(MakeLabel("Stacked"), WrapTrack(_trkClusterY, _lblClusterYVal), 42);
+            AddFull(MakeHint("Lower = keep balloons separate. Higher = glue multi-line text into one island."), 36);
+
+            // 3) Box pad
+            AddFull(MakeSection("3 · BOX PADDING"), 20);
+            _trkInflateX = MakeTrack(0, 80, 22);
+            _lblInflateXVal = MakeValueLabel();
+            AddRow(MakeLabel("Grow X"), WrapTrack(_trkInflateX, _lblInflateXVal), 42);
+            _trkInflateY = MakeTrack(0, 80, 28);
+            _lblInflateYVal = MakeValueLabel();
+            AddRow(MakeLabel("Grow Y"), WrapTrack(_trkInflateY, _lblInflateYVal), 42);
+            _trkPadding = MakeTrack(0, 64, 16);
+            _lblPaddingVal = MakeValueLabel();
+            AddRow(MakeLabel("Crop pad"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
+            // Extra row height leaves a clear gap before section 4.
+            AddFull(MakeHint(
+                "Grow X/Y expand boxes by a fraction of their size. Crop pad adds fixed pixels " +
+                "(same pad used for OCR crops; pad stops at neighbor islands). " +
+                "Green boxes show grow + crop pad."),
+                60);
+
+            // 4) Merge overlapping (default on)
+            AddFull(MakeSection("4 · MERGE OVERLAPPING ISLANDS"), 20);
+            _chkMergeOverlap = new CheckBox
+            {
+                Text = "Merge overlapping islands",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkMergeOverlap.CheckedChanged += (_, _) => OnFieldChanged();
+            AddFull(_chkMergeOverlap, 28);
+            // Tall enough for 3-line wrap + gap before the next section header.
+            AddFull(MakeHint(
+                "On (default): after Grow X/Y and Crop pad, any islands whose boxes " +
+                "would overlap become one union rectangle large enough to cover all " +
+                "text — good for busy pages where OCR splits close balloons. " +
+                "Off: nudge grow-overlaps apart instead."),
+                68);
+
+            // 5) Dense-page pad
+            AddFull(MakeSection("5 · DENSE PAGE PAD"), 20);
+            _trkDenseCount = MakeTrack(0, 20, 4);
+            _lblDenseCountVal = MakeValueLabel();
+            AddRow(MakeLabel("When ≥ N"), WrapTrack(_trkDenseCount, _lblDenseCountVal), 42);
+            AddFull(MakeHint("Use milder pad when this many islands found. 0 = always use full pad."), 36);
+
+            // 6) Split large
+            AddFull(MakeSection("6 · SPLIT LARGE REGIONS"), 20);
+            _chkSplitLarge = new CheckBox
+            {
+                Text = "Re-detect inside mega caption / row islands",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkSplitLarge.CheckedChanged += (_, _) => OnFieldChanged();
+            AddFull(_chkSplitLarge, 28);
+            AddFull(MakeHint("On when one huge box swallows several balloons."), 32);
+
+            // 7) Orphan recover
+            AddFull(MakeSection("7 · RECOVER MISSED BALLOONS"), 20);
+            _trkOrphan = MakeTrack(0, 16, 6);
+            _lblOrphanVal = MakeValueLabel();
+            AddRow(MakeLabel("Orphan passes"), WrapTrack(_trkOrphan, _lblOrphanVal), 42);
+            AddFull(MakeHint(
+                "Bright empty plates re-OCR’d after a miss on Speak / live Comic Book. " +
+                "0 = off. Detect-only preview does not run orphan fill."),
+                44);
+
+            // 8) Drop weak (0 = off)
+            AddFull(MakeSection("8 · DROP WEAK ISLANDS"), 20);
+            _trkMinAlnum = MakeTrack(0, 40, 4);
+            _lblMinAlnumVal = MakeValueLabel();
+            AddRow(MakeLabel("Min letters"), WrapTrack(_trkMinAlnum, _lblMinAlnumVal), 42);
+            AddFull(MakeHint("Drop islands below this letter count. 0 = off (keep all non-junk islands)."), 36);
+
+            // 9) Speak path — sequential isolates balloons from global dedupe
+            AddFull(MakeSection("9 · SPEAK PATH"), 20);
+            _chkSequential = new CheckBox
+            {
+                Text = "Sequential regions (OCR + speak each balloon.)",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkSequential.CheckedChanged += (_, _) => OnFieldChanged();
+            AddFull(_chkSequential, 28);
+            AddFull(MakeHint(
+                "On (default): crop one balloon → speak it → wait for TTS → next. " +
+                "Short replies like \"Really?\" stay spoken even if that word appeared earlier. " +
+                "Off: one vertical crop-stack OCR for the page, then a global speak plan " +
+                "(faster on busy pages; uses speak-dedupe across balloons)."),
+                56);
+
+            scroll.Controls.Add(body);
+            root.Controls.Add(scroll, 0, 0);
+
+            // ---- Right: preview ----
+            var previewPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(8, 0, 0, 0),
+            };
+            previewPanel.RowCount = 5;
+            previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 70f));
+            // Tall enough for AutoSize refine buttons (were clipped at 34px).
+            previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+            previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+            previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 30f));
+
+            var previewHeader = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "PREVIEW — detect view (fog when on)  ·  drag / resize / add  ·  Del = remove  ·  Ctrl+↑↓ = reorder",
+                ForeColor = UiTheme.FgHeader,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            previewPanel.Controls.Add(previewHeader, 0, 0);
+
+            var previewHost = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = UiTheme.BgDeep,
+                Padding = new Padding(1),
+            };
+            previewHost.Paint += (_, e) =>
+            {
+                using var pen = new Pen(UiTheme.Border, 1f);
+                e.Graphics.DrawRectangle(pen, 0, 0, previewHost.Width - 1, previewHost.Height - 1);
+            };
+            _refine = new RegionRefineSurface
+            {
+                Dock = DockStyle.Fill,
+            };
+            _refine.RegionsChanged += (_, _) =>
+            {
+                PersistRefineSession();
+                // Only real geometry edits arm one-shot overlay-hide speak.
+                if (_refine.HasUserOverride)
+                    ComicRegionOverrideSession.ArmOverlaySpeak();
+                UpdateRefineStatus();
+            };
+            _refine.SelectionChanged += (_, _) => UpdateRefineButtons();
+            previewHost.Controls.Add(_refine);
+            previewPanel.Controls.Add(previewHost, 0, 1);
+
+            var refineBar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoScroll = true,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(0, 4, 0, 0),
+            };
+            _btnRedetect = MakeRefineButton("Re-detect");
+            _btnRedetect.Click += async (_, _) =>
+            {
+                // Explicit re-detect: drop locked overrides and reseed from OCR.
+                ComicRegionOverrideSession.Clear();
+                _refine.MarkClean();
+                await RunPreviewAsync(fromLive: false, forceRedetect: true);
+            };
+            _btnRegionUp = MakeRefineButton("Order ↑");
+            _btnRegionUp.Click += (_, _) => _refine.MoveSelected(-1);
+            _btnRegionDown = MakeRefineButton("Order ↓");
+            _btnRegionDown.Click += (_, _) => _refine.MoveSelected(1);
+            _btnRegionDelete = MakeRefineButton("Delete");
+            _btnRegionDelete.Click += (_, _) => _refine.DeleteSelected();
+            refineBar.Controls.Add(_btnRedetect);
+            refineBar.Controls.Add(_btnRegionUp);
+            refineBar.Controls.Add(_btnRegionDown);
+            refineBar.Controls.Add(_btnRegionDelete);
+            previewPanel.Controls.Add(refineBar, 0, 2);
+
+            _lblPreviewStatus = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Load a panel image, then Preview to seed OCR boxes.",
+                ForeColor = UiTheme.FgMuted,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true,
+            };
+            previewPanel.Controls.Add(_lblPreviewStatus, 0, 3);
+
+            _txtDetail = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = UiTheme.BgInput,
+                ForeColor = UiTheme.FgMuted,
+                Font = new Font("Consolas", 8f),
+                WordWrap = false,
+            };
+            previewPanel.Controls.Add(_txtDetail, 0, 4);
+
+            root.Controls.Add(previewPanel, 1, 0);
+
+            // ---- Bottom bar: progress strip + status + buttons ----
+            var bottom = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 2,
+                BackColor = UiTheme.Bg,
+            };
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 8f));
+            bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            bottom.SetColumnSpan(bottom, 2);
+            root.SetColumnSpan(bottom, 2);
+
+            _progress = new ThemeProgressBar();
+            bottom.Controls.Add(_progress, 0, 0);
+            bottom.SetColumnSpan(_progress, 2);
+
+            _lblStatus = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Comic Book balloon detect.",
+                ForeColor = UiTheme.Ok,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true,
+            };
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                AutoSize = true,
+                BackColor = UiTheme.Bg,
+            };
+
+            // FlowLayout RightToLeft: add in reverse visual order (left→right for user).
+            // Desired left→right: Open · Last · Snap · Reset · Stop · Speak · Preview
+            _btnPreview = MakeButton("Preview");
+            UiTheme.StylePrimaryButton(_btnPreview);
+            _btnPreview.Click += async (_, _) => await RunPreviewAsync();
+
+            _btnSpeak = MakeButton("Speak");
+            UiTheme.StylePrimaryButton(_btnSpeak);
+            _btnSpeak.Click += async (_, _) => await RunSpeakAsync();
+
+            _btnStop = MakeButton("Stop");
+            _btnStop.Enabled = false;
+            _btnStop.Click += (_, _) => CancelWork();
+
+            _btnOpenImage = MakeButton("Open image…");
+            _btnOpenImage.Click += (_, _) => OpenImageFile();
+
+            _btnUseLast = MakeButton("Use last capture");
+            _btnUseLast.Click += (_, _) => UseLastCapture();
+
+            // Snap active overlay region (same geometry as Enter) — no OCR/TTS.
+            _btnSnapRegion = MakeButton("Snap region");
+            _btnSnapRegion.Click += async (_, _) => await SnapActiveRegionAsync();
+            _btnSnapRegion.Enabled = _onCaptureActiveRegion != null;
+
+            _btnReset = MakeButton("Reset defaults");
+            _btnReset.Click += (_, _) => ResetDefaults();
+
+            // RightToLeft: first added is rightmost
+            buttons.Controls.Add(_btnPreview);
+            buttons.Controls.Add(_btnSpeak);
+            buttons.Controls.Add(_btnStop);
+            buttons.Controls.Add(_btnReset);
+            buttons.Controls.Add(_btnSnapRegion);
+            buttons.Controls.Add(_btnUseLast);
+            buttons.Controls.Add(_btnOpenImage);
+
+            if (!_embedded)
+            {
+                _btnClose = MakeButton("Close");
+                UiTheme.StylePrimaryButton(_btnClose);
+                _btnClose.Click += (_, _) =>
+                {
+                    FlushToSettings();
+                    Close();
+                };
+                // Rightmost when not embedded
+                buttons.Controls.Add(_btnClose);
+            }
+
+            bottom.Controls.Add(_lblStatus, 0, 1);
+            bottom.Controls.Add(buttons, 1, 1);
+            root.Controls.Add(bottom, 0, 1);
+
+            Controls.Add(root);
+
+            // Track change handlers
+            foreach (var t in new[]
+            {
+                _trkFogAmount, _trkClusterX, _trkClusterY,
+                _trkInflateX, _trkInflateY, _trkPadding,
+                _trkDenseCount, _trkOrphan, _trkMinAlnum,
+            })
+            {
+                t.ValueChanged += (_, _) =>
+                {
+                    RefreshValueLabels();
+                    OnFieldChanged();
+                };
+            }
+
+            Load += (_, _) =>
+            {
+                LoadFromSettings();
+                ApplyKeyboardTabOrder();
+            };
+            Shown += (_, _) => ApplyKeyboardTabOrder();
+            FormClosing += (_, _) =>
+            {
+                FlushToSettings();
+                try { _liveTimer.Stop(); } catch { /* ignore */ }
+                try { _liveTimer.Dispose(); } catch { /* ignore */ }
+                try { _diskSaveTimer.Stop(); } catch { /* ignore */ }
+                try { _diskSaveTimer.Dispose(); } catch { /* ignore */ }
+                CancelWork(disposeCts: true);
+                DisposeSource();
+                try { _refine.Clear(); } catch { /* ignore */ }
+            };
+            KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Escape && !_embedded)
+                {
+                    e.Handled = true;
+                    FlushToSettings();
+                    Close();
+                }
+                else if (e.KeyCode == Keys.F5)
+                {
+                    e.Handled = true;
+                    _ = RunPreviewAsync();
+                }
+                else if (e.KeyCode == Keys.F6)
+                {
+                    e.Handled = true;
+                    _ = RunSpeakAsync();
+                }
+            };
+        }
+
+        public void ReloadFromSettings()
+        {
+            LoadFromSettings();
+            ApplyKeyboardTabOrder();
+        }
+
+        /// <summary>
+        /// Explicit Tab order for this tab (overrides screen-position auto sort).
+        /// Left controls top→bottom, then action buttons left→right, then detail log.
+        /// </summary>
+        public void ApplyKeyboardTabOrder()
+        {
+            int i = 0;
+            void Next(Control c, bool tabStop = true)
+            {
+                c.TabStop = tabStop && c.Enabled;
+                c.TabIndex = i++;
+            }
+
+            // 1) Detect fog
+            Next(_chkFog);
+            Next(_trkFogAmount);
+            // 2) Line merge
+            Next(_trkClusterX);
+            Next(_trkClusterY);
+            // 3) Box pad
+            Next(_trkInflateX);
+            Next(_trkInflateY);
+            Next(_trkPadding);
+            // 4) Merge overlap
+            Next(_chkMergeOverlap);
+            // 5) Dense
+            Next(_trkDenseCount);
+            // 6) Split
+            Next(_chkSplitLarge);
+            // 7) Orphan
+            Next(_trkOrphan);
+            // 8) Min letters
+            Next(_trkMinAlnum);
+            // 9) Speak path
+            Next(_chkSequential);
+            // Actions (left → right for user)
+            Next(_btnOpenImage);
+            Next(_btnUseLast);
+            Next(_btnSnapRegion);
+            Next(_btnReset);
+            Next(_btnStop);
+            Next(_btnSpeak);
+            Next(_btnPreview);
+            Next(_btnRedetect);
+            Next(_btnRegionUp);
+            Next(_btnRegionDown);
+            Next(_btnRegionDelete);
+            Next(_refine);
+            if (_btnClose != null)
+                Next(_btnClose);
+            // Detail log last
+            Next(_txtDetail);
+
+            // Non-interactive chrome
+            _lblStatus.TabStop = false;
+            _lblPreviewStatus.TabStop = false;
+            _lblFogAmountVal.TabStop = false;
+            _lblClusterXVal.TabStop = false;
+            _lblClusterYVal.TabStop = false;
+            _lblInflateXVal.TabStop = false;
+            _lblInflateYVal.TabStop = false;
+            _lblPaddingVal.TabStop = false;
+            _lblDenseCountVal.TabStop = false;
+            _lblOrphanVal.TabStop = false;
+            _lblMinAlnumVal.TabStop = false;
+        }
+
+        /// <summary>Push control values into <see cref="AppSettings"/> before profile save.</summary>
+        public void FlushToSettings()
+        {
+            if (_loading) return;
+            Persist(writeDiskNow: true);
+            PersistRefineSession();
+        }
+
+        /// <summary>
+        /// Push refined regions into the session so overlay-hide speak can use them
+        /// even after this form is disposed.
+        /// </summary>
+        public void FlushRefineSessionForOverlay()
+        {
+            PersistRefineSession();
+        }
+
+        /// <summary>
+        /// One-shot: if the user <b>edited</b> refine boxes since last overlay speak,
+        /// start Comic Book speak with that override. Looking at Balloons without
+        /// edits never arms this. Called on overlay hide. Fire-and-forget.
+        /// </summary>
+        public static void TrySpeakOverrideOnOverlayHide()
+        {
+            if (!ComicRegionOverrideSession.TryConsumeOverlaySpeak(out var regions))
+                return;
+            if (regions.Count == 0)
+                return;
+
+            Bitmap? work = null;
+            try
+            {
+                work = DevCaptureCache.CloneOrNull()
+                    ?? DevCaptureCache.TryLoadLastOcrCapture();
+            }
+            catch { work = null; }
+
+            if (work == null)
+            {
+                Debug.WriteLine("[Balloons] overlay hide: pending speak but no image");
+                return;
+            }
+
+            var overrideCopy = regions.ToList();
+            Debug.WriteLine(
+                $"[Balloons] Overlay hide → one-shot speak with {overrideCopy.Count} refined region(s)");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using (work)
+                    using (await OcrProcessor.SpeakComicFromBitmapAsync(
+                               work, CancellationToken.None, overrideCopy)
+                           .ConfigureAwait(false))
+                    {
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Balloons] override speak on overlay hide: {ex.Message}");
+                }
+            });
+        }
+
+        private string CurrentCaptureId()
+        {
+            if (_sourceImage == null)
+                return "";
+            return ComicRegionOverrideSession.MakeCaptureId(
+                _sourceLabel,
+                _sourceImage.Width,
+                _sourceImage.Height);
+        }
+
+        /// <summary>
+        /// Regions to pass into Speak: surface list when user has overridden, else session.
+        /// </summary>
+        private List<Rectangle>? GetActiveOverrideRegions()
+        {
+            PersistRefineSession();
+            if (_refine.HasUserOverride)
+                return _refine.Regions.ToList();
+            // Only the override bound to this capture — never a stale other-page session.
+            if (ComicRegionOverrideSession.TryGet(
+                    CurrentCaptureId(), out var fromSession, out _, out _, out _))
+                return fromSession;
+            return null;
+        }
+
+        /// <summary>
+        /// True only when the user has actually edited boxes (or a matching session
+        /// override is still active). Bare <see cref="RegionRefineSurface.IsDirty"/>
+        /// alone is not enough — e.g. delete-all is dirty with zero regions and must
+        /// allow live knob previews again.
+        /// </summary>
+        private bool HasLockedRefine =>
+            _refine.HasUserOverride || ComicRegionOverrideSession.IsActive;
+
+        private void PersistRefineSession()
+        {
+            if (_sourceImage == null)
+                return;
+            // Only lock when the user has edited geometry (or already locked).
+            if (!_refine.HasUserOverride && !ComicRegionOverrideSession.IsActive)
+            {
+                // Dirty-with-empty (deleted all) must drop any prior lock.
+                if (_refine.IsDirty && _refine.RegionCount == 0)
+                    ComicRegionOverrideSession.Clear();
+                return;
+            }
+            if (_refine.RegionCount == 0)
+            {
+                ComicRegionOverrideSession.Clear();
+                return;
+            }
+
+            // Keep dirty flag true once user has overridden.
+            _refine.MarkDirty();
+            string id = CurrentCaptureId();
+            using var baseClone = _refine.CloneBaseImage();
+            ComicRegionOverrideSession.Set(
+                id,
+                _refine.Regions.ToList(),
+                pipeW: _refine.BaseWidth,
+                pipeH: _refine.BaseHeight,
+                basePipeline: baseClone);
+        }
+
+        private bool TryRestoreRefineSession()
+        {
+            string id = CurrentCaptureId();
+            // Only restore when capture id matches — never attach another page's boxes.
+            if (!ComicRegionOverrideSession.TryGet(
+                    id, out var regions, out _, out _, out Bitmap? baseClone))
+                return false;
+            if (regions.Count == 0)
+            {
+                try { baseClone?.Dispose(); } catch { /* ignore */ }
+                return false;
+            }
+
+            if (baseClone != null)
+            {
+                _refine.RestoreLocked(baseClone, regions);
+            }
+            else if (_sourceImage != null)
+            {
+                try
+                {
+                    _refine.RestoreLocked((Bitmap)_sourceImage.Clone(), regions);
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            UpdateRefineStatus();
+            _lblStatus.Text =
+                $"Restored {regions.Count} refined region(s) — locked until next capture / Re-detect.";
+            _lblStatus.ForeColor = UiTheme.Ok;
+            return true;
+        }
+
+        private void LoadFromSettings()
+        {
+            _loading = true;
+            try
+            {
+                var s = AppSettings.Current;
+                s.NormalizeComicRegionSettings();
+
+                _chkFog.Checked = s.ComicDetectFog;
+                _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
+                _trkClusterX.Value = GapToTick(s.ComicClusterGapX);
+                _trkClusterY.Value = GapToTick(s.ComicClusterGapY);
+                _trkInflateX.Value = InflateToTick(s.ComicInflateFracX);
+                _trkInflateY.Value = InflateToTick(s.ComicInflateFracY);
+                _trkPadding.Value = Math.Clamp(s.ComicRegionPadding, _trkPadding.Minimum, _trkPadding.Maximum);
+                _trkDenseCount.Value = Math.Clamp(s.ComicDenseIslandCount, _trkDenseCount.Minimum, _trkDenseCount.Maximum);
+                _chkMergeOverlap.Checked = s.ComicMergeOverlappingIslands;
+                _chkSplitLarge.Checked = s.ComicSplitLargeRegions;
+                _trkOrphan.Value = Math.Clamp(s.ComicOrphanRecoverPasses, _trkOrphan.Minimum, _trkOrphan.Maximum);
+                _trkMinAlnum.Value = Math.Clamp(s.ComicMinIslandAlnum, _trkMinAlnum.Minimum, _trkMinAlnum.Maximum);
+                _chkSequential.Checked = s.ComicSequentialRegions;
+
+                RefreshValueLabels();
+
+                // Cache → last capture → built-in sample so knobs are usable immediately.
+                EnsurePreviewImageLoaded();
+
+                if (HasSource)
+                {
+                    _lblStatus.Text = DevCaptureCache.IsSample
+                        ? "Sample panel loaded — Open image… for your own capture."
+                        : (s.ComicBook
+                            ? "Comic Book is ON — these settings apply to the next speak."
+                            : "Comic Book is OFF — enable Ctrl+B for live reads (preview still works).");
+                    _lblStatus.ForeColor = DevCaptureCache.IsSample ? UiTheme.Ok
+                        : (s.ComicBook ? UiTheme.Ok : UiTheme.Warn);
+                }
+                else
+                {
+                    _lblStatus.Text = "Load an image to enable balloon controls.";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                }
+            }
+            finally
+            {
+                _loading = false;
+            }
+
+            ApplyControlsEnabled();
+            ApplyKeyboardTabOrder();
+            // Restore locked refine across tab switches; otherwise re-preview if prep changed.
+            if (TryRestoreRefineSession())
+            {
+                // Keep locked boxes.
+            }
+            else
+            {
+                InvalidatePreviewForCurrentPrep(force: true);
+            }
+        }
+
+        private bool HasSource => _sourceImage != null;
+        private int _appliedPrepGeneration = -1;
+        private string _appliedPrepSig = "";
+
+        /// <summary>
+        /// Drop stale overlay and re-run detect preview when shared Image prep knobs change.
+        /// </summary>
+        private void InvalidatePreviewForCurrentPrep(bool force = false)
+        {
+            if (!HasSource || IsDisposed)
+                return;
+
+            int gen = DevCaptureCache.PrepGeneration;
+            string sig = DevCaptureCache.PrepSettingsSignature();
+            if (!force && gen == _appliedPrepGeneration && sig == _appliedPrepSig)
+            {
+                ScheduleLivePreview();
+                return;
+            }
+
+            _appliedPrepGeneration = gen;
+            _appliedPrepSig = sig;
+            // Prep change invalidates pipeline coords — must drop locked refine.
+            ComicRegionOverrideSession.Clear();
+            if (_sourceImage != null)
+            {
+                try
+                {
+                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), Array.Empty<Rectangle>());
+                }
+                catch { /* ignore */ }
+            }
+            _lblPreviewStatus.Text =
+                $"Source: {_sourceLabel}  ·  re-preview with current prep…";
+            _lblPreviewStatus.ForeColor = UiTheme.Warn;
+            ScheduleLivePreview();
+        }
+
+        /// <summary>
+        /// Always prefer last OCR capture when available; else cache/sample.
+        /// Called on every tab reload so preview tracks the latest speak.
+        /// </summary>
+        private void EnsurePreviewImageLoaded()
+        {
+            try
+            {
+                var last = DevCaptureCache.TryLoadLastOcrCapture();
+                if (last != null)
+                {
+                    DateTime stamp = OcrProcessor.LastResult?.CompletedLocal ?? default;
+                    // Skip only if we already hold this exact OCR run.
+                    if (_sourceImage != null &&
+                        string.Equals(_sourceLabel, "last capture", StringComparison.Ordinal) &&
+                        stamp != default &&
+                        stamp == _lastCaptureStamp &&
+                        _sourceImage.Width == last.Width &&
+                        _sourceImage.Height == last.Height)
+                    {
+                        try { last.Dispose(); } catch { /* ignore */ }
+                        // Same capture frame — restore locked refine if any.
+                        TryRestoreRefineSession();
+                        return;
+                    }
+                    SetSourceImage(last, "last capture");
+                    _lastCaptureStamp = stamp;
+                    return;
+                }
+
+                if (_sourceImage != null)
+                {
+                    SyncFromSharedCache();
+                    return;
+                }
+
+                var bmp = DevCaptureCache.GetOrCreatePreviewSource(out string label);
+                SetSourceImage(bmp, label, share: false);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Balloons] EnsurePreviewImageLoaded: {ex.Message}");
+            }
+        }
+
+        private void ApplyControlsEnabled()
+        {
+            bool ready = HasSource && !_speakBusy;
+
+            _chkFog.Enabled = ready;
+            _trkFogAmount.Enabled = ready && _chkFog.Checked;
+            _lblFogAmountVal.Enabled = _trkFogAmount.Enabled;
+            _trkClusterX.Enabled = ready;
+            _trkClusterY.Enabled = ready;
+            _trkInflateX.Enabled = ready;
+            _trkInflateY.Enabled = ready;
+            _trkPadding.Enabled = ready;
+            _trkDenseCount.Enabled = ready;
+            _chkMergeOverlap.Enabled = ready;
+            _chkSplitLarge.Enabled = ready;
+            _trkOrphan.Enabled = ready;
+            _trkMinAlnum.Enabled = ready;
+            _chkSequential.Enabled = ready;
+
+            _btnPreview.Enabled = ready && !_snapBusy;
+            _btnSpeak.Enabled = ready && !_snapBusy;
+            _btnReset.Enabled = ready && !_snapBusy;
+            _btnRedetect.Enabled = ready && !_snapBusy;
+            UpdateRefineButtons();
+            // Load actions always available (replace sample / load capture / snap region).
+            _btnOpenImage.Enabled = !_speakBusy && !_snapBusy;
+            _btnUseLast.Enabled = !_speakBusy && !_snapBusy;
+            _btnSnapRegion.Enabled =
+                !_speakBusy && !_snapBusy && _onCaptureActiveRegion != null;
+            _refine.Enabled = ready && !_snapBusy;
+            RefreshStopEnabled();
+            // Recompute TabStop — Enabled flips must not leave TabStop=false forever.
+            if (!_loading)
+                ApplyKeyboardTabOrder();
+        }
+
+        private void UpdateRefineButtons()
+        {
+            bool ready = HasSource && !_speakBusy;
+            bool hasSel = ready && _refine.SelectedIndex >= 0;
+            bool hasAny = ready && _refine.RegionCount > 0;
+            _btnRegionUp.Enabled = hasSel && _refine.SelectedIndex > 0;
+            _btnRegionDown.Enabled = hasSel && _refine.SelectedIndex < _refine.RegionCount - 1;
+            _btnRegionDelete.Enabled = hasSel;
+            _btnRedetect.Enabled = ready;
+            _ = hasAny; // speak works with 0 (falls back to auto detect)
+        }
+
+        private void UpdateRefineStatus()
+        {
+            if (IsDisposed)
+                return;
+            int n = _refine.RegionCount;
+            string dirty = HasLockedRefine ? "  ·  LOCKED override" : "  ·  auto seed";
+            int sel = _refine.SelectedIndex;
+            string selTxt = sel >= 0 ? $"  ·  selected #{sel + 1}" : "";
+            _lblPreviewStatus.Text =
+                $"Source: {_sourceLabel}  ·  {n} region" +
+                (n == 1 ? "" : "s") +
+                dirty + selTxt +
+                "  ·  solid = core  ·  dashed = crop pad";
+            _lblPreviewStatus.ForeColor = HasLockedRefine ? UiTheme.Warn
+                : (n > 0 ? UiTheme.Ok : UiTheme.FgMuted);
+            UpdateRefineButtons();
+        }
+
+        /// <summary>
+        /// Write knobs into <see cref="AppSettings.Current"/> immediately so live
+        /// detect / crop-pad paint see them. Disk write is debounced unless
+        /// <paramref name="writeDiskNow"/>.
+        /// </summary>
+        private void Persist(bool writeDiskNow = false)
+        {
+            var s = AppSettings.Current;
+            s.ComicDetectFog = _chkFog.Checked;
+            s.ComicDetectFogAmount = TickToFog(_trkFogAmount.Value);
+            s.ComicClusterGapX = TickToGap(_trkClusterX.Value);
+            s.ComicClusterGapY = TickToGap(_trkClusterY.Value);
+            s.ComicInflateFracX = TickToInflate(_trkInflateX.Value);
+            s.ComicInflateFracY = TickToInflate(_trkInflateY.Value);
+            s.ComicRegionPadding = _trkPadding.Value;
+            s.ComicDenseIslandCount = _trkDenseCount.Value;
+            s.ComicMergeOverlappingIslands = _chkMergeOverlap.Checked;
+            s.ComicSplitLargeRegions = _chkSplitLarge.Checked;
+            s.ComicOrphanRecoverPasses = _trkOrphan.Value;
+            s.ComicMinIslandAlnum = _trkMinAlnum.Value;
+            s.ComicSequentialRegions = _chkSequential.Checked;
+            s.NormalizeComicRegionSettings();
+
+            if (writeDiskNow)
+                FlushDiskSave(force: true);
+            else
+                ScheduleDiskSave();
+        }
+
+        private void ScheduleDiskSave()
+        {
+            _diskSavePending = true;
+            try
+            {
+                _diskSaveTimer.Stop();
+                _diskSaveTimer.Start();
+            }
+            catch { /* ignore */ }
+        }
+
+        private void FlushDiskSave(bool force = false)
+        {
+            try { _diskSaveTimer.Stop(); } catch { /* ignore */ }
+            if (!force && !_diskSavePending)
+                return;
+            _diskSavePending = false;
+            try { AppSettings.Current.Save(); } catch { /* still keep in-memory */ }
+        }
+
+        private void OnFieldChanged()
+        {
+            if (_loading) return;
+            ApplyFogUiState();
+            ApplyControlsEnabled();
+            Persist(writeDiskNow: false);
+            // Crop-pad dashed outline reads live settings — refresh paint.
+            try { _refine.Invalidate(); } catch { /* ignore */ }
+            if (_sourceImage != null)
+            {
+                if (HasLockedRefine)
+                {
+                    // Keep boxes; still refresh detect-view base so fog strength is visible.
+                    _lblStatus.Text =
+                        "Saved knobs — refined boxes kept · fog preview updating… " +
+                        "Re-detect to re-run OCR.";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                    ScheduleDetectViewRefresh();
+                }
+                else
+                {
+                    _lblStatus.Text = "Saved — live preview…";
+                    _lblStatus.ForeColor = UiTheme.Ok;
+                    ScheduleLivePreview();
+                }
+            }
+            else
+            {
+                _lblStatus.Text = "Load an image to enable balloon controls.";
+                _lblStatus.ForeColor = UiTheme.Warn;
+            }
+        }
+
+        /// <summary>
+        /// Debounced: rebuild detect-view base (prep + fog) without re-running OCR detect.
+        /// Used when boxes are locked so fog slider still updates the preview image.
+        /// </summary>
+        private void ScheduleDetectViewRefresh()
+        {
+            if (_loading || _sourceImage == null || _speakBusy || IsDisposed)
+                return;
+            try
+            {
+                // Reuse live debounce timer; RunDetectViewRefreshOnly is chosen via flag.
+                _detectViewOnly = true;
+                _liveTimer.Stop();
+                _liveTimer.Start();
+            }
+            catch { /* ignore */ }
+        }
+
+        private void ScheduleLivePreview()
+        {
+            // Live detect may already be running — debounce restarts it after knobs settle.
+            // Never auto-redect while the user is refining boxes.
+            if (_loading || _sourceImage == null || _speakBusy || IsDisposed)
+                return;
+            if (HasLockedRefine)
+                return;
+            try
+            {
+                _detectViewOnly = false;
+                _liveTimer.Stop();
+                _liveTimer.Start();
+            }
+            catch { /* ignore */ }
+        }
+
+        /// <summary>
+        /// Rebuild prep + fog base for the refine surface; keep existing boxes.
+        /// So Fog strength / on-off is visible without wiping a locked override.
+        /// </summary>
+        private async Task RefreshDetectViewBaseAsync()
+        {
+            if (_sourceImage == null || IsDisposed || _speakBusy)
+                return;
+
+            Persist(writeDiskNow: false);
+            AppSettings.Current.NormalizeImagePrepSettings();
+            AppSettings.Current.NormalizeComicRegionSettings();
+
+            int gen = ++_liveGeneration;
+            Bitmap? work = null;
+            _progress.BeginWork();
+            try
+            {
+                work = new Bitmap(_sourceImage);
+                bool fogOn = AppSettings.Current.ComicDetectFog;
+                float fogAmt = AppSettings.Current.ComicDetectFogAmount;
+                Bitmap detectView = await Task.Run(
+                    () => OcrProcessor.BuildComicDetectViewBitmap(work),
+                    CancellationToken.None).ConfigureAwait(true);
+
+                if (IsDisposed || gen != _liveGeneration)
+                {
+                    try { detectView.Dispose(); } catch { /* ignore */ }
+                    return;
+                }
+
+                _refine.UpdateBaseKeepRegions(detectView);
+                string fogHint = fogOn
+                    ? $"fog={fogAmt:0.00}"
+                    : "fog=off";
+                _lblPreviewStatus.Text =
+                    $"Source: {_sourceLabel}  ·  {_refine.RegionCount} region" +
+                    (_refine.RegionCount == 1 ? "" : "s") +
+                    $"  ·  detect view ({fogHint})  ·  boxes locked";
+                _lblPreviewStatus.ForeColor = UiTheme.Warn;
+                if (HasLockedRefine)
+                {
+                    _lblStatus.Text =
+                        $"Detect view updated ({fogHint}). Boxes kept — Re-detect to re-run OCR.";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                }
+                UpdateRefineStatus();
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && gen == _liveGeneration)
+                {
+                    _lblStatus.Text = $"Fog preview failed: {ex.Message}";
+                    _lblStatus.ForeColor = UiTheme.Bad;
+                }
+            }
+            finally
+            {
+                try { work?.Dispose(); } catch { /* ignore */ }
+                if (!IsDisposed)
+                    _progress.EndWork();
+            }
+        }
+
+        private void ApplyFogUiState()
+        {
+            bool ready = HasSource && !_speakBusy;
+            bool on = ready && _chkFog.Checked;
+            _trkFogAmount.Enabled = on;
+            _lblFogAmountVal.Enabled = on;
+            _trkFogAmount.TabStop = on;
+        }
+
+        private void ResetDefaults()
+        {
+            AppSettings.Current.ResetComicRegionSettingsToDefaults();
+            LoadFromSettings();
+            Persist(writeDiskNow: true);
+            _lblStatus.Text = "Restored built-in balloon detect defaults.";
+            _lblStatus.ForeColor = UiTheme.Ok;
+        }
+
+        private void OpenImageFile()
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Open comic panel / page image",
+                Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif|All files|*.*",
+                CheckFileExists = true,
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
+            {
+                // Opening a file is always a new page — drop prior refine session.
+                ComicRegionOverrideSession.NotifyNewCapture();
+                using var tmp = new Bitmap(dlg.FileName);
+                SetSourceImage(new Bitmap(tmp), Path.GetFileName(dlg.FileName));
+                _lblStatus.Text = $"Loaded {_sourceLabel}. Click Preview.";
+                _lblStatus.ForeColor = UiTheme.Ok;
+            }
+            catch (Exception ex)
+            {
+                _lblStatus.Text = $"Could not open image: {ex.Message}";
+                _lblStatus.ForeColor = UiTheme.Bad;
+            }
+        }
+
+        private void UseLastCapture()
+        {
+            try
+            {
+                // Prefer a real OCR capture, not the built-in sample.
+                var bmp = DevCaptureCache.TryLoadLastOcrCapture();
+                if (bmp == null)
+                {
+                    _lblStatus.Text = "No last capture yet — speak a region first, or Open image…";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                    return;
+                }
+
+                SetSourceImage(bmp, "last capture");
+                _lblStatus.Text = "Using last capture.";
+                _lblStatus.ForeColor = UiTheme.Ok;
+            }
+            catch (Exception ex)
+            {
+                _lblStatus.Text = $"Last capture failed: {ex.Message}";
+                _lblStatus.ForeColor = UiTheme.Bad;
+            }
+        }
+
+        /// <summary>
+        /// Hide chrome → snap active F1–F8 region (same as Enter) → load raw → detect preview.
+        /// No Local-LLM / TTS (Preview path only; not Speak).
+        /// </summary>
+        private async Task SnapActiveRegionAsync()
+        {
+            if (_snapBusy || _speakBusy || _onCaptureActiveRegion == null)
+                return;
+
+            _snapBusy = true;
+            ApplyControlsEnabled();
+            _lblStatus.Text = "Snapping active region…";
+            _lblStatus.ForeColor = UiTheme.Warn;
+            _progress.BeginWork();
+            try
+            {
+                var (bmp, error) = await _onCaptureActiveRegion().ConfigureAwait(true);
+                if (IsDisposed)
+                {
+                    try { bmp?.Dispose(); } catch { /* ignore */ }
+                    return;
+                }
+
+                if (bmp == null)
+                {
+                    _lblStatus.Text = string.IsNullOrWhiteSpace(error)
+                        ? "Snap failed."
+                        : error;
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                    return;
+                }
+
+                // New page — drop prior refine; raw source then full detect Preview.
+                ComicRegionOverrideSession.NotifyNewCapture();
+                SetSourceImage(bmp, "region snap");
+                // End snap-wait bar before detect (detect has its own BeginWork).
+                _progress.EndWork();
+                await RunPreviewAsync(fromLive: false, forceRedetect: true).ConfigureAwait(true);
+                if (!IsDisposed)
+                {
+                    _lblStatus.Text = "Region snap loaded — detect preview.";
+                    _lblStatus.ForeColor = UiTheme.Ok;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed)
+                {
+                    _lblStatus.Text = $"Snap failed: {ex.Message}";
+                    _lblStatus.ForeColor = UiTheme.Bad;
+                }
+            }
+            finally
+            {
+                _snapBusy = false;
+                if (!IsDisposed)
+                {
+                    // Safe if already ended after successful snap path.
+                    if (_progress.IsBusy)
+                        _progress.EndWork();
+                    ApplyControlsEnabled();
+                }
+            }
+        }
+
+        /// <summary>Prefer shared Image/Balloons cache so both tabs stay aligned.</summary>
+        private void SyncFromSharedCache()
+        {
+            if (!DevCaptureCache.HasImage)
+                return;
+            var bmp = DevCaptureCache.CloneOrNull();
+            if (bmp == null)
+                return;
+            // Skip replace if we already hold the same shared frame (avoid re-detect spam).
+            if (_sourceImage != null &&
+                string.Equals(_sourceLabel, DevCaptureCache.Label, StringComparison.Ordinal) &&
+                _sourceImage.Width == bmp.Width &&
+                _sourceImage.Height == bmp.Height)
+            {
+                try { bmp.Dispose(); } catch { /* ignore */ }
+                return;
+            }
+            SetSourceImage(bmp, DevCaptureCache.Label, share: false);
+        }
+
+        private void SetSourceImage(Bitmap bmp, string label, bool share = true)
+        {
+            DisposeSource();
+            _sourceImage = bmp;
+            _sourceLabel = label;
+            if (share)
+            {
+                try { DevCaptureCache.Set(bmp, label); } catch { /* ignore */ }
+            }
+            // Bind identity after source is set (uses LastResult stamp for last capture).
+            string capId = CurrentCaptureId();
+            ComicRegionOverrideSession.NotifySourceIdentity(capId);
+
+            if (TryRestoreRefineSession())
+            {
+                // Kept locked regions for this capture id.
+            }
+            else
+            {
+                // Fresh source — empty boxes until Preview seeds OCR.
+                _refine.SetSeed((Bitmap)bmp.Clone(), Array.Empty<Rectangle>());
+                _lblPreviewStatus.Text =
+                    $"Source: {_sourceLabel}  ·  {bmp.Width}×{bmp.Height}  ·  Preview to seed OCR boxes";
+                _lblPreviewStatus.ForeColor = UiTheme.FgMuted;
+            }
+
+            _txtDetail.Text = string.Equals(label, DevCaptureCache.SampleLabel, StringComparison.Ordinal)
+                ? "Sample panel — Open image… or Use last capture for a real page."
+                : "Adjust knobs for live preview, or Preview / Speak. Refined boxes lock until next capture.";
+            ApplyControlsEnabled();
+            if (!_loading && !_refine.IsDirty && !ComicRegionOverrideSession.IsActive)
+                ScheduleLivePreview();
+        }
+
+        private void DisposeSource()
+        {
+            if (_sourceImage != null)
+            {
+                try { _sourceImage.Dispose(); } catch { /* ignore */ }
+                _sourceImage = null;
+            }
+        }
+
+        /// <summary>
+        /// Cancel in-flight preview/speak. Do not dispose the CTS until form close —
+        /// disposing while a task still observes the token can throw ObjectDisposedException.
+        /// </summary>
+        private void CancelWork(bool disposeCts = false)
+        {
+            try { _workCts?.Cancel(); } catch { /* ignore */ }
+            if (disposeCts)
+            {
+                try { _workCts?.Dispose(); } catch { /* ignore */ }
+                _workCts = null;
+            }
+            // Invalidate any in-flight UI application of results
+            _liveGeneration++;
+            if (!IsDisposed && !_speakBusy)
+            {
+                _lblStatus.Text = "Stopping…";
+                _lblStatus.ForeColor = UiTheme.FgMuted;
+            }
+        }
+
+        private CancellationToken BeginWorkToken()
+        {
+            try { _workCts?.Cancel(); } catch { /* ignore */ }
+            // Leave old CTS for GC — avoid Dispose while OCR/TTS still observes it.
+            _workCts = new CancellationTokenSource();
+            return _workCts.Token;
+        }
+
+        private bool EnsureSourceImage()
+        {
+            if (_sourceImage != null)
+                return true;
+            UseLastCapture();
+            if (_sourceImage != null)
+                return true;
+            _lblStatus.Text = "Open an image or speak a region first.";
+            _lblStatus.ForeColor = UiTheme.Warn;
+            return false;
+        }
+
+        private void RefreshStopEnabled()
+        {
+            if (IsDisposed) return;
+            _btnStop.Enabled = _speakBusy || _previewInFlight > 0;
+        }
+
+        private void SetSpeakBusy(bool busy)
+        {
+            _speakBusy = busy;
+            ApplyControlsEnabled();
+            ApplyKeyboardTabOrder();
+        }
+
+        private async Task RunPreviewAsync(bool fromLive = false, bool forceRedetect = false)
+        {
+            if (_speakBusy)
+                return;
+            if (!EnsureSourceImage())
+                return;
+
+            // Locked refine: never wipe on Preview / live unless Re-detect.
+            if (HasLockedRefine && !forceRedetect)
+            {
+                if (!fromLive)
+                {
+                    _lblStatus.Text =
+                        $"Keeping {_refine.RegionCount} refined region(s). Re-detect to re-run OCR · Speak uses your boxes.";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                    UpdateRefineStatus();
+                }
+                return;
+            }
+
+            Persist(writeDiskNow: !fromLive);
+            AppSettings.Current.NormalizeImagePrepSettings();
+            AppSettings.Current.NormalizeComicRegionSettings();
+            _appliedPrepGeneration = DevCaptureCache.PrepGeneration;
+            _appliedPrepSig = DevCaptureCache.PrepSettingsSignature();
+
+            var token = BeginWorkToken();
+            int gen = ++_liveGeneration;
+
+            _previewInFlight++;
+            _progress.BeginWork();
+            RefreshStopEnabled();
+            bool prepOn = AppSettings.Current.ImagePrepEnabled;
+            bool grayOn = prepOn && AppSettings.Current.ImageGrayscale;
+            string prepHint =
+                $"prep={(prepOn ? "on" : "off")}" +
+                $" gray={(grayOn ? "on" : "off")}" +
+                $" long={AppSettings.Current.ImageUpscaleLongSide}";
+            _lblPreviewStatus.Text = fromLive
+                ? $"Live preview — detecting… ({prepHint})"
+                : $"Running detect… ({prepHint})";
+            _lblPreviewStatus.ForeColor = UiTheme.Warn;
+            if (!fromLive)
+            {
+                _lblStatus.Text = $"Detecting balloons ({prepHint})…";
+                _lblStatus.ForeColor = UiTheme.FgMuted;
+            }
+
+            try
+            {
+                Bitmap work;
+                try { work = new Bitmap(_sourceImage!); }
+                catch (Exception ex)
+                {
+                    if (!IsDisposed && gen == _liveGeneration)
+                    {
+                        _lblStatus.Text = $"Preview source error: {ex.Message}";
+                        _lblStatus.ForeColor = UiTheme.Bad;
+                    }
+                    return;
+                }
+
+                ComicRegionPreviewResult result;
+                try
+                {
+                    result = await Task.Run(
+                        () => OcrProcessor.PreviewComicRegionsAsync(work, token),
+                        token).ConfigureAwait(true);
+                }
+                finally
+                {
+                    try { work.Dispose(); } catch { /* ignore */ }
+                }
+
+                if (IsDisposed || gen != _liveGeneration) { result.Dispose(); return; }
+
+                // Race fix: user may have refined while detect was running.
+                if (HasLockedRefine && !forceRedetect)
+                {
+                    try { result.BaseImage?.Dispose(); } catch { /* ignore */ }
+                    result.BaseImage = null;
+                    try { result.Overlay?.Dispose(); } catch { /* ignore */ }
+                    result.Overlay = null;
+                    result.Dispose();
+                    if (!fromLive)
+                    {
+                        _lblStatus.Text =
+                            $"Keeping {_refine.RegionCount} refined region(s) (detect result discarded).";
+                        _lblStatus.ForeColor = UiTheme.Warn;
+                        UpdateRefineStatus();
+                    }
+                    return;
+                }
+
+                int regionCount = result.RegionCount;
+                string detailText = result.Detail ?? "";
+
+                Bitmap? baseImg = result.BaseImage;
+                result.BaseImage = null;
+                // Enforce Western reading order on seed numbers (L→R, top→bottom).
+                // Detect already sorts; re-apply so refine badges always match speak order.
+                var cores = OcrProcessor.SmokeSortComicReadingOrder(
+                    result.Regions ?? Array.Empty<Rectangle>());
+                try { result.Overlay?.Dispose(); } catch { /* ignore */ }
+                result.Overlay = null;
+                result.Dispose();
+
+                if (baseImg != null)
+                    _refine.SetSeed(baseImg, cores);
+                else if (_sourceImage != null)
+                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), cores);
+
+                _txtDetail.Text = UiTheme.SanitizeUiEngineNames(detailText);
+                UpdateRefineStatus();
+                _lblStatus.Text = regionCount > 0
+                    ? $"OCR seeded {regionCount} island(s). Edit boxes to lock · Speak uses your list."
+                    : "No OCR islands — click+drag to add boxes, then Speak.";
+                _lblStatus.ForeColor = regionCount > 0 ? UiTheme.Ok : UiTheme.Warn;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsDisposed && gen == _liveGeneration && !fromLive)
+                {
+                    _lblStatus.Text = "Preview cancelled.";
+                    _lblStatus.ForeColor = UiTheme.FgMuted;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && gen == _liveGeneration)
+                {
+                    _lblStatus.Text = $"Preview failed: {ex.Message}";
+                    _lblStatus.ForeColor = UiTheme.Bad;
+                    _txtDetail.Text = ex.ToString();
+                }
+            }
+            finally
+            {
+                _previewInFlight = Math.Max(0, _previewInFlight - 1);
+                if (!IsDisposed)
+                {
+                    _progress.EndWork();
+                    RefreshStopEnabled();
+                }
+            }
+        }
+
+        private async Task RunSpeakAsync()
+        {
+            if (_speakBusy)
+                return;
+            if (!EnsureSourceImage())
+                return;
+
+            Persist(writeDiskNow: true);
+            // Stop live timer + any detect
+            try { _liveTimer.Stop(); } catch { /* ignore */ }
+            var token = BeginWorkToken();
+            int gen = ++_liveGeneration;
+
+            SetSpeakBusy(true);
+            _progress.BeginWork();
+            _lblPreviewStatus.Text = "Reading text and speaking…";
+            _lblPreviewStatus.ForeColor = UiTheme.Warn;
+            _lblStatus.Text = "Reading balloons and speaking… this can take a minute.";
+            _lblStatus.ForeColor = UiTheme.FgMuted;
+
+            try
+            {
+                Bitmap work;
+                try { work = new Bitmap(_sourceImage!); }
+                catch (Exception ex)
+                {
+                    if (!IsDisposed)
+                    {
+                        _lblStatus.Text = $"Speak source error: {ex.Message}";
+                        _lblStatus.ForeColor = UiTheme.Bad;
+                    }
+                    return;
+                }
+
+                // Prefer user refine / session override; else auto OCR detect inside speak.
+                List<Rectangle>? overrideRegions = GetActiveOverrideRegions();
+                if (overrideRegions != null && overrideRegions.Count == 0)
+                    overrideRegions = null;
+                // Manual Speak from Balloons satisfies the refine intent — do not also
+                // auto-speak the same list when the overlay is hidden later.
+                if (overrideRegions != null && overrideRegions.Count > 0)
+                    ComicRegionOverrideSession.DisarmOverlaySpeak();
+
+                Debug.WriteLine(
+                    $"[Balloons] Speak override={(overrideRegions == null ? "none" : overrideRegions.Count.ToString())} " +
+                    $"dirty={_refine.IsDirty} session={ComicRegionOverrideSession.IsActive}");
+
+                ComicRegionSpeakResult result;
+                try
+                {
+                    result = await Task.Run(
+                        () => OcrProcessor.SpeakComicFromBitmapAsync(
+                            work, token, overrideRegions),
+                        token).ConfigureAwait(true);
+                }
+                finally
+                {
+                    try { work.Dispose(); } catch { /* ignore */ }
+                }
+
+                if (IsDisposed || gen != _liveGeneration) { result.Dispose(); return; }
+
+                int regionCount = result.RegionCount;
+                string detailText = result.Detail ?? "";
+                string spoken = result.SpokenText ?? "";
+                bool unreadable = result.Unreadable;
+                // Keep user's refine list; optional overlay is discarded (we paint live).
+                try { result.Overlay?.Dispose(); } catch { /* ignore */ }
+                result.Overlay = null;
+                result.Dispose();
+
+                string detailUi = UiTheme.SanitizeUiEngineNames(detailText);
+                // Normalize to \r\n so multiline TextBox shows unit breaks
+                // (bare \n from logs/OCR often smashes lines until paste).
+                static string ForTextBox(string s) =>
+                    (s ?? "").Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+                _txtDetail.Text = string.IsNullOrWhiteSpace(spoken)
+                    ? ForTextBox(detailUi)
+                    : ForTextBox(
+                        "=== SPOKEN ===\r\n" +
+                        spoken +
+                        "\r\n\r\n=== PIPELINE ===\r\n" +
+                        detailUi);
+
+                bool usedOverride = overrideRegions != null && overrideRegions.Count > 0;
+                string usedRefine = usedOverride
+                    ? $"  ·  OVERRIDE {overrideRegions!.Count} box(es)"
+                    : "  ·  auto OCR";
+                _lblPreviewStatus.Text =
+                    $"Source: {_sourceLabel}  ·  {regionCount} region" +
+                    (regionCount == 1 ? "" : "s") +
+                    usedRefine +
+                    (unreadable ? "  ·  unreadable" : "  ·  spoke");
+                _lblPreviewStatus.ForeColor = unreadable ? UiTheme.Warn : UiTheme.Ok;
+                _lblStatus.Text = unreadable
+                    ? "Speak finished — unreadable (check detail log)."
+                    : usedOverride
+                        ? $"Spoke using your {overrideRegions!.Count} refined region(s)."
+                        : $"Spoke {regionCount} auto OCR island(s).";
+                _lblStatus.ForeColor = unreadable ? UiTheme.Warn : UiTheme.Ok;
+                // Keep refine UI after speak (do not reseed).
+                UpdateRefineStatus();
+                UpdateRefineButtons();
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsDisposed && gen == _liveGeneration)
+                {
+                    _lblStatus.Text = "Speak cancelled.";
+                    _lblStatus.ForeColor = UiTheme.FgMuted;
+                    _lblPreviewStatus.Text = "Cancelled.";
+                    _lblPreviewStatus.ForeColor = UiTheme.FgMuted;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // shutdown
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && gen == _liveGeneration)
+                {
+                    _lblStatus.Text = $"Speak failed: {ex.Message}";
+                    _lblStatus.ForeColor = UiTheme.Bad;
+                    _txtDetail.Text = ex.ToString();
+                }
+            }
+            finally
+            {
+                if (!IsDisposed)
+                {
+                    _progress.EndWork();
+                    SetSpeakBusy(false);
+                }
+            }
+        }
+
+        private void RefreshValueLabels()
+        {
+            var inv = CultureInfo.InvariantCulture;
+            _lblFogAmountVal.Text = TickToFog(_trkFogAmount.Value).ToString("0.00", inv);
+            _lblClusterXVal.Text = TickToGap(_trkClusterX.Value).ToString("0.00", inv);
+            _lblClusterYVal.Text = TickToGap(_trkClusterY.Value).ToString("0.00", inv);
+            _lblInflateXVal.Text = TickToInflate(_trkInflateX.Value).ToString("0.00", inv);
+            _lblInflateYVal.Text = TickToInflate(_trkInflateY.Value).ToString("0.00", inv);
+            _lblPaddingVal.Text = $"{_trkPadding.Value}px";
+            _lblDenseCountVal.Text = _trkDenseCount.Value == 0
+                ? "off"
+                : $"{_trkDenseCount.Value}+";
+            _lblOrphanVal.Text = _trkOrphan.Value == 0
+                ? "off"
+                : _trkOrphan.Value.ToString(inv);
+            _lblMinAlnumVal.Text = _trkMinAlnum.Value == 0
+                ? "off"
+                : _trkMinAlnum.Value.ToString(inv);
+        }
+
+        private static int FogToTick(float v) =>
+            Math.Clamp((int)Math.Round(v * 100f), 0, 100);
+        private static float TickToFog(int t) => t / 100f;
+
+        private static int GapToTick(double v) =>
+            Math.Clamp((int)Math.Round(v * 100.0), 25, 300);
+        private static double TickToGap(int t) => t / 100.0;
+
+        private static int InflateToTick(double v) =>
+            Math.Clamp((int)Math.Round(v * 100.0), 0, 80);
+        private static double TickToInflate(int t) => t / 100.0;
+
+        private static Label MakeSection(string text) => new()
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            ForeColor = UiTheme.FgHeader,
+            Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        private static Label MakeLabel(string text) => new()
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            ForeColor = UiTheme.FgMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
+
+        private static Label MakeHint(string text) => new()
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            ForeColor = UiTheme.FgDim,
+            Font = new Font("Segoe UI", 8f),
+            TextAlign = ContentAlignment.TopLeft,
+        };
+
+        private static Label MakeValueLabel() => new()
+        {
+            Dock = DockStyle.Fill,
+            ForeColor = UiTheme.Fg,
+            TextAlign = ContentAlignment.MiddleRight,
+            Font = new Font("Segoe UI", 8.5f),
+            AutoEllipsis = true,
+        };
+
+        private static TrackBar MakeTrack(int min, int max, int value)
+        {
+            var t = new TrackBar
+            {
+                Dock = DockStyle.Fill,
+                Minimum = min,
+                Maximum = max,
+                Value = Math.Clamp(value, min, max),
+                TickStyle = TickStyle.None,
+                AutoSize = false,
+                Height = 28,
+                BackColor = UiTheme.Bg,
+            };
+            return t;
+        }
+
+        private static Control WrapTrack(TrackBar track, Label value)
+        {
+            var p = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = UiTheme.Bg,
+            };
+            p.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            p.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52f));
+            p.Controls.Add(track, 0, 0);
+            p.Controls.Add(value, 1, 0);
+            return p;
+        }
+
+        private static Button MakeButton(string text)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                MinimumSize = new Size(88, 30),
+                Margin = new Padding(6, 2, 0, 2),
+            };
+            UiTheme.StyleButton(btn);
+            return btn;
+        }
+
+        /// <summary>Compact refine toolbar buttons (full text, no forced narrow Width).</summary>
+        private static Button MakeRefineButton(string text)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(70, 32),
+                Margin = new Padding(0, 0, 8, 0),
+                Padding = new Padding(10, 4, 10, 4),
+                Font = new Font("Segoe UI", 8.5f),
+            };
+            UiTheme.StyleButton(btn);
+            return btn;
+        }
+    }
+}

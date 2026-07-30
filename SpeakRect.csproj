@@ -1,0 +1,116 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- ====================== TARGET FRAMEWORK ====================== -->
+		<TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+		<SupportedOSPlatformVersion>10.0.26100.0</SupportedOSPlatformVersion>
+
+		<OutputType>WinExe</OutputType>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+
+		<UseWindowsForms>true</UseWindowsForms>
+		<UseWPF>true</UseWPF>
+
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<Platforms>x64;arm64</Platforms>
+
+		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+		<EnableWindowsFormsHighDpiAutoResizing>true</EnableWindowsFormsHighDpiAutoResizing>
+
+		<StartupObject>SpeakRect.Program</StartupObject>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+		<Version>1.4.23</Version>
+		<InformationalVersion>1.4.23</InformationalVersion>
+	</PropertyGroup>
+
+	<!-- Local Build: no RID, normal multi-file output under bin\x64\… -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<!--
+	  EVERY publish (VS Publish, dotnet publish, any profile):
+	    1) Single-file self-contained SpeakRect.exe (open source — no obfuscation)
+	    2) CopyPayloadOnPublish: koboldcpp\ + LICENSE + README + notices
+	  These properties only affect publish packaging, not normal Build.
+	-->
+	<PropertyGroup>
+		<PublishSingleFile>true</PublishSingleFile>
+		<SelfContained>true</SelfContained>
+		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+		<PublishReadyToRun>true</PublishReadyToRun>
+		<PublishTrimmed>false</PublishTrimmed>
+		<!-- Default publish folder if no profile / -o given -->
+		<PublishDir Condition="'$(PublishDir)' == ''">$(MSBuildProjectDirectory)\publish\</PublishDir>
+		<!-- Kobold source (override with -p:KoboldCppSourceDir=...) -->
+		<KoboldCppSourceDir Condition="'$(KoboldCppSourceDir)' == ''">$(MSBuildProjectDirectory)\koboldcpp</KoboldCppSourceDir>
+	</PropertyGroup>
+
+	<!-- Force win-x64 single-file defaults when publishing if nothing else set them -->
+	<Target Name="SpeakRectPublishDefaults" BeforeTargets="PrepareForPublish;ComputeFilesToPublish;_GeneratePublishDependencyFile;Publish">
+		<PropertyGroup>
+			<PublishSingleFile>true</PublishSingleFile>
+			<SelfContained>true</SelfContained>
+			<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+			<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+			<PublishReadyToRun>true</PublishReadyToRun>
+			<PublishTrimmed>false</PublishTrimmed>
+			<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+			<RuntimeIdentifiers Condition="'$(RuntimeIdentifiers)' == ''">win-x64</RuntimeIdentifiers>
+		</PropertyGroup>
+	</Target>
+
+	<!-- ====================== NUGET ====================== -->
+	<ItemGroup>
+		<PackageReference Include="NAudio" Version="2.3.0" />
+		<PackageReference Include="System.Speech" Version="10.0.10" />
+	</ItemGroup>
+
+	<!-- ====================== CLEANUP ====================== -->
+	<ItemGroup>
+		<Compile Remove="frm_SpeakRect.Designer.cs" />
+		<Compile Remove="tests\**\*" />
+		<None Remove="tests\**\*" />
+		<EmbeddedResource Remove="tests\**\*" />
+	</ItemGroup>
+
+	<!--
+	  After every Publish: SpeakRect.exe is already single-file.
+	  Copy koboldcpp\ + LICENSE + README + third-party notices next to it.
+	  App-only / CI dry-run: -p:SkipKoboldPayload=true (docs still copied when present).
+	-->
+	<PropertyGroup>
+		<SkipKoboldPayload Condition="'$(SkipKoboldPayload)' == ''">false</SkipKoboldPayload>
+	</PropertyGroup>
+	<Target Name="CopyPayloadOnPublish" AfterTargets="Publish">
+		<PropertyGroup>
+			<_PubDir>$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))</_PubDir>
+			<_KoboldSrc>$([System.IO.Path]::GetFullPath('$(KoboldCppSourceDir)'))</_KoboldSrc>
+		</PropertyGroup>
+
+		<Error Condition="'$(SkipKoboldPayload)' != 'true' And !Exists('$(_KoboldSrc)\koboldcpp.exe')" Text="Publish requires koboldcpp at $(_KoboldSrc)\ (koboldcpp.exe + gguf + ocr.kcpps next to the .csproj). Or pass -p:SkipKoboldPayload=true for app-only." />
+
+		<ItemGroup>
+			<_KoboldFiles Include="$(_KoboldSrc)\koboldcpp.exe" Condition="'$(SkipKoboldPayload)' != 'true'" />
+			<_KoboldFiles Include="$(_KoboldSrc)\*.gguf" Condition="'$(SkipKoboldPayload)' != 'true'" />
+			<_KoboldFiles Include="$(_KoboldSrc)\ocr.kcpps" Condition="'$(SkipKoboldPayload)' != 'true'" />
+			<_DocFiles Include="$(MSBuildProjectDirectory)\LICENSE" Condition="Exists('$(MSBuildProjectDirectory)\LICENSE')" />
+			<_DocFiles Include="$(MSBuildProjectDirectory)\README.md" Condition="Exists('$(MSBuildProjectDirectory)\README.md')" />
+			<_DocFiles Include="$(MSBuildProjectDirectory)\THIRD_PARTY_NOTICES.md" Condition="Exists('$(MSBuildProjectDirectory)\THIRD_PARTY_NOTICES.md')" />
+		</ItemGroup>
+
+		<Error Condition="'$(SkipKoboldPayload)' != 'true' And '@(_KoboldFiles)' == ''" Text="No kobold files found under $(_KoboldSrc)\" />
+		<Error Condition="'@(_DocFiles)' == ''" Text="Publish expected LICENSE / README.md next to the .csproj." />
+
+		<MakeDir Directories="$(_PubDir)koboldcpp" Condition="'$(SkipKoboldPayload)' != 'true'" />
+		<Copy Condition="'$(SkipKoboldPayload)' != 'true'" SourceFiles="@(_KoboldFiles)" DestinationFolder="$(_PubDir)koboldcpp" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
+		<Copy SourceFiles="@(_DocFiles)" DestinationFolder="$(_PubDir)" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
+
+		<Message Importance="high" Condition="'$(SkipKoboldPayload)' != 'true'" Text="Published: $(_PubDir)SpeakRect.exe (single-file) + koboldcpp\ + LICENSE/README/notices" />
+		<Message Importance="high" Condition="'$(SkipKoboldPayload)' == 'true'" Text="Published: $(_PubDir)SpeakRect.exe (app-only; SkipKoboldPayload=true) + LICENSE/README/notices" />
+	</Target>
+
+</Project>

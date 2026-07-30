@@ -1,0 +1,58 @@
+## Build outputs
+bin/
+obj/
+**/[Bb]in/
+**/[Oo]bj/
+
+## Release packaging under publish/
+## Track instructions + release-notes*.md; ignore zips and script staging only.
+publish/**/*.zip
+publish/_publish-temp-*/
+publish/SpeakRect-*/
+publish/**/SpeakRect-*/
+
+## VS / user local
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.DotSettings.user
+
+## Debug / smoke captures
+_debug_view/
+**/last_*.png
+**/last_*.txt
+**/desktop_*.png
+**/settings_*.png
+**/smoke_err.txt
+**/smoke_out.txt
+
+## Local LLM payload: NOT in public git (release zip / Fetch only).
+## Keep small ocr.kcpps tracked; ignore host/models, logs, runtime config.
+koboldcpp/*.gguf
+koboldcpp/koboldcpp.exe
+koboldcpp/*.log
+koboldcpp/ocr.runtime.kcpps
+
+## NuGet
+*.nupkg
+**/packages/
+project.lock.json
+
+## OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Test / local profiles that may hold paths
+**/Profiles/
+*.ini
+!**/ocr.kcpps
+
+## Release packaging scratch (created under publish/ by scripts)
+publish/**/*.zip
+
+## Legacy nested docs-only face (pre-R6 dual-repo). Not the product remote.
+public-repo/
+
