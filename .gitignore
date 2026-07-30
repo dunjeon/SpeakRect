@@ -5,11 +5,12 @@ obj/
 **/[Oo]bj/
 
 ## Release packaging under publish/
-## Track instructions + release-notes*.md; ignore zips and script staging only.
+## Track release-notes*.md; ignore zips, staging, and agent-only ship notes.
 publish/**/*.zip
 publish/_publish-temp-*/
 publish/SpeakRect-*/
 publish/**/SpeakRect-*/
+publish/AGENT_RELEASE.md
 
 ## VS / user local
 *.user
