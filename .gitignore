@@ -11,7 +11,8 @@ obj/
 *.userosscache
 *.sln.docstates
 *.DotSettings.user
-Properties/PublishProfiles/
+# Keep FolderProfile.pubxml tracked; only ignore local VS history
+Properties/PublishProfiles/*.pubxml.user
 
 ## Debug / smoke captures
 _debug_view/
