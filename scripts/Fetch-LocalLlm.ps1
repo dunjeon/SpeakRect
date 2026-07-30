@@ -19,7 +19,7 @@
   Skip SHA256 checks when pins are still TBD.
 
 .EXAMPLE
-  .\scripts\Fetch-LocalLlm.ps1 -ReleaseTag v1.4.19
+  .\scripts\Fetch-LocalLlm.ps1 -ReleaseTag v1.4.23
 #>
 [CmdletBinding()]
 param(

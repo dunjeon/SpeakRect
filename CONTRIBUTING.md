@@ -1,14 +1,12 @@
 # Contributing to SpeakRect
 
-Thanks for interest in SpeakRect.
-
 ## Prerequisites
 
 - Windows 10/11 **x64**
-- .NET **10** SDK (TFM `net10.0-windows10.0.26100.0`)
-- Optional: GPU + Local-LLM payload under `koboldcpp\` for live recognition testing
+- .NET **10** SDK (`net10.0-windows10.0.26100.0`)
+- Optional: GPU + Local-LLM files under `koboldcpp\` for live recognition
 
-## Build
+## Clone and build
 
 ```powershell
 git clone https://github.com/dunjeon/SpeakRect.git
@@ -17,46 +15,56 @@ dotnet build SpeakRect.sln -c Debug
 dotnet run --project SpeakRect.csproj -c Debug
 ```
 
-Large Local-LLM binaries are **not** in git. Use a release zip extract or `scripts/Fetch-LocalLlm.ps1` when configured. On-disk folder remains `koboldcpp\` for install compatibility. See [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md).
+Large Local-LLM binaries are **not** in git. Either:
 
-## Tests / smokes
+- Extract a [release zip](https://github.com/dunjeon/SpeakRect/releases) so `koboldcpp\` sits next to the app, or  
+- Run `scripts/Fetch-LocalLlm.ps1` when configured  
 
-See [`docs/dev/smoke-runbook.md`](docs/dev/smoke-runbook.md).
+On-disk folder name stays `koboldcpp\`. Small config `koboldcpp/ocr.kcpps` is in the repo.
 
-- Pure unit tests: `dotnet test tests/SpeakRect.Tests`
-- Live ModeSmoke is **optional** and needs GPU + models
+## Tests
+
+```powershell
+dotnet test tests/SpeakRect.Tests
+```
+
+Smokes (optional): see [`docs/dev/smoke-runbook.md`](docs/dev/smoke-runbook.md).  
+Live ModeSmoke needs GPU + models and is **not** a PR gate.
 
 ## Product language (UI)
 
-| Concept | User-facing term |
-|---------|------------------|
-| Windows.Media.Ocr balloon detect | **OCR** |
-| Bundled vision host + model | **Local-LLM** |
+| Concept | Term |
+|---------|------|
+| Balloon / region detect | **OCR** |
+| Vision host + model | **Local-LLM** |
 
-Do not put **WinOCR** or **Kobold** / **KoboldCpp** in user-visible strings. On-disk folder `koboldcpp\` and third-party credit names may remain.
+Do not put **WinOCR** or **Kobold** / **KoboldCpp** in user-visible strings.
 
-## Docs
+## Docs map
 
-- Design / architecture: [`docs/SPEAKRECT_ARCHITECTURE_OSS.md`](docs/SPEAKRECT_ARCHITECTURE_OSS.md)
-- Speak path: [`docs/architecture/speak-path-checklist.md`](docs/architecture/speak-path-checklist.md)
-- Git / releases: [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md)
+| Doc | Use |
+|-----|-----|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | As-built overview |
+| [`docs/architecture/speak-path-checklist.md`](docs/architecture/speak-path-checklist.md) | Capture → speak call graph |
+| [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md) | What is / isn’t in git |
+| [`docs/dev/smoke-runbook.md`](docs/dev/smoke-runbook.md) | How to run smokes |
 
-## Pull request expectations
+## Pull requests
 
 1. Prefer small PRs.
-2. Extract/refactor PRs: **no algorithm or threshold changes** unless that is the point of the PR.
-3. Do not commit `SpeakRect.ini`, profiles, `Mapping.txt`, GGUF/exe dumps, or personal paths.
-4. Run relevant smokes for the area you touch.
+2. Pure extracts: **no algorithm or threshold changes**.
+3. Do not commit profiles, `SpeakRect.ini`, GGUF/exe dumps, or personal paths.
+4. Run unit tests (and relevant smokes) for the area you touch.
 
 ## License
 
-SpeakRect application source is **GPLv2** — see [LICENSE](LICENSE). By contributing, you agree your contributions are licensed under the same terms.
+**GPLv2** — see [LICENSE](LICENSE). Contributions are under the same terms.
 
 ## Code of conduct / DCO
 
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)  
-- **DCO:** commits should be signed off (`git commit -s`) affirming the Developer Certificate of Origin  
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Sign off commits: `git commit -s` (Developer Certificate of Origin)
 
 ## Security
 
-See [`SECURITY.md`](SECURITY.md).
+See [SECURITY.md](SECURITY.md).

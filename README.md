@@ -436,6 +436,21 @@ SpeakRect bundles a **Q8_0** GGUF build of GLM-OCR (`glmocr-Q8_0.gguf` + `mmproj
 
 ---
 
+## Build from source
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Short version:
+
+```powershell
+git clone https://github.com/dunjeon/SpeakRect.git
+cd SpeakRect
+dotnet build SpeakRect.sln -c Debug
+dotnet test tests/SpeakRect.Tests
+```
+
+Architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
 ## License
 
 **SpeakRect** application source is licensed under the **GNU General Public License version 2 (GPLv2)** — see [LICENSE](LICENSE).

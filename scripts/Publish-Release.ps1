@@ -4,19 +4,16 @@
   Publish SpeakRect and pack ONE complete zip (app + models).
 
 .DESCRIPTION
-  OWNER / NEW-VERSION tool only. Agents shipping an already-provided archive
-  must follow publish\AGENT_RELEASE.md and MUST NOT rebuild that zip.
+  Maintainer packaging tool for a complete install zip.
 
-  1) dotnet publish (single-file self-contained; no obfuscation — open source)
+  1) dotnet publish (single-file self-contained; no obfuscation)
   2) Stage SpeakRect.exe + koboldcpp payload (Q8_0 GGUFs + host + config)
   3) Zip to publish\SpeakRect-<version>-win-x64.zip
 
-  Models are NOT in git -- they must exist under koboldcpp\ (or -KoboldCppSourceDir).
+  Models are NOT in git — they must exist under koboldcpp\ (or -KoboldCppSourceDir).
 
-  GitHub Releases hard-limit each asset to 2 GiB. Use -CreateGitHubRelease only
-  when the zip is under the limit, or host the zip elsewhere and link it.
-
-  Public source of truth: dunjeon/SpeakRect (full source).
+  Prefer an already-validated zip for GitHub Releases when one exists; do not
+  rebuild casually. GitHub asset limit is 2 GiB.
 
 .EXAMPLE
   .\scripts\Publish-Release.ps1
