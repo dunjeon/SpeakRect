@@ -14,8 +14,7 @@ dunjeon/SpeakRect  (public — only remote)
   *.cs, *.csproj, tests/, scripts/, docs/
   LICENSE (GPLv2), README, THIRD_PARTY_NOTICES
        │
-       │  owner-provided zip under publish\
-       │  (agents: see publish/AGENT_RELEASE.md — never rebuild ship zips)
+       │  owner-validated zip under publish\
        ▼
   Releases → SpeakRect-<ver>-win-x64.zip
             (app + koboldcpp host + Q8_0 models)
@@ -33,15 +32,13 @@ dotnet test tests/SpeakRect.Tests
 dotnet run --project SpeakRect.csproj -c Debug
 ```
 
-## Every release (agents)
+## Every release
 
-**Read first:** [`publish/AGENT_RELEASE.md`](../publish/AGENT_RELEASE.md).
-
-1. Prefer the **owner-provided** zip already under `publish\` (e.g. `SpeakRect-1.4.23-win-x64.zip`).
+1. Prefer an **owner-validated** zip already under `publish\` (e.g. `SpeakRect-1.4.23-win-x64.zip`).
 2. **Do not** rebuild that zip for upload unless the owner requests a new version package.
 3. Create/upload the GitHub Release on **`dunjeon/SpeakRect`** attaching that file when size **&lt; 2 GiB**.
 
-`scripts/Publish-Release.ps1` is for **owner-directed new packs** only, not the default agent ship path.
+`scripts/Publish-Release.ps1` is for **owner-directed new packs** only, not the default ship path for an existing archive.
 
 ### Single zip contents
 
@@ -70,11 +67,11 @@ origin  https://github.com/dunjeon/SpeakRect.git
 
 - **`public-repo\`** — historical docs-only tree used before full-source OSS. Not the product remote; safe to ignore for day-to-day work.
 - **Private `SpeakRect-src` + dual-repo flow** — superseded. Init script dual-repo setup is obsolete for new work.
-- **LFS history** — public tree is a clean source start **without** multi-GB LFS objects (see `docs/dev/lfs-history-strategy.md`).
+- **Large binaries** — public tree has **no** multi-GB GGUF/host objects; ship via Releases only.
 
 ## Security checklist
 
 - [ ] Release zip has no secrets or local debug artifacts
 - [ ] Models only in the release zip / Fetch path, not required for public source clone
 - [ ] App is **not** obfuscated
-- [ ] Agents upload **provided** archives per `publish/AGENT_RELEASE.md`
+- [ ] Upload **owner-validated** archives only (do not substitute a rebuild)

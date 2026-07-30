@@ -1,29 +1,29 @@
 # Contributing to SpeakRect
 
-Thanks for interest in SpeakRect. This document is a **draft** for open-source readiness work. Contribution legal process (CLA vs DCO) is **not final** until the product owner answers open questions in `docs/SPEAKRECT_ARCHITECTURE_OSS.md`.
+Thanks for interest in SpeakRect.
 
 ## Prerequisites
 
 - Windows 10/11 **x64**
 - .NET **10** SDK (TFM `net10.0-windows10.0.26100.0`)
-- Optional: GPU + bundled Local-LLM payload under `koboldcpp\` for live OCR testing
+- Optional: GPU + Local-LLM payload under `koboldcpp\` for live recognition testing
 
 ## Build
 
 ```powershell
-git clone <repo-url>
+git clone https://github.com/dunjeon/SpeakRect.git
 cd SpeakRect
 dotnet build SpeakRect.sln -c Debug
 dotnet run --project SpeakRect.csproj -c Debug
 ```
 
-Local-LLM binaries/models: see `docs/dev/lfs-history-strategy.md` and (when available) `scripts/Fetch-LocalLlm.ps1`. Folder on disk remains `koboldcpp\` for install compatibility.
+Large Local-LLM binaries are **not** in git. Use a release zip extract or `scripts/Fetch-LocalLlm.ps1` when configured. On-disk folder remains `koboldcpp\` for install compatibility. See [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md).
 
 ## Tests / smokes
 
 See [`docs/dev/smoke-runbook.md`](docs/dev/smoke-runbook.md).
 
-- Pure unit tests (when present): `dotnet test tests/SpeakRect.Tests`
+- Pure unit tests: `dotnet test tests/SpeakRect.Tests`
 - Live ModeSmoke is **optional** and needs GPU + models
 
 ## Product language (UI)
@@ -35,16 +35,16 @@ See [`docs/dev/smoke-runbook.md`](docs/dev/smoke-runbook.md).
 
 Do not put **WinOCR** or **Kobold** / **KoboldCpp** in user-visible strings. On-disk folder `koboldcpp\` and third-party credit names may remain.
 
-## Architecture & product decisions
+## Docs
 
-- Design: [`docs/SPEAKRECT_ARCHITECTURE_OSS.md`](docs/SPEAKRECT_ARCHITECTURE_OSS.md)
-- Git / releases: [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md), [`publish/AGENT_RELEASE.md`](publish/AGENT_RELEASE.md)
-- Product decisions: [`docs/OSS_PRODUCT_DECISIONS.md`](docs/OSS_PRODUCT_DECISIONS.md)
+- Design / architecture: [`docs/SPEAKRECT_ARCHITECTURE_OSS.md`](docs/SPEAKRECT_ARCHITECTURE_OSS.md)
+- Speak path: [`docs/architecture/speak-path-checklist.md`](docs/architecture/speak-path-checklist.md)
+- Git / releases: [`docs/GITHUB_REPOS.md`](docs/GITHUB_REPOS.md)
 
 ## Pull request expectations
 
-1. Prefer small PRs (see design PR plan).
-2. Extract/refactor PRs: **no algorithm or threshold changes**.
+1. Prefer small PRs.
+2. Extract/refactor PRs: **no algorithm or threshold changes** unless that is the point of the PR.
 3. Do not commit `SpeakRect.ini`, profiles, `Mapping.txt`, GGUF/exe dumps, or personal paths.
 4. Run relevant smokes for the area you touch.
 
@@ -56,7 +56,6 @@ SpeakRect application source is **GPLv2** — see [LICENSE](LICENSE). By contrib
 
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)  
 - **DCO:** commits should be signed off (`git commit -s`) affirming the Developer Certificate of Origin  
-- Product decisions for OSS flip: [docs/OSS_PRODUCT_DECISIONS.md](docs/OSS_PRODUCT_DECISIONS.md)
 
 ## Security
 

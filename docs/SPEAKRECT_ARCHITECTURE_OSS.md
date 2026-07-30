@@ -10,9 +10,9 @@
 | **Revision** | **R6** — public topology flip; R5 Obfuscar removal retained |
 | **Codebase** | Public [`dunjeon/SpeakRect`](https://github.com/dunjeon/SpeakRect) (`main` @ 1.4.23+) |
 | **Audience** | Senior engineers; OSS contributors |
-| **Decisions** | `docs/OSS_PRODUCT_DECISIONS.md` |
-| **Git / releases** | `docs/GITHUB_REPOS.md`, `publish/AGENT_RELEASE.md` |
+| **Git / releases** | `docs/GITHUB_REPOS.md` |
 | **Speak-path gate** | `docs/architecture/speak-path-checklist.md` |
+| **Smokes** | `docs/dev/smoke-runbook.md` |
 
 ---
 
@@ -58,7 +58,7 @@ This document has two purposes:
 
 ### Why open source
 
-Accessibility tools benefit from scrutiny and hardware matrix testing. **Full source** lives on public **`dunjeon/SpeakRect`** (GPLv2). Multi-GB Local-LLM binaries stay **out of git** and ship via release zips. Agents must follow `publish/AGENT_RELEASE.md` (use owner-provided archives; never rebuild ship zips by default). See `docs/OSS_PRODUCT_DECISIONS.md`.
+Accessibility tools benefit from scrutiny and hardware matrix testing. **Full source** lives on public **`dunjeon/SpeakRect`** (GPLv2). Multi-GB Local-LLM binaries stay **out of git** and ship via release zips. See `docs/GITHUB_REPOS.md`.
 
 ---
 
@@ -86,7 +86,7 @@ Accessibility tools benefit from scrutiny and hardware matrix testing. **Full so
 
 ## Glossary (user-facing product language)
 
-Canonical product language (**implemented**). Recorded under Q9 in `docs/OSS_PRODUCT_DECISIONS.md`.
+Canonical product language (**implemented**).
 
 | Concept | Canonical user-facing term | Also OK (secondary) | Banned in UI |
 |---------|---------------------------|---------------------|--------------|
@@ -121,7 +121,7 @@ Debug logs may still use technical `WinOCR` / host prefixes; not user-facing.
 
 | # | Status | Decision | Rationale |
 |---|--------|----------|-----------|
-| **K1** | **Done (R6)** | **Single public source-of-truth:** [`dunjeon/SpeakRect`](https://github.com/dunjeon/SpeakRect). Private `SpeakRect-src` **retired**. **Release zips** remain the primary binary channel; agents use owner-provided archives (`publish/AGENT_RELEASE.md`). | Issues/PRs/source/releases in one place. |
+| **K1** | **Done (R6)** | **Single public source-of-truth:** [`dunjeon/SpeakRect`](https://github.com/dunjeon/SpeakRect). Private `SpeakRect-src` **retired**. **Release zips** remain the primary binary channel. | Issues/PRs/source/releases in one place. |
 | **K2** | **Approved for implementation** | **User-visible branding first** per Glossary: OCR + Local-LLM; **internal type renames later**. Fix `SanitizeUiEngineNames` two-axis map; never Kobold→OCR. | Low risk for users; avoids massive mechanical rename. |
 | **K3** | **Done (1.4.23)** | **Obfuscar removed from all paths** (package, MSBuild targets, publish profile, release script, CI). | Open source prep; conflicts with R2R and contributor trust. |
 | **K4** | **Approved for implementation** | **Do not put multi-GB models in public git clones.** Supported public paths: **release assets** + **`Fetch-LocalLlm.ps1`**. Current private tree uses **Git LFS** (not gitignore) for GGUF/exe — see LFS history strategy. | Clone pain, bandwidth, GitHub limits. |
@@ -592,11 +592,11 @@ flowchart LR
 
 **Open-source packaging (1.4.23+):** no obfuscation; ReadyToRun stays on for publish. Vision JSON still uses `JsonObject` indexers (stable + unit-tested). ModeSmoke asserts `SmokeVerifyKoboldJsonShape`.
 
-**Release path:** agents upload the **owner-provided** zip per `publish/AGENT_RELEASE.md` (never rebuild by default). `scripts/Publish-Release.ps1` is for **owner-directed new packs** only. GitHub asset hard limit **2 GiB**.
+**Release path:** prefer owner-validated zips under `publish\` for GitHub Releases. `scripts/Publish-Release.ps1` is for **owner-directed new packs** only. GitHub asset hard limit **2 GiB**.
 
 ### Git topology (R6 — public full source)
 
-Documented in [`docs/GITHUB_REPOS.md`](GITHUB_REPOS.md) and agent ship rules in [`publish/AGENT_RELEASE.md`](../publish/AGENT_RELEASE.md):
+Documented in [`docs/GITHUB_REPOS.md`](GITHUB_REPOS.md):
 
 | Repo | Visibility | Content |
 |------|------------|---------|
@@ -651,7 +651,7 @@ These are **candidates** for cleanup phases; not all are confirmed bugs.
 ### Possible cleanup targets
 
 14. Debug-only `_debug_view/` captures in tree (gitignored patterns exist).
-15. Historical engineering logs may live outside git; product decisions live in `docs/OSS_PRODUCT_DECISIONS.md`.
+15. Historical engineering logs may live outside git.
 16. Two prep layers (`BuildImagePrepStages` vs `PrepareForLocalLlmOcr`) — roles documented; names clearer post-rename.
 17. Smoke tests mutate `AppSettings.Current` global — not parallel-safe.
 
@@ -666,7 +666,7 @@ These are **candidates** for cleanup phases; not all are confirmed bugs.
 1. ~~Hygiene~~ — **done** (1.4.20+).
 2. ~~License + docs + CI~~ — app **GPLv2**; CONTRIBUTING/SECURITY/COC; pure-test CI. **Counsel** on AGPL host bundling still recommended before wide redistribution claims.
 3. ~~Public flip~~ — **done (R6):** full source on **`dunjeon/SpeakRect`** without multi-GB binaries in git; models via release zip / `Fetch-LocalLlm.ps1`.
-4. **Public releases** continue as complete zips; agents **must not rebuild** owner-provided archives (`publish/AGENT_RELEASE.md`).
+4. **Public releases** continue as complete zips (owner-validated archives preferred).
 5. Obfuscation: **removed** (1.4.23) — all publish paths ship clear IL.
 
 **Alternative:** source-available non-OSI license — better than closed for audit, worse for package managers and forks.
@@ -680,7 +680,7 @@ These are **candidates** for cleanup phases; not all are confirmed bugs.
 | `.gitignore` | Public policy | Ignores `*.gguf`, `koboldcpp.exe`, logs, `ocr.runtime.kcpps`; tracks small `ocr.kcpps` |
 | `.gitattributes` | No multi-GB LFS on public | Public source start does **not** require LFS for clone |
 | `docs/GITHUB_REPOS.md` | Single public repo | **`dunjeon/SpeakRect` only** |
-| Ship path | Owner-provided zip | Agents follow `publish/AGENT_RELEASE.md` — **never rebuild** by default |
+| Ship path | Complete release zip under `publish\` | Prefer owner-validated archives for GitHub Releases |
 
 Measured on-disk (this machine): `koboldcpp.exe` ~608 MB, `glmocr-Q8_0.gguf` ~906 MB, `mmproj` ~462 MB.
 
@@ -695,7 +695,7 @@ Measured on-disk (this machine): `koboldcpp.exe` ~608 MB, `glmocr-Q8_0.gguf` ~90
 
 #### LFS history strategy — **done (option 2 / R6)**
 
-Public source is published **without** multi-GB LFS objects in git. Private dual-repo retired. See `docs/dev/lfs-history-strategy.md`.
+Public source is published **without** multi-GB LFS objects in git. Private dual-repo retired. See `docs/GITHUB_REPOS.md`.
 
 **Developer bootstrap (public OSS):**
 
@@ -747,7 +747,7 @@ dotnet run
 - [x] App SPDX: **GPL-2.0** (root `LICENSE`)
 - [ ] KoboldCpp **binary version pin** + source offer for shipped host (on each release)
 - [x] THIRD_PARTY_NOTICES present; LICENSE footer notes AGPL host
-- [x] Bundle for users + Fetch for devs (`docs/OSS_PRODUCT_DECISIONS.md` Q4)
+- [x] Bundle for users + Fetch for devs
 - [x] DCO documented in CONTRIBUTING (Q10)
 - [x] Historical proprietary releases remain in git history
 
@@ -833,10 +833,10 @@ Do **not** run full live OCR in PR CI without GPU runners.
 
 **Exit criteria (artifacts):**
 
-- [x] `docs/inventory/user-visible-engine-strings.md`
+- [x] UI branding inventory / OCR + Local-LLM rename
 - [x] `docs/dev/smoke-runbook.md`
 - [x] RegionSmoke green; ModeSmoke pure green; SettingsSmoke optional/interactive
-- [x] LFS strategy option 2 chosen (`docs/dev/lfs-history-strategy.md`)
+- [x] Public source without multi-GB LFS blobs
 
 **PRs:** PR-00, PR-01, PR-02 **landed**
 
@@ -1324,7 +1324,7 @@ README currently markets **Windows 10 or 11**; project `SupportedOSPlatformVersi
 | Settings | `AppSettings.cs` |
 | Overlay | `frm_SpeakRect.cs` |
 | Project / publish | `SpeakRect.csproj`, `scripts/Publish-Release.ps1` |
-| Git / releases | `docs/GITHUB_REPOS.md`, `publish/AGENT_RELEASE.md` |
+| Git / releases | `docs/GITHUB_REPOS.md` |
 | License | `LICENSE`, `THIRD_PARTY_NOTICES.md` |
 | Legacy docs face | `public-repo/` (not the product remote) |
 | KoboldCpp upstream | https://github.com/LostRuins/koboldcpp |
@@ -1379,7 +1379,7 @@ Detailed per-PR writeups below are historical design notes; prefer the Status ta
 ### PR-00  -  Phase 0 baseline artifacts
 
 - **Title:** `docs: Phase 0 string inventory, smoke runbook, LFS notes`
-- **Files:** `docs/inventory/user-visible-engine-strings.md`, `docs/dev/smoke-runbook.md`, optional `docs/dev/lfs-history-strategy.md` stub; outbound HTTP inventory note
+- **Files:** `docs/dev/smoke-runbook.md`; Phase 0 inventory notes (historical)
 - **Dependencies:** none
 - **Description:** Commit grep inventory (WinOCR/Kobold/Paddle user-facing), commands to run RegionSmoke/SettingsSmoke, ModeSmoke optional, LFS vs gitignore facts, record telemetry verification date. No product code change.
 
@@ -1526,7 +1526,7 @@ Detailed per-PR writeups below are historical design notes; prefer the Status ta
 ### PR-20  -  Public topology + GITHUB_REPOS rewrite
 
 - **Title:** `docs: public full-source topology; retire private dual-repo`
-- **Files:** `docs/GITHUB_REPOS.md`, README, `publish/AGENT_RELEASE.md`, design R6, `.gitignore`
+- **Files:** `docs/GITHUB_REPOS.md`, README, design R6, `.gitignore`
 - **Dependencies:** PR-19, **Q2**
 - **Description:** **Landed (R6)** — single public `dunjeon/SpeakRect`; agents ship owner-provided zips only.
 

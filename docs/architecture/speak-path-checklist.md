@@ -248,7 +248,7 @@ There is **no** type `ImagePrepPipeline` today.
 | `KoboldChatAsync` / `BuildKoboldChatRequestJson` / `BuildKoboldUserContent` | HTTP + JsonObject (obfuscation-safe) |
 | `RunKoboldConsensusAsync` | Comic diversified temps |
 
-**Network:** `127.0.0.1` only (see `docs/inventory/outbound-http.md`).
+**Network:** `127.0.0.1` only (no cloud OCR/telemetry).
 
 ---
 
@@ -385,9 +385,7 @@ No algorithm bugs confirmed in this pass that required logic changes.
 |-----|------|
 | `docs/SPEAKRECT_ARCHITECTURE_OSS.md` | Full as-built design + PR plan |
 | `docs/dev/smoke-runbook.md` | How to run smokes |
-| `docs/dev/phase2-hygiene-log.md` | Dead code already removed |
-| `docs/inventory/outbound-http.md` | Localhost-only HTTP |
-| `todo.txt` | Operational checklist |
+| `docs/GITHUB_REPOS.md` | Public git topology + release channel |
 
 ---
 
