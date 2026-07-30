@@ -15,10 +15,7 @@ dotnet build SpeakRect.sln -c Debug
 dotnet run --project SpeakRect.csproj -c Debug
 ```
 
-Large Local-LLM binaries are **not** in git. Either:
-
-- Extract a [release zip](https://github.com/dunjeon/SpeakRect/releases) so `koboldcpp\` sits next to the app, or  
-- Run `scripts/Fetch-LocalLlm.ps1` when configured  
+Large Local-LLM binaries are **not** in git. For live recognition, extract a [release zip](https://github.com/dunjeon/SpeakRect/releases) so `koboldcpp\` (host + GGUFs) is available next to the app / repo.
 
 On-disk folder name stays `koboldcpp\`. Small config `koboldcpp/ocr.kcpps` is in the repo.
 

@@ -64,21 +64,11 @@ dotnet test tests/SpeakRect.Tests
 
 ## Local-LLM binaries (not in git)
 
-Clone is **source only**. Place host + GGUFs under `koboldcpp\` via:
-
-1. Extract a [release zip](https://github.com/dunjeon/SpeakRect/releases), or  
-2. `scripts/Fetch-LocalLlm.ps1` (when release assets / pins are configured)
+Clone is **source only**. Place host + GGUFs under `koboldcpp\` by extracting a [release zip](https://github.com/dunjeon/SpeakRect/releases).
 
 Tracked: `koboldcpp/ocr.kcpps` only. Ignored: `*.gguf`, `koboldcpp.exe`.
 
-## Packaging (maintainers)
-
-```powershell
-# Requires local koboldcpp payload on disk
-.\scripts\Publish-Release.ps1
-```
-
-App-only publish: `dotnet publish -p:SkipKoboldPayload=true`. Releases ship **unobfuscated** single-file + ReadyToRun.
+App-only publish (no payload): `dotnet publish -p:SkipKoboldPayload=true`. Official releases ship **unobfuscated** single-file + ReadyToRun.
 
 ## Third-party
 

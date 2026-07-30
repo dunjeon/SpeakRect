@@ -29,7 +29,8 @@ koboldcpp/koboldcpp.exe
 koboldcpp/*.log
 koboldcpp/ocr.runtime.kcpps
 
-## Release packaging (local maintainer output)
+## Maintainer-only local tooling (not needed to build source)
+scripts/
 publish/
 
 ## Legacy nested docs face (pre-public full source)
