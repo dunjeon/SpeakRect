@@ -111,11 +111,136 @@ namespace SpeakRect
                 var msg = choices[0];
                 if (msg.TryGetProperty("message", out var m) &&
                     m.TryGetProperty("content", out var c))
-                    return c.GetString() ?? "";
+                    return SanitizeModelText(c.GetString());
             }
 
             return "";
         }
+
+        /// <summary>
+        /// First-pass scrub of Local-LLM message content, before CleanForSpeech /
+        /// fusion / quality gates. Wire text is UTF-8 JSON; this is not re-encoding —
+        /// it maps common typography to ASCII then keeps only:
+        /// Latin letters (basic + Latin-1 / Latin Extended-A), digits, whitespace,
+        /// and basic punctuation used by English comic OCR / TTS.
+        /// Drops CJK, emoji, private-use, exotic scripts, and other junk the VL
+        /// sometimes emits on hard crops.
+        /// </summary>
+        public static string SanitizeModelText(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return "";
+
+            // Typography → ASCII so curly quotes / dashes survive the allow-list.
+            var sb = new StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                switch (c)
+                {
+                    case '\u2018': // ‘
+                    case '\u2019': // ’
+                    case '\u201A': // ‚
+                    case '\u2032': // ′
+                    case '\u02BC': // ʼ
+                        sb.Append('\'');
+                        continue;
+                    case '\u201C': // “
+                    case '\u201D': // ”
+                    case '\u201E': // „
+                        sb.Append('"');
+                        continue;
+                    case '\u2013': // –
+                    case '\u2014': // —
+                    case '\u2212': // −
+                        sb.Append('-');
+                        continue;
+                    case '\u2026': // …
+                        sb.Append("...");
+                        continue;
+                    case '\u00A0': // NBSP
+                    case '\u202F': // narrow NBSP
+                    case '\u2007': // figure space
+                        sb.Append(' ');
+                        continue;
+                    case '\u00AD': // soft hyphen
+                    case '\uFEFF': // BOM / ZWNBSP
+                    case '\u200B': // zero-width space
+                    case '\u200C': // ZWNJ
+                    case '\u200D': // ZWJ
+                    case '\u2060': // word joiner
+                        continue;
+                    case '\r':
+                        // Normalize CRLF / lone CR later via whitespace collapse path.
+                        sb.Append('\n');
+                        continue;
+                    default:
+                        sb.Append(c);
+                        break;
+                }
+            }
+
+            // Allow-list: Latin letters, digits, whitespace, basic punct.
+            // Latin ranges match English comics + common Western European names
+            // (café, naïve) without opening the door to Linear-B / PUA spam.
+            var kept = new StringBuilder(sb.Length);
+            char prev = '\0';
+            for (int i = 0; i < sb.Length; i++)
+            {
+                char c = sb[i];
+
+                if (c == '\n')
+                {
+                    // Collapse runs of newlines to a single blank-line break max
+                    // is left to CleanForSpeech; here just keep \n and squash \n\n\n+.
+                    if (prev == '\n')
+                    {
+                        // Allow at most one extra \n (blank line) then skip more.
+                        if (kept.Length >= 2 && kept[^2] == '\n')
+                            continue;
+                    }
+                    kept.Append('\n');
+                    prev = '\n';
+                    continue;
+                }
+
+                if (char.IsWhiteSpace(c))
+                {
+                    // Other whitespace → single space (not across newlines).
+                    if (prev == ' ' || prev == '\n')
+                        continue;
+                    kept.Append(' ');
+                    prev = ' ';
+                    continue;
+                }
+
+                if (IsKeptLatinLetter(c) || char.IsAsciiDigit(c) || IsKeptPunctuation(c))
+                {
+                    kept.Append(c);
+                    prev = c;
+                }
+                // else: drop non-Latin letters, emoji, private-use, controls, etc.
+                // No '?' placeholders — those get spoken by TTS.
+            }
+
+            return kept.ToString().Trim();
+        }
+
+        /// <summary>
+        /// Basic Latin + Latin-1 Supplement letters + Latin Extended-A (U+0000–U+024F
+        /// letter codepoints). Rejects Greek, Cyrillic, CJK, private-use, etc.
+        /// </summary>
+        private static bool IsKeptLatinLetter(char c)
+        {
+            if (!char.IsLetter(c))
+                return false;
+            // Basic Latin, Latin-1, Latin Extended-A/B through U+024F
+            return c <= 0x024F;
+        }
+
+        /// <summary>Punctuation Safe for English OCR / later CleanForSpeech pauses.</summary>
+        private static bool IsKeptPunctuation(char c) =>
+            c is '.' or '!' or '?' or ',' or '\'' or '"'
+                or '-' or ':' or ';' or '(' or ')' or '/' or '&';
 
         /// <summary>
         /// Smoke / post-obfuscation check: payload must contain required wire keys.

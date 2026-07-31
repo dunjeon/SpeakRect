@@ -9487,25 +9487,29 @@ namespace SpeakRect
             await SpeakWithWinRtAsync(text, token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Forced TTS language for OCR dialogue / announcements. Comic text is
+        /// scrubbed to Latin; engines should pronounce as English regardless of
+        /// OS UI culture. Voice selection also prefers an English pack when possible.
+        /// </summary>
+        public const string TtsForcedLanguage = "en-US";
+
         /// <summary>UWP / OneCore path (Windows.Media.SpeechSynthesis).</summary>
         private async Task SpeakWithWinRtAsync(string text, CancellationToken token)
         {
             // Re-apply each speak so live VOICE panel changes take effect mid-session.
             ApplyVoiceSettings(_synth);
 
-            // ComicBook: SSML with short breaks between sentences so long
-            // multi-sentence balloons are easier to follow. Balloon-to-balloon
-            // pauses stay on Task.Delay (BubblePauseMs).
-            WinSpeech.SpeechSynthesisStream stream;
-            if (!ComicBookOff && SentenceBreakMs > 0 && LooksMultiSentence(text))
-            {
-                string ssml = BuildSpeakSsml(text, SentenceBreakMs, _synth.Voice?.Language);
-                stream = await _synth.SynthesizeSsmlToStreamAsync(ssml).AsTask(token);
-            }
-            else
-            {
-                stream = await _synth.SynthesizeTextToStreamAsync(text).AsTask(token);
-            }
+            // Always SSML with xml:lang=en-US so OneCore uses English pronunciation
+            // rules even when the system default culture is not English.
+            // ComicBook: optional short breaks between sentences; balloon pauses
+            // stay on Task.Delay (BubblePauseMs).
+            int breakMs = !ComicBookOff && SentenceBreakMs > 0 && LooksMultiSentence(text)
+                ? SentenceBreakMs
+                : 0;
+            string ssml = BuildSpeakSsml(text, breakMs, TtsForcedLanguage);
+            WinSpeech.SpeechSynthesisStream stream =
+                await _synth.SynthesizeSsmlToStreamAsync(ssml).AsTask(token);
 
             using (stream)
             {
@@ -9580,27 +9584,17 @@ namespace SpeakRect
                     tcs.TrySetCanceled();
                 }))
                 {
-                    bool useSsml =
-                        (!ComicBookOff && SentenceBreakMs > 0 && LooksMultiSentence(text)) ||
-                        Math.Abs(AppSettings.Current.VoicePitch - 1.0) > 0.02;
-
-                    if (useSsml)
-                    {
-                        string culture =
-                            synth.Voice?.Culture?.Name
-                            ?? CultureInfo.CurrentUICulture.Name
-                            ?? "en-US";
-                        string ssml = BuildSapiSpeakSsml(
-                            text,
-                            SentenceBreakMs > 0 && !ComicBookOff ? SentenceBreakMs : 0,
-                            culture,
-                            AppSettings.Current.VoicePitch);
-                        synth.SpeakSsmlAsync(ssml);
-                    }
-                    else
-                    {
-                        synth.SpeakAsync(text);
-                    }
+                    // Always SSML with forced en-US so SAPI does not follow OS UI culture.
+                    int breakMs =
+                        SentenceBreakMs > 0 && !ComicBookOff && LooksMultiSentence(text)
+                            ? SentenceBreakMs
+                            : 0;
+                    string ssml = BuildSapiSpeakSsml(
+                        text,
+                        breakMs,
+                        TtsForcedLanguage,
+                        AppSettings.Current.VoicePitch);
+                    synth.SpeakSsmlAsync(ssml);
 
                     await tcs.Task.ConfigureAwait(false);
                 }
@@ -9621,16 +9615,46 @@ namespace SpeakRect
 
             try
             {
+                // Prefer configured name only when it is an English voice; otherwise
+                // pick any installed English voice, then CultureInfo en-US hints.
+                string? pick = null;
                 if (!string.IsNullOrWhiteSpace(s.SapiVoiceName))
                 {
-                    // SelectVoice throws if the name is missing — fall back to default.
-                    bool found = synth.GetInstalledVoices()
-                        .Any(v => v.Enabled &&
+                    var named = synth.GetInstalledVoices()
+                        .FirstOrDefault(v => v.Enabled &&
                             string.Equals(
                                 v.VoiceInfo.Name, s.SapiVoiceName,
                                 StringComparison.OrdinalIgnoreCase));
-                    if (found)
-                        synth.SelectVoice(s.SapiVoiceName);
+                    if (named != null &&
+                        IsEnglishCultureName(named.VoiceInfo.Culture?.Name))
+                        pick = named.VoiceInfo.Name;
+                }
+
+                if (pick == null)
+                {
+                    pick = synth.GetInstalledVoices()
+                        .Where(v => v.Enabled &&
+                            IsEnglishCultureName(v.VoiceInfo.Culture?.Name))
+                        .Select(v => v.VoiceInfo.Name)
+                        .FirstOrDefault();
+                }
+
+                if (pick != null)
+                    synth.SelectVoice(pick);
+                else
+                {
+                    try
+                    {
+                        synth.SelectVoiceByHints(
+                            SapiSpeech.VoiceGender.NotSet,
+                            SapiSpeech.VoiceAge.NotSet,
+                            0,
+                            new CultureInfo(TtsForcedLanguage));
+                    }
+                    catch
+                    {
+                        // No English pack — leave engine default.
+                    }
                 }
             }
             catch (Exception ex)
@@ -9678,7 +9702,8 @@ namespace SpeakRect
             if (parts.Count == 0)
                 parts.Add(text.Trim());
 
-            string lang = string.IsNullOrWhiteSpace(culture) ? "en-US" : culture.Trim();
+            // Always force English — ignore OS / voice culture for pronunciation rules.
+            string lang = TtsForcedLanguage;
             double pitchPct = Math.Clamp((pitchMultiplier - 1.0) * 50.0, -50.0, 50.0);
             string pitchAttr = pitchPct >= 0
                 ? $"+{pitchPct:0.#}%"
@@ -9713,7 +9738,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Build SSML with a short break after each sentence for easier tracking.
-        /// Escapes XML special chars in spoken text.
+        /// Escapes XML special chars in spoken text. Always uses
+        /// <see cref="TtsForcedLanguage"/> (English) for pronunciation.
         /// </summary>
         private static string BuildSpeakSsml(string text, int breakMs, string? voiceLang = null)
         {
@@ -9727,7 +9753,9 @@ namespace SpeakRect
             if (parts.Count == 0)
                 parts.Add(text.Trim());
 
-            string lang = string.IsNullOrWhiteSpace(voiceLang) ? "en-US" : voiceLang.Trim();
+            // Ignore caller/voice culture — OCR speak path is English-only.
+            string lang = TtsForcedLanguage;
+            _ = voiceLang;
             var sb = new StringBuilder();
             sb.Append("<?xml version=\"1.0\"?>");
             sb.Append("<speak version=\"1.0\" xml:lang=\"")
@@ -9745,6 +9773,35 @@ namespace SpeakRect
             return sb.ToString();
         }
 
+        /// <summary>True when a BCP-47 / culture tag is English (en, en-US, en-GB, …).</summary>
+        private static bool IsEnglishCultureName(string? lang) =>
+            !string.IsNullOrWhiteSpace(lang) &&
+            (lang.Equals("en", StringComparison.OrdinalIgnoreCase) ||
+             lang.StartsWith("en-", StringComparison.OrdinalIgnoreCase) ||
+             lang.StartsWith("en_", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Prefer an installed English OneCore voice; fall back to system default.
+        /// Configured <see cref="AppSettings.VoiceId"/> is used only when that voice is English.
+        /// </summary>
+        private static WinSpeech.VoiceInformation ResolveEnglishWinRtVoice(string? preferredId)
+        {
+            var all = WinSpeech.SpeechSynthesizer.AllVoices;
+            if (!string.IsNullOrWhiteSpace(preferredId))
+            {
+                var named = all.FirstOrDefault(v =>
+                    string.Equals(v.Id, preferredId, StringComparison.OrdinalIgnoreCase));
+                if (named != null && IsEnglishCultureName(named.Language))
+                    return named;
+            }
+
+            var english = all.FirstOrDefault(v => IsEnglishCultureName(v.Language));
+            if (english != null)
+                return english;
+
+            return WinSpeech.SpeechSynthesizer.DefaultVoice;
+        }
+
         /// <summary>
         /// Apply <see cref="AppSettings"/> voice Id + SpeechSynthesizerOptions
         /// (rate, pitch, volume, silence) to a synthesizer instance.
@@ -9758,20 +9815,16 @@ namespace SpeakRect
 
             try
             {
-                WinSpeech.VoiceInformation? voice = null;
-                if (!string.IsNullOrWhiteSpace(s.VoiceId))
-                {
-                    voice = WinSpeech.SpeechSynthesizer.AllVoices
-                        .FirstOrDefault(v =>
-                            string.Equals(v.Id, s.VoiceId, StringComparison.OrdinalIgnoreCase));
-                }
-
-                synth.Voice = voice ?? WinSpeech.SpeechSynthesizer.DefaultVoice;
+                synth.Voice = ResolveEnglishWinRtVoice(s.VoiceId);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[SystemTTS] voice select: {ex.Message}");
-                try { synth.Voice = WinSpeech.SpeechSynthesizer.DefaultVoice; } catch { /* ignore */ }
+                try
+                {
+                    synth.Voice = ResolveEnglishWinRtVoice(null);
+                }
+                catch { /* ignore */ }
             }
 
             try
@@ -9974,8 +10027,9 @@ namespace SpeakRect
             {
                 using var synth = new WinSpeech.SpeechSynthesizer();
                 ApplyVoiceSettings(synth);
+                string ssml = BuildSpeakSsml(text, breakMs: 0, TtsForcedLanguage);
                 using var stream =
-                    await synth.SynthesizeTextToStreamAsync(text).AsTask(token);
+                    await synth.SynthesizeSsmlToStreamAsync(ssml).AsTask(token);
                 if (token.IsCancellationRequested)
                     return;
 
@@ -10047,7 +10101,9 @@ namespace SpeakRect
                     tcs.TrySetCanceled();
                 }))
                 {
-                    synth.SpeakAsync(text);
+                    string ssml = BuildSapiSpeakSsml(
+                        text, breakMs: 0, TtsForcedLanguage, AppSettings.Current.VoicePitch);
+                    synth.SpeakSsmlAsync(ssml);
                     await tcs.Task.ConfigureAwait(false);
                 }
             }
