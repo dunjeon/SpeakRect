@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
@@ -12,6 +14,7 @@ namespace SpeakRect
     /// Analytics tab (Settings): most recent OCR / speak result with pipeline images
     /// (capture, prep, detect regions, crops) and step detail.
     /// Read-only snapshot from <see cref="OcrProcessor.LastResult"/>.
+    /// Export packs the same snapshot to a zip (works in Release — no debug build needed).
     /// </summary>
     public sealed class frm_Analytics : Form
     {
@@ -19,6 +22,7 @@ namespace SpeakRect
         private readonly bool _embedded;
         private readonly Button? _btnClose;
         private readonly Button _btnRefresh;
+        private readonly Button _btnExport;
         private readonly Label _lblSummary;
         private readonly Label _lblImagesHeader;
         private readonly FlowLayoutPanel _imageFlow;
@@ -71,6 +75,11 @@ namespace SpeakRect
             _btnRefresh = MakePrimaryButton("Refresh");
             _btnRefresh.Click += (_, _) => ReloadFromSettings();
             bottom.Controls.Add(_btnRefresh);
+
+            _btnExport = MakePrimaryButton("Export…");
+            _btnExport.Click += (_, _) => ExportLastResult();
+            bottom.Controls.Add(_btnExport);
+
             if (!_embedded)
             {
                 _btnClose = MakePrimaryButton("Close");
@@ -88,6 +97,7 @@ namespace SpeakRect
             {
                 int y = Math.Max(8, (bottom.ClientSize.Height - _btnRefresh.Height) / 2);
                 _btnRefresh.Location = new Point(14, y);
+                _btnExport.Location = new Point(_btnRefresh.Right + 10, y);
                 if (_btnClose != null)
                 {
                     _btnClose.Location = new Point(
@@ -269,10 +279,13 @@ namespace SpeakRect
                 _lblStatus.Text = "No OCR run yet this session.";
                 _lblStatus.ForeColor = UiTheme.FgMuted;
                 _lblImagesHeader.Text = "PIPELINE IMAGES";
+                _btnExport.Enabled = false;
                 ClearImageGallery();
                 FillEmptyRtf();
                 return;
             }
+
+            _btnExport.Enabled = true;
 
             var b = result.CaptureBounds;
             string when = result.CompletedLocal.ToString("yyyy-MM-dd HH:mm:ss");
@@ -285,8 +298,8 @@ namespace SpeakRect
                 $"{when}  ·  {result.Shape}  ·  {size} at {origin}  ·  {outcome}" +
                 (imgCount > 0 ? $"  ·  {imgCount} image{(imgCount == 1 ? "" : "s")}" : "");
             _lblStatus.Text = result.Unreadable
-                ? "Last run produced no usable text (or was cancelled mid-plan). Double-click an image to enlarge."
-                : "Last run recorded. Double-click an image to enlarge · Refresh / F5 after the next speak.";
+                ? "Last run produced no usable text (or was cancelled mid-plan). Double-click an image to enlarge · Export… for a zip."
+                : "Last run recorded. Double-click an image to enlarge · Export… packs detail + PNGs · Refresh / F5 after the next speak.";
             _lblStatus.ForeColor = result.Unreadable
                 ? UiTheme.Warn
                 : UiTheme.Ok;
@@ -295,6 +308,226 @@ namespace SpeakRect
             FillResultRtf(result);
             _rtb.Select(0, 0);
             _rtb.ScrollToCaret();
+        }
+
+        /// <summary>
+        /// Save the in-memory last OCR snapshot as a zip (last_ocr.txt + pipeline PNGs).
+        /// Same data Analytics already holds — works in Release without a debug build.
+        /// </summary>
+        private void ExportLastResult()
+        {
+            var result = OcrProcessor.LastResult;
+            if (result == null)
+            {
+                UiMessageBox.Show(
+                    this,
+                    "No OCR run to export yet.\nSpeak a region first, then try Export again.",
+                    "Export analytics",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            string stamp = result.CompletedLocal.ToString("yyyyMMdd_HHmmss");
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Export analytics debug package",
+                Filter = "Zip archive (*.zip)|*.zip",
+                DefaultExt = "zip",
+                AddExtension = true,
+                OverwritePrompt = true,
+                FileName = $"SpeakRect-analytics-{stamp}.zip",
+            };
+
+            if (dlg.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
+            {
+                WriteAnalyticsExportZip(dlg.FileName, result);
+                _lblStatus.Text = $"Exported debug package → {dlg.FileName}";
+                _lblStatus.ForeColor = UiTheme.Ok;
+
+                // Offer to open the containing folder (Explorer selects the zip).
+                var open = UiMessageBox.Show(
+                    this,
+                    $"Saved:\n{dlg.FileName}\n\nOpen containing folder?",
+                    "Export analytics",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (open == DialogResult.Yes)
+                {
+                    try
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            Arguments = $"/select,\"{dlg.FileName}\"",
+                            UseShellExecute = true,
+                        });
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                _lblStatus.Text = "Export failed.";
+                _lblStatus.ForeColor = UiTheme.Warn;
+                UiMessageBox.Show(
+                    this,
+                    "Could not write the export zip.\n\n" + ex.Message,
+                    "Export analytics",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// Build a self-contained debug zip from <see cref="OcrLastResult"/>
+        /// (no disk dumps required — uses memory snapshot only).
+        /// </summary>
+        public static void WriteAnalyticsExportZip(string zipPath, OcrLastResult result)
+        {
+            ArgumentNullException.ThrowIfNull(result);
+            if (string.IsNullOrWhiteSpace(zipPath))
+                throw new ArgumentException("Zip path required.", nameof(zipPath));
+
+            string? dir = Path.GetDirectoryName(zipPath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            // Overwrite cleanly
+            if (File.Exists(zipPath))
+                File.Delete(zipPath);
+
+            using var fs = new FileStream(
+                zipPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+
+            // last_ocr.txt — same shape as Debug-only dump
+            {
+                var entry = zip.CreateEntry("last_ocr.txt", CompressionLevel.Optimal);
+                using var w = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                w.Write(result.SpokenText ?? "");
+                w.Write("\n\n--- detail ---\n");
+                w.Write(result.Detail ?? "");
+                if (!string.IsNullOrEmpty(result.Detail) &&
+                    !result.Detail.EndsWith('\n'))
+                    w.Write('\n');
+            }
+
+            // meta.txt — identity for support without reading binaries
+            {
+                var entry = zip.CreateEntry("meta.txt", CompressionLevel.Optimal);
+                using var w = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                w.WriteLine(FormatExportBuildStamp());
+                w.WriteLine($"when={result.CompletedLocal:yyyy-MM-dd HH:mm:ss}");
+                w.WriteLine($"shape={result.Shape}");
+                var b = result.CaptureBounds;
+                w.WriteLine(
+                    $"bounds=x={b.X},y={b.Y},w={Math.Max(0, b.Width)},h={Math.Max(0, b.Height)}");
+                w.WriteLine($"unreadable={(result.Unreadable ? "yes" : "no")}");
+                w.WriteLine($"spoken_chars={(result.SpokenText ?? "").Length}");
+                w.WriteLine($"detail_chars={(result.Detail ?? "").Length}");
+                int n = result.Images?.Count ?? 0;
+                w.WriteLine($"images={n}");
+                if (n > 0)
+                {
+                    for (int i = 0; i < result.Images!.Count; i++)
+                    {
+                        var img = result.Images[i];
+                        w.WriteLine(
+                            $"  [{i}] key={img.Key} title={img.Title} " +
+                            $"{img.Width}x{img.Height} bytes={img.PngBytes?.Length ?? 0}");
+                    }
+                }
+            }
+
+            // Pipeline PNGs (full resolution, same bytes as Analytics gallery)
+            if (result.Images != null)
+            {
+                var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < result.Images.Count; i++)
+                {
+                    var img = result.Images[i];
+                    if (img.PngBytes == null || img.PngBytes.Length == 0)
+                        continue;
+
+                    string baseName = SanitizeExportFileName(
+                        string.IsNullOrWhiteSpace(img.Key) ? img.Title : img.Key);
+                    if (string.IsNullOrEmpty(baseName))
+                        baseName = "image";
+                    string fileName = $"{i:00}_{baseName}.png";
+                    // Deduplicate if keys collide
+                    string candidate = fileName;
+                    int suffix = 2;
+                    while (!usedNames.Add(candidate))
+                    {
+                        candidate = $"{i:00}_{baseName}_{suffix}.png";
+                        suffix++;
+                    }
+
+                    var entry = zip.CreateEntry(
+                        "images/" + candidate, CompressionLevel.Optimal);
+                    using var es = entry.Open();
+                    es.Write(img.PngBytes, 0, img.PngBytes.Length);
+                }
+            }
+        }
+
+        private static string FormatExportBuildStamp()
+        {
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                var name = asm.GetName();
+                string ver =
+                    asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                        ?.InformationalVersion
+                    ?? name.Version?.ToString()
+                    ?? "?";
+                int plus = ver.IndexOf('+');
+                if (plus > 0)
+                    ver = ver[..plus];
+
+                string path = Environment.ProcessPath
+                    ?? Path.Combine(AppContext.BaseDirectory, "SpeakRect.exe");
+                string writeTime = File.Exists(path)
+                    ? File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm:ss")
+                    : "unknown";
+
+#if DEBUG
+                const string config = "Debug";
+#else
+                const string config = "Release";
+#endif
+                return $"build={name.Name ?? "SpeakRect"} {ver} {config} write={writeTime}";
+            }
+            catch
+            {
+                return "build=unknown";
+            }
+        }
+
+        private static string SanitizeExportFileName(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return "";
+            var sb = new StringBuilder(raw.Length);
+            foreach (char c in raw.Trim())
+            {
+                if (char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')
+                    sb.Append(c);
+                else if (char.IsWhiteSpace(c) || c is '/' or '\\' or ':' or '|' or '·')
+                    sb.Append('_');
+                // drop other punctuation
+            }
+            string s = sb.ToString().Trim('_');
+            while (s.Contains("__", StringComparison.Ordinal))
+                s = s.Replace("__", "_", StringComparison.Ordinal);
+            if (s.Length > 48)
+                s = s[..48].TrimEnd('_');
+            return s;
         }
 
         private void ClearImageGallery()
@@ -511,7 +744,8 @@ namespace SpeakRect
             sb.Append(@"\par\par\cf6 ");
             sb.Append(RtfEscape(
                 "Tip: press Refresh (or F5) after a speak if this window was already open. " +
-                "Double-click a thumbnail to enlarge."));
+                "Double-click a thumbnail to enlarge. Export… saves detail + pipeline PNGs as a zip " +
+                "(works in Release — no debug build required)."));
             sb.Append(@"\cf1\par }");
             _rtb.Rtf = sb.ToString();
             _rtb.Select(0, 0);

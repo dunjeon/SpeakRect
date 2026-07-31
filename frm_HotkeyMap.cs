@@ -875,7 +875,7 @@ namespace SpeakRect
                 return;
             }
 
-            if (MessageBox.Show(this,
+            if (UiMessageBox.Show(this,
                     $"Remove custom binding “{row.Label}”?",
                     "Remove custom", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                 != DialogResult.Yes)
@@ -1663,7 +1663,7 @@ namespace SpeakRect
         private void BtnReset_Click(object? sender, EventArgs e)
         {
             CancelCapture();
-            if (MessageBox.Show(this,
+            if (UiMessageBox.Show(this,
                     "Reset keyboard hotkeys to built-in defaults, clear all gamepad bindings, " +
                     "and remove all custom system actions?",
                     "Reset bindings", MessageBoxButtons.YesNo, MessageBoxIcon.Question)

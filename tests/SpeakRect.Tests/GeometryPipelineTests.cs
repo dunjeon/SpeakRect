@@ -61,6 +61,16 @@ public class GeometryPipelineTests
     }
 
     [Fact]
+    public void Expand_regions_with_crop_pad_grows_solid_box()
+    {
+        var core = new Rectangle(100, 100, 40, 40);
+        var expanded = OcrProcessor.ExpandRegionsWithCropPad(
+            new[] { core }, capW: 400, capH: 400, padPx: 16);
+        Assert.Single(expanded);
+        Assert.Equal(new Rectangle(84, 84, 72, 72), expanded[0]);
+    }
+
+    [Fact]
     public void Dead_island_drops_art_logo_token()
     {
         // cream-style single token on non-balloon fill (ModeSmoke parity)

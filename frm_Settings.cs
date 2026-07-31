@@ -745,7 +745,7 @@ namespace SpeakRect
                 SetStatus($"No saved file for “{name}”.", bad: true);
                 return;
             }
-            if (MessageBox.Show(this,
+            if (UiMessageBox.Show(this,
                     $"Delete profile “{name}” from disk?\n\nCurrent settings stay as they are.",
                     "Delete profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                 != DialogResult.Yes)
@@ -811,7 +811,7 @@ namespace SpeakRect
                 return null;
             if (!AppSettings.TryNormalizeProfileName(tb.Text, out string clean, out string? error))
             {
-                MessageBox.Show(this, error ?? "Invalid name.", "Profile",
+                UiMessageBox.Show(this, error ?? "Invalid name.", "Profile",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }

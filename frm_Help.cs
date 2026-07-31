@@ -230,7 +230,7 @@ namespace SpeakRect
             Feature(sb, "Balloons", "Settings \u2192 Balloons: tune Comic Book balloon detect + live green-box preview. Profile-backed.");
             Feature(sb, "Image", "Settings \u2192 Image: letterbox / upscale / gray / tone prep with live preview. Profile-backed.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");
-            Feature(sb, "Analytics", "Settings \u2192 Analytics shows the most recent OCR text and timings.");
+            Feature(sb, "Analytics", "Settings \u2192 Analytics shows the most recent OCR text, pipeline images, and timings. Export\u2026 packs a debug zip (works in Release).");
             sb.Append(@"\par ");
 
             // Hotkeys
@@ -347,7 +347,7 @@ namespace SpeakRect
             string? path = FindReadme();
             if (path == null)
             {
-                MessageBox.Show(this,
+                UiMessageBox.Show(this,
                     "README.md was not found next to the app.\n\n" +
                     "If you installed from a release zip, re-extract so README.md sits beside SpeakRect.exe.",
                     "Open README",
@@ -366,7 +366,7 @@ namespace SpeakRect
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Could not open README:\n" + ex.Message,
+                UiMessageBox.Show(this, "Could not open README:\n" + ex.Message,
                     "Open README", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }

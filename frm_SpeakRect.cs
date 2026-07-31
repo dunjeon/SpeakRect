@@ -282,7 +282,7 @@ namespace SpeakRect
         {
             if (!AppSettings.Current.LoadProfile(name, out string? error))
             {
-                MessageBox.Show(
+                UiMessageBox.Show(
                     error ?? "Failed to load profile.",
                     "SpeakRect — Profile",
                     MessageBoxButtons.OK,
@@ -322,7 +322,7 @@ namespace SpeakRect
 
             if (!AppSettings.Current.SaveProfile(name, out string? error))
             {
-                MessageBox.Show(
+                UiMessageBox.Show(
                     error ?? "Failed to save profile.",
                     "SpeakRect — Profile",
                     MessageBoxButtons.OK,
@@ -333,7 +333,7 @@ namespace SpeakRect
             if (_settingsForm is { IsDisposed: false })
                 _settingsForm.ReloadFromSettings();
 
-            MessageBox.Show(
+            UiMessageBox.Show(
                 $"Saved profile “{AppSettings.Current.ActiveProfileName}”.",
                 "SpeakRect — Profile",
                 MessageBoxButtons.OK,
@@ -394,7 +394,7 @@ namespace SpeakRect
 
             if (!AppSettings.TryNormalizeProfileName(tb.Text, out string clean, out string? error))
             {
-                MessageBox.Show(error ?? "Invalid name.", "SpeakRect — Profile",
+                UiMessageBox.Show(error ?? "Invalid name.", "SpeakRect — Profile",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }

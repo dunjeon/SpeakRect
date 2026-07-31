@@ -500,7 +500,7 @@ namespace SpeakRect
             }
 
             string hotkey = FormatHotkey(s.HotkeyRegions[i]);
-            if (MessageBox.Show(this,
+            if (UiMessageBox.Show(this,
                     $"Clear region slot R{i + 1} ({hotkey})?\n\nThe saved capture area will be removed. You can draw it again on the overlay.",
                     "Clear region",
                     MessageBoxButtons.YesNo,

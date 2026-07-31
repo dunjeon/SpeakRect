@@ -233,25 +233,13 @@ namespace SpeakRect
                 return;
             }
 
-            int pad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
+            // Stored regions already include grow + crop pad (baked at Preview seed).
+            // Solid green = exact Speak crop; Speak uses ForcedCropPadPx=0 with overrides.
             for (int i = 0; i < _regions.Count; i++)
             {
                 bool sel = i == _selected;
                 var core = _regions[i];
                 var coreClient = PipeToClient(core, disp);
-                var padPipe = Rectangle.Inflate(core, pad, pad);
-                padPipe = ClampToImage(padPipe);
-                var padClient = PipeToClient(padPipe, disp);
-
-                // Dashed crop-pad outline (what crop stack roughly uses)
-                if (pad > 0 && (padPipe.Width > core.Width || padPipe.Height > core.Height))
-                {
-                    using var dash = new Pen(Color.FromArgb(120, 80, 200, 80), 1f)
-                    {
-                        DashStyle = DashStyle.Dash,
-                    };
-                    g.DrawRectangle(dash, padClient);
-                }
 
                 Color box = sel ? UiTheme.AccentHot : Color.FromArgb(220, 50, 220, 50);
                 using (var pen = new Pen(box, sel ? 2.5f : 1.8f))

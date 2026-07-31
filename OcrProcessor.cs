@@ -678,12 +678,20 @@ namespace SpeakRect
         private const int SentenceBreakMs = 450;
 
         /// <summary>
+        /// When set, overrides <see cref="AppSettings.ComicRegionPadding"/> for crops.
+        /// Balloons seeds solid boxes with crop pad already baked in; Speak then uses
+        /// <c>0</c> on that override so pad is not applied a second time.
+        /// Live Comic Book (no override) leaves this null and uses settings pad.
+        /// </summary>
+        private static int? ForcedCropPadPx { get; set; }
+
+        /// <summary>
         /// Base padding around each island before cropping. Further clamped so
         /// padding does not expand into neighboring islands.
-        /// From <see cref="AppSettings.ComicRegionPadding"/>.
+        /// From <see cref="AppSettings.ComicRegionPadding"/> unless forced.
         /// </summary>
         private static int TextRegionPadding =>
-            AppSettings.Current.ComicRegionPadding;
+            ForcedCropPadPx ?? AppSettings.Current.ComicRegionPadding;
 
         /// <summary>
         /// Hard cap on regions/crops per snap (sanity bound only).
@@ -1403,7 +1411,7 @@ namespace SpeakRect
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
             bool useOverride = regionOverride != null && regionOverride.Count > 0;
             if (useOverride)
-                detail.AppendLine($"region-override={regionOverride!.Count} (skip WinOCR detect)");
+                detail.AppendLine($"region-override={regionOverride!.Count} (skip WinOCR detect; crop-pad baked into boxes)");
 
             ImagePrepStages? prepStages = null;
             Bitmap? fogOwned = null;
@@ -1411,6 +1419,10 @@ namespace SpeakRect
             var pipeTimer = new PipelineTimer();
             var totalSw = Stopwatch.StartNew();
             bool ducked = false;
+
+            // Balloons solid boxes already include crop pad — do not pad again.
+            if (useOverride)
+                ForcedCropPadPx = 0;
 
             try
             {
@@ -1507,10 +1519,21 @@ namespace SpeakRect
                         $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
                 }
 
-                // Same green boxes as Settings → Balloons detect preview (grow + crop pad).
-                var speakOverlayBoxes = ExpandRegionsByCropPad(
-                    regions, pipeW, pipeH, TextRegionPadding);
-                overlay = BuildRegionsOverlayBitmap(toneOwned, speakOverlayBoxes);
+                // Same green boxes as Settings → Balloons: grow cores + settings crop pad
+                // on detect view (fog when on). Use settings pad even when ForcedCropPadPx=0
+                // so the returned overlay / Analytics match what the user tuned.
+                int overlayPad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
+                // Override boxes from Balloons already include pad — do not expand again.
+                var speakOverlayBoxes = useOverride
+                    ? regions
+                    : ExpandRegionsByCropPad(regions, pipeW, pipeH, overlayPad);
+                overlay = BuildRegionsOverlayBitmap(detectImage, speakOverlayBoxes);
+                // Publish for Analytics when speaking from Balloons / still image
+                try
+                {
+                    CaptureAnalyticsImage("regions", "Detect regions", overlay);
+                }
+                catch { /* ignore */ }
 
                 var spokenParts = new List<string>();
                 string chosenTag;
@@ -1677,6 +1700,7 @@ namespace SpeakRect
             }
             finally
             {
+                ForcedCropPadPx = null;
                 if (ducked)
                     RestoreAudio();
                 prepStages?.Dispose();
@@ -2294,8 +2318,9 @@ namespace SpeakRect
                                     .ConfigureAwait(false);
                             token.ThrowIfCancellationRequested();
 
-                            // Overlay on OCR source so green boxes match what crops see
-                            SaveRegionDebugOverlay(ocrImage, regions);
+                            // Same boxes as Balloons preview: post-grow cores + crop pad
+                            // on the detect view (fog when on). Crops still use clear tone.
+                            SaveRegionDebugOverlay(detectImage, regions);
                             pipeTimer.Mark("winocr-detect+regions+overlay", sw);
                             winOcrRegions = regions;
 
@@ -8416,13 +8441,24 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Numbered green boxes on the OCR source — always for Analytics; disk when Debug heavy.
+        /// Numbered green boxes for Analytics / last_regions.png.
+        /// Boxes match Balloons preview: post-grow cores expanded by live Crop pad
+        /// (neighbor-clamped). Base should be detect view (fog when on).
         /// </summary>
         private void SaveRegionDebugOverlay(Bitmap capture, List<DetectedTextRegion> regions)
         {
             try
             {
-                using var overlay = BuildRegionsOverlayBitmap(capture, regions);
+                if (capture == null || regions == null)
+                    return;
+
+                // Always use settings pad (not ForcedCropPadPx) so Analytics shows the
+                // same solid crop boxes as Balloons even when Speak overrides pad to 0.
+                int pad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
+                var boxes = ExpandRegionsByCropPad(
+                    regions, capture.Width, capture.Height, pad);
+
+                using var overlay = BuildRegionsOverlayBitmap(capture, boxes);
                 CaptureAnalyticsImage("regions", "Detect regions", overlay);
                 if (ActiveHeavyDebugImages)
                 {
@@ -9155,6 +9191,37 @@ namespace SpeakRect
                 .Select(r => r.Bounds)
                 .ToList();
         }
+
+        /// <summary>
+        /// Expand post-grow cores by Crop pad (neighbor-clamped) — same rect Speak
+        /// crops. Balloons seeds solid green boxes with this so the preview is the snap.
+        /// </summary>
+        public static List<Rectangle> ExpandRegionsWithCropPad(
+            IEnumerable<Rectangle> cores,
+            int capW,
+            int capH,
+            int? padPx = null)
+        {
+            var regions = (cores ?? Array.Empty<Rectangle>())
+                .Select(b => new DetectedTextRegion { Bounds = b, WinOcrText = "" })
+                .ToList();
+            int pad = Math.Max(0, padPx ?? AppSettings.Current.ComicRegionPadding);
+            return ExpandRegionsByCropPad(regions, capW, capH, pad)
+                .Select(r => r.Bounds)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Same crop rectangle Local-LLM uses for one island: core + Crop pad,
+        /// neighbor-clamped (does not invade other cores).
+        /// </summary>
+        public static Rectangle ComputeSpeakCropRect(
+            Rectangle core,
+            int padPx,
+            int capW,
+            int capH,
+            IReadOnlyList<Rectangle>? neighborCores)
+            => ComputeClampedCropRect(core, padPx, capW, capH, neighborCores);
 
         /// <summary>
         /// Smoke helper: bitmap live OCR would read (no fog) — same prep for

@@ -23,7 +23,7 @@ namespace SpeakRect
             if (!isNewInstance)
             {
                 // Another instance is already running
-                MessageBox.Show(
+                UiMessageBox.Show(
                     "SpeakRect is already running.\n\n" +
                     "Check the system tray (notification area) for the existing instance.",
                     "SpeakRect - Already Running",

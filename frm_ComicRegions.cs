@@ -89,6 +89,13 @@ namespace SpeakRect
         /// </summary>
         private bool _detectViewOnly;
 
+        /// <summary>
+        /// Detect-knob signature baked into the current refine seed (grow, pad, cluster, …).
+        /// When this drifts and boxes are not user-edited, Speak re-detects so solid
+        /// green boxes match the knobs.
+        /// </summary>
+        private string _seededDetectSig = "";
+
         // Track scales (integer) ↔ real values
         // Fog amount: 0..100 → 0.00..1.00
         // Cluster: 25..300 → 0.25..3.00
@@ -264,10 +271,9 @@ namespace SpeakRect
             AddRow(MakeLabel("Crop pad"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
             // Extra row height leaves a clear gap before section 4.
             AddFull(MakeHint(
-                "Grow X/Y expand boxes by a fraction of their size. Crop pad adds fixed pixels " +
-                "(same pad used for OCR crops; pad stops at neighbor islands). " +
-                "Green boxes show grow + crop pad."),
-                60);
+                "Grow X/Y and Crop pad resize the solid green boxes (what Speak crops). " +
+                "Pad stops at neighbor islands. Live preview updates the boxes."),
+                48);
 
             // 4) Merge overlapping (default on)
             AddFull(MakeSection("4 · MERGE OVERLAPPING ISLANDS"), 20);
@@ -755,18 +761,65 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Regions to pass into Speak: surface list when user has overridden, else session.
+        /// Regions Speak should crop (pipeline coords). Prefer the boxes currently
+        /// on the preview surface so Speak matches the solid/dashed outlines.
+        /// Falls back to a session override for this capture only.
         /// </summary>
         private List<Rectangle>? GetActiveOverrideRegions()
         {
             PersistRefineSession();
-            if (_refine.HasUserOverride)
+            // Always speak the on-screen list when we have islands — Preview already
+            // ran detect with current knobs (or the user edited the boxes).
+            // Crop pad is applied later at crop time from live AppSettings.
+            if (_refine.RegionCount > 0)
                 return _refine.Regions.ToList();
             // Only the override bound to this capture — never a stale other-page session.
             if (ComicRegionOverrideSession.TryGet(
                     CurrentCaptureId(), out var fromSession, out _, out _, out _))
                 return fromSession;
             return null;
+        }
+
+        /// <summary>
+        /// Settings that change solid green box size (grow, crop pad, cluster, …).
+        /// </summary>
+        private static string BuildDetectSettingsSignature()
+        {
+            var s = AppSettings.Current;
+            s.NormalizeComicRegionSettings();
+            s.NormalizeImagePrepSettings();
+            var inv = CultureInfo.InvariantCulture;
+            return string.Join('|',
+                s.ComicDetectFog ? "1" : "0",
+                s.ComicDetectFogAmount.ToString("0.###", inv),
+                s.ComicClusterGapX.ToString("0.###", inv),
+                s.ComicClusterGapY.ToString("0.###", inv),
+                s.ComicInflateFracX.ToString("0.###", inv),
+                s.ComicInflateFracY.ToString("0.###", inv),
+                s.ComicRegionPadding.ToString(inv),
+                s.ComicDenseIslandCount.ToString(inv),
+                s.ComicMergeOverlappingIslands ? "1" : "0",
+                s.ComicSplitLargeRegions ? "1" : "0",
+                s.ComicOrphanRecoverPasses.ToString(inv),
+                s.ComicMinIslandAlnum.ToString(inv),
+                DevCaptureCache.PrepSettingsSignature());
+        }
+
+        private void MarkSeedMatchesLiveDetectSettings()
+        {
+            _seededDetectSig = BuildDetectSettingsSignature();
+        }
+
+        /// <summary>
+        /// True when grow / cluster / merge / prep etc. changed since the last seed
+        /// and the user has not locked geometry by editing boxes.
+        /// </summary>
+        private bool DetectKnobsChangedSinceSeed()
+        {
+            if (string.IsNullOrEmpty(_seededDetectSig))
+                return true;
+            return !string.Equals(
+                _seededDetectSig, BuildDetectSettingsSignature(), StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -1052,7 +1105,7 @@ namespace SpeakRect
                 $"Source: {_sourceLabel}  ·  {n} region" +
                 (n == 1 ? "" : "s") +
                 dirty + selTxt +
-                "  ·  solid = core  ·  dashed = crop pad";
+                "  ·  solid = Speak crop (grow + pad baked in)";
             _lblPreviewStatus.ForeColor = HasLockedRefine ? UiTheme.Warn
                 : (n > 0 ? UiTheme.Ok : UiTheme.FgMuted);
             UpdateRefineButtons();
@@ -1414,6 +1467,7 @@ namespace SpeakRect
             {
                 // Fresh source — empty boxes until Preview seeds OCR.
                 _refine.SetSeed((Bitmap)bmp.Clone(), Array.Empty<Rectangle>());
+                _seededDetectSig = "";
                 _lblPreviewStatus.Text =
                     $"Source: {_sourceLabel}  ·  {bmp.Width}×{bmp.Height}  ·  Preview to seed OCR boxes";
                 _lblPreviewStatus.ForeColor = UiTheme.FgMuted;
@@ -1589,18 +1643,30 @@ namespace SpeakRect
 
                 Bitmap? baseImg = result.BaseImage;
                 result.BaseImage = null;
-                // Enforce Western reading order on seed numbers (L→R, top→bottom).
-                // Detect already sorts; re-apply so refine badges always match speak order.
+                // Enforce Western reading order. Bake Grow (in detect) + Crop pad into
+                // solid green boxes so preview size == Speak crop. Speak uses pad=0
+                // with these overrides so pad is not applied twice.
                 var cores = OcrProcessor.SmokeSortComicReadingOrder(
                     result.Regions ?? Array.Empty<Rectangle>());
+                int pipeW = result.PipelineWidth > 0
+                    ? result.PipelineWidth
+                    : (baseImg?.Width ?? _sourceImage?.Width ?? 1);
+                int pipeH = result.PipelineHeight > 0
+                    ? result.PipelineHeight
+                    : (baseImg?.Height ?? _sourceImage?.Height ?? 1);
+                var speakBoxes = OcrProcessor.ExpandRegionsWithCropPad(
+                    cores, pipeW, pipeH, AppSettings.Current.ComicRegionPadding);
                 try { result.Overlay?.Dispose(); } catch { /* ignore */ }
                 result.Overlay = null;
                 result.Dispose();
 
                 if (baseImg != null)
-                    _refine.SetSeed(baseImg, cores);
+                    _refine.SetSeed(baseImg, speakBoxes);
                 else if (_sourceImage != null)
-                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), cores);
+                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), speakBoxes);
+
+                // Preview boxes now match live detect knobs (grow/cluster/pad/…)
+                MarkSeedMatchesLiveDetectSettings();
 
                 _txtDetail.Text = UiTheme.SanitizeUiEngineNames(detailText);
                 UpdateRefineStatus();
@@ -1650,6 +1716,21 @@ namespace SpeakRect
             Persist(writeDiskNow: true);
             // Stop live timer + any detect
             try { _liveTimer.Stop(); } catch { /* ignore */ }
+
+            // Grow / crop pad / cluster change solid box size. Re-detect first when
+            // knobs moved and boxes are not user-locked so Speak matches the preview.
+            if (_refine.RegionCount > 0 &&
+                !_refine.HasUserOverride &&
+                DetectKnobsChangedSinceSeed())
+            {
+                _lblStatus.Text = "Box settings changed — re-detecting before Speak…";
+                _lblStatus.ForeColor = UiTheme.Warn;
+                await RunPreviewAsync(fromLive: false, forceRedetect: true)
+                    .ConfigureAwait(true);
+                if (IsDisposed)
+                    return;
+            }
+
             var token = BeginWorkToken();
             int gen = ++_liveGeneration;
 
@@ -1674,7 +1755,7 @@ namespace SpeakRect
                     return;
                 }
 
-                // Prefer user refine / session override; else auto OCR detect inside speak.
+                // Prefer on-screen refine boxes (same solid cores + live crop pad).
                 List<Rectangle>? overrideRegions = GetActiveOverrideRegions();
                 if (overrideRegions != null && overrideRegions.Count == 0)
                     overrideRegions = null;
@@ -1685,7 +1766,9 @@ namespace SpeakRect
 
                 Debug.WriteLine(
                     $"[Balloons] Speak override={(overrideRegions == null ? "none" : overrideRegions.Count.ToString())} " +
-                    $"dirty={_refine.IsDirty} session={ComicRegionOverrideSession.IsActive}");
+                    $"dirty={_refine.IsDirty} session={ComicRegionOverrideSession.IsActive} " +
+                    $"pad={AppSettings.Current.ComicRegionPadding} " +
+                    $"grow={AppSettings.Current.ComicInflateFracX:0.##}/{AppSettings.Current.ComicInflateFracY:0.##}");
 
                 ComicRegionSpeakResult result;
                 try

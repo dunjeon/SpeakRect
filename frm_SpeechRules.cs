@@ -1053,7 +1053,7 @@ namespace SpeakRect
             }
             if (r.IsBuiltIn)
             {
-                var dr = MessageBox.Show(GetModalOwner(),
+                var dr = UiMessageBox.Show(GetModalOwner(),
                     $"“{r.Name}” is a built-in rule.\n\n" +
                     "Delete removes it from this profile. It stays gone across restarts " +
                     "until you use Reset all (or Reset this on a restored copy).\n\nDelete anyway?",
@@ -1154,7 +1154,7 @@ namespace SpeakRect
 
         private void ResetAllTextRules()
         {
-            var dr = MessageBox.Show(GetModalOwner(),
+            var dr = UiMessageBox.Show(GetModalOwner(),
                 "Reset ALL pipeline text rules to SpeakRect built-ins?\n\n" +
                 "Custom rules will be removed. Name rules and prompts are not changed.",
                 "Reset text rules",
@@ -1289,7 +1289,7 @@ namespace SpeakRect
 
         private void ResetAllPrompts()
         {
-            var dr = MessageBox.Show(GetModalOwner(),
+            var dr = UiMessageBox.Show(GetModalOwner(),
                 "Reset ALL OCR prompts to SpeakRect built-in defaults?",
                 "Reset prompts",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -1578,7 +1578,7 @@ namespace SpeakRect
                 {
                     if (!TryBuild(out _, out string? err))
                     {
-                        MessageBox.Show(this, err ?? "Invalid rule.", Text,
+                        UiMessageBox.Show(this, err ?? "Invalid rule.", Text,
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -1767,7 +1767,7 @@ namespace SpeakRect
                 {
                     if (!TryBuild(out _, out string? err))
                     {
-                        MessageBox.Show(this, err ?? "Invalid rule.", Text,
+                        UiMessageBox.Show(this, err ?? "Invalid rule.", Text,
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
