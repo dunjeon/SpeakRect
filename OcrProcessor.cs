@@ -499,41 +499,36 @@ namespace SpeakRect
             AppSettings.Current.ResolveRecoveryPrompt();
 
         /// <summary>
-        /// Full-frame path only: scale + unsharp before Kobold.
-        /// Off by default - crops use crop scale/sharpen instead.
+        /// Full-frame path only: extra scale + unsharp before Kobold.
+        /// Off — live Image prep (letterbox/upscale/gray/tone) already did this.
         /// </summary>
         private static readonly bool EnableFullFrameScaleAndSharpen = false;
 
         /// <summary>
-        /// Region crops only: upscale into a modest box + unsharp.
+        /// Region crops only: second-pass upscale + unsharp after the cut.
+        /// Off — crops are plain snaps of the fully prepped tone image; Image prep
+        /// already upscaled the panel and applied tone/sharpen. Re-doing it here
+        /// double-processed lettering.
         /// </summary>
-        private static readonly bool EnableCropScaleAndSharpen = true;
+        private static readonly bool EnableCropScaleAndSharpen = false;
 
         /// <summary>Full-frame fit box (only if <see cref="EnableFullFrameScaleAndSharpen"/>).</summary>
         private const int OcrTargetWidth = 1280;
         private const int OcrTargetHeight = 720;
 
         /// <summary>
-        /// Per-crop fallback fit box (aspect preserved). Match crop-stack strip
-        /// width — balloon lettering lives here, not on the full-panel upscale.
+        /// Legacy per-crop fit box (only if <see cref="EnableCropScaleAndSharpen"/>).
         /// </summary>
         private const int CropTargetWidth = 1536;
         private const int CropTargetHeight = 1536;
 
         /// <summary>
-        /// Cap crop upscale so small islands can still reach stack/crop letter size
-        /// (tight selection ~2–8×). Lanczos progressive handles comic ink.
+        /// Legacy cap on crop second-pass upscale (only if
+        /// <see cref="EnableCropScaleAndSharpen"/>).
         /// </summary>
         private const double MaxCropUpscale = 8.0;
 
-        /// <summary>
-        /// ComicBook crop-stack: balloons cropped in reading order, scaled to this
-        /// width, stacked top→bottom, one Kobold call. Primary accuracy path —
-        /// panel long-edge can stay modest (1920).
-        /// </summary>
-        private const int CropStackStripWidth = 1536;
-
-        /// <summary>White gap between stacked balloon strips (px at strip scale).</summary>
+        /// <summary>White gap between stacked balloon strips (px at crop scale).</summary>
         private const int CropStackGapPx = 48;
 
         /// <summary>Hard cap on stack height after composition (then scale down).</summary>
@@ -544,8 +539,8 @@ namespace SpeakRect
         private const int SharpenPasses = 2;
 
         /// <summary>
-        /// Unsharp for crops after upscale only (pipeline tone already sharpens once).
-        /// Stronger than full-frame - crops are what we speak; need hard glyph edges.
+        /// Legacy crop second-pass unsharp (only if <see cref="EnableCropScaleAndSharpen"/>).
+        /// Pipeline tone already sharpens once.
         /// </summary>
         private const float CropSharpenAmount = 0.85f;
         private const int CropSharpenPasses = 1;
@@ -3256,10 +3251,10 @@ namespace SpeakRect
 
         /// <summary>
         /// ComicBook best-of: full-frame (fallback) + <b>vertical crop-stack</b>
-        /// (primary). Balloons are cropped in reading order, scaled, stacked, and
-        /// sent as one Kobold image so order is geometry and wording is crop-scale
-        /// — not full-order merge of under-read full-frame vs per-crop.
-        /// Per-region crop Kobold remains a last-resort fallback if the stack fails.
+        /// (primary). Balloons are plain snaps of the prepped tone image in reading
+        /// order, stacked, and sent as one Kobold image (no second-pass crop
+        /// upscale/tone). Per-region crop Kobold remains a last-resort fallback
+        /// if the stack fails.
         /// Used when <see cref="AppSettings.ComicSequentialRegions"/> is false.
         /// </summary>
         private async Task<(List<string> Chosen, string Tag)> RunFullAndCropsBestOfAsync(
@@ -3292,14 +3287,14 @@ namespace SpeakRect
             var fullUsable = fullParts.Where(p => !SpeechCleaner.IsUnusableOcrText(p)).ToList();
 
             // ComicBook always crop-stacks when detect found islands.
-            // Full-frame is fallback only — not a substitute for crop-scale lettering.
+            // Full-frame is fallback only — crops are snaps of the prepped tone.
 
             // --- Primary: vertical crop-stack in reading order ---
             if (regions.Count > 0)
             {
                 detail.AppendLine(
                     $"crop-stack: building strips={regions.Count} " +
-                    $"(width={CropStackStripWidth} gap={CropStackGapPx})");
+                    $"(native prep crops, gap={CropStackGapPx})");
                 sw.Restart();
                 using var stackBmp = BuildVerticalCropStack(
                     pipelineImage, regions, detail);
@@ -3326,8 +3321,8 @@ namespace SpeakRect
                         int stackWords = stackUnits.Sum(ComicRegionGeometry.CountWords);
 
                         // Trust stack unless full-frame clearly found much more
-                        // (stack under-read). Order comes from geometry; wording
-                        // from crop-scale balloons.
+                        // (stack under-read). Order from geometry; wording from
+                        // prep-native balloon crops.
                         bool fullMuchRicher =
                             fullWords >= stackWords + 8 &&
                             fullUsable.Count > 0;
@@ -3431,8 +3426,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Crop each reading-order region, scale strips to a common width, stack
-        /// top→bottom with a gap. Returns null if no usable strips.
+        /// Crop each reading-order region from the prepped pipeline image and stack
+        /// top→bottom with a gap. Strips keep native prep pixels (no second-pass
+        /// upscale/tone). Composition may scale down only to honor height/edge caps.
         /// </summary>
         private static Bitmap? BuildVerticalCropStack(
             Bitmap pipelineImage,
@@ -3463,40 +3459,12 @@ namespace SpeakRect
                         continue;
                     }
 
-                    // Scale strip to stack width (upscale only, cap MaxCropUpscale).
-                    double scale = (double)CropStackStripWidth / crop.Width;
-                    if (scale < 1.0)
-                        scale = 1.0; // never shrink balloons in the stack
-                    if (scale > MaxCropUpscale)
-                        scale = MaxCropUpscale;
-                    int tw = Math.Max(1, (int)Math.Round(crop.Width * scale));
-                    int th = Math.Max(1, (int)Math.Round(crop.Height * scale));
-
-                    Bitmap scaled;
-                    if (tw == crop.Width && th == crop.Height)
-                        scaled = (Bitmap)crop.Clone();
-                    else
-                        scaled = ScaleBitmapLanczosProgressive(crop, tw, th);
-
-                    // Light unsharp after upscale (same spirit as crop prep).
-                    if (CropSharpenPasses > 0 && CropSharpenAmount > 0.01f)
-                    {
-                        for (int p = 0; p < CropSharpenPasses; p++)
-                        {
-                            var sharp = LightUnsharp(scaled, CropSharpenAmount);
-                            if (!ReferenceEquals(sharp, scaled))
-                            {
-                                scaled.Dispose();
-                                scaled = sharp;
-                            }
-                        }
-                    }
-
+                    // Plain snap of prep — Image pipeline already upscaled + toned.
+                    var strip = (Bitmap)crop.Clone();
                     detail.AppendLine(
                         $"  crop-stack strip[{i + 1}]: " +
-                        $"{crop.Width}x{crop.Height} → {scaled.Width}x{scaled.Height} " +
-                        $"(scale={scale:F2})");
-                    strips.Add(scaled);
+                        $"{strip.Width}x{strip.Height} (native prep crop)");
+                    strips.Add(strip);
                 }
 
                 if (strips.Count == 0)
@@ -4281,7 +4249,8 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Kobold crop from the OCR pipeline image (pre-fog tone) ? prep ? recovery.
+        /// Kobold crop: plain snap of the OCR pipeline image (pre-fog tone) + recovery.
+        /// No second-pass crop upscale/tone — Image prep already did that.
         /// Primary speech text is Kobold; WinOCR text is last-resort TTS only.
         /// Region bounds come from WinOCR detect (possibly fogged); geometry matches.
         /// </summary>
@@ -4323,9 +4292,18 @@ namespace SpeakRect
                 if (crop == null)
                     return (null, "");
 
+                // Passthrough unless legacy EnableCropScaleAndSharpen is re-enabled.
                 using var prepared = PrepareCropForLocalLlmOcr(crop);
-                detail.AppendLine(
-                    $"      {tag} crop {crop.Width}x{crop.Height} ? prep {prepared.Width}x{prepared.Height}");
+                if (prepared.Width != crop.Width || prepared.Height != crop.Height)
+                {
+                    detail.AppendLine(
+                        $"      {tag} crop {crop.Width}x{crop.Height} → prep {prepared.Width}x{prepared.Height}");
+                }
+                else
+                {
+                    detail.AppendLine(
+                        $"      {tag} crop {crop.Width}x{crop.Height} (native prep snap)");
+                }
                 string cropKey = $"region_{index:D2}{(string.IsNullOrEmpty(tag) ? "" : tag)}";
                 string cropTitle = string.IsNullOrEmpty(tag)
                     ? $"Crop {index}"
@@ -8499,9 +8477,10 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Region-crop prep: upscale small bubbles into <see cref="CropTargetWidth"/>-
-        /// <see cref="CropTargetHeight"/> (capped by <see cref="MaxCropUpscale"/>),
-        /// then mild unsharp. No downscale - large crops stay as-is + light sharpen.
+        /// Region crop for Kobold: default is a plain clone of the cut from the
+        /// fully prepped tone image (no second upscale/tone — Image prep already
+        /// did letterbox/upscale/gray/tone). Optional legacy scale+unsharp when
+        /// <see cref="EnableCropScaleAndSharpen"/> is re-enabled.
         /// </summary>
         private static Bitmap PrepareCropForLocalLlmOcr(Bitmap source)
         {
