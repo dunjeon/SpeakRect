@@ -39,6 +39,12 @@ namespace SpeakRect
         /// <summary>White gap between auto-stacked POI strips (px).</summary>
         public const int StackStripGapPx = 8;
 
+        /// <summary>
+        /// Local-LLM send experiment: outer margin (px) on top/left/right/bottom of
+        /// the forced island stack before the 640 long-edge cap.
+        /// </summary>
+        public const int LlmSendStackMarginPx = 12;
+
         /// <summary>Hard cap on auto-stack canvas height before scale-down.</summary>
         public const int StackMaxHeight = 4096;
 
@@ -249,7 +255,8 @@ namespace SpeakRect
             IReadOnlyList<Rectangle> boxes,
             StringBuilder? detail = null,
             bool paintBullseyes = true,
-            int stripGapPx = StackStripGapPx)
+            int stripGapPx = StackStripGapPx,
+            int marginPx = 0)
         {
             if (source == null || boxes == null || boxes.Count == 0)
                 return null;
@@ -280,10 +287,13 @@ namespace SpeakRect
                 if (strips.Count == 0)
                     return null;
 
+                int margin = Math.Max(0, marginPx);
                 int contentW = strips.Max(s => s.Width);
-                int width = contentW;
                 int gap = Math.Max(0, stripGapPx);
-                int rawH = strips.Sum(s => s.Height) + gap * Math.Max(0, strips.Count - 1);
+                int contentH = strips.Sum(s => s.Height) + gap * Math.Max(0, strips.Count - 1);
+                // Outer margin on all four sides of the final canvas.
+                int width = contentW + margin * 2;
+                int rawH = contentH + margin * 2;
                 double fit = 1.0;
                 if (rawH > StackMaxHeight)
                     fit = (double)StackMaxHeight / rawH;
@@ -309,13 +319,16 @@ namespace SpeakRect
                     g.CompositingMode = CompositingMode.SourceOver;
                     g.SmoothingMode = SmoothingMode.AntiAlias;
 
-                    float y = 0;
+                    float m = (float)(margin * fit);
+                    float y = m;
+                    float contentDrawW = Math.Max(1f, outW - m * 2f);
                     for (int i = 0; i < strips.Count; i++)
                     {
                         var s = strips[i];
                         float dw = (float)(s.Width * fit);
                         float dh = (float)(s.Height * fit);
-                        float x = Math.Max(0, (outW - dw) * 0.5f);
+                        // Center strips in the content band (inside left/right margin).
+                        float x = m + Math.Max(0, (contentDrawW - dw) * 0.5f);
                         g.DrawImage(s, x, y, dw, dh);
 
                         // Green guide box around the strip (stroke only — text untouched).
@@ -331,7 +344,8 @@ namespace SpeakRect
 
                 detail?.AppendLine(
                     $"poi-stack composed: strips={strips.Count} {outW}x{outH} " +
-                    $"(rawH={rawH} fit={fit:F3} gap={gap} green-boxes)");
+                    $"(content={contentW}x{contentH} margin={margin}px gap={gap} " +
+                    $"fit={fit:F3} green-boxes)");
                 return canvas;
             }
             finally

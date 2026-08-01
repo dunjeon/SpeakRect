@@ -333,19 +333,24 @@ namespace SpeakRect
         public bool ComicPoiFogOutside { get; set; } = true;
 
         /// <summary>
-        /// When POI is on: if consecutive islands are farther apart than
-        /// <see cref="ComicPoiAutoStackGapPx"/>, crop them and vertical-stack
-        /// (like crop-stack) so distant balloons are not missed. 0 gap = always stack.
+        /// When POI is on: lift islands from tone, vertical-stack for Local-LLM send
+        /// (then optional long-edge cap). Preview stays on full page for editing.
+        /// Default on for Comic Book starting defaults.
         /// </summary>
         public bool ComicPoiAutoStack { get; set; } = true;
 
         /// <summary>
-        /// Gap threshold (px) for <see cref="ComicPoiAutoStack"/>. Stack when the
-        /// largest consecutive island separation exceeds this. <b>0 = always stack</b>
-        /// when 2+ islands. Default 8.
+        /// White gap (px) between stacked island strips for Local-LLM send. Default 8.
         /// </summary>
         public int ComicPoiAutoStackGapPx { get; set; } =
             ComicPoiGuide.DefaultAutoStackGapPx;
+
+        /// <summary>
+        /// Outer margin (px) on top/left/right/bottom of the Local-LLM island stack.
+        /// Default 12.
+        /// </summary>
+        public int ComicPoiAutoStackMarginPx { get; set; } =
+            ComicPoiGuide.LlmSendStackMarginPx;
 
         /// <summary>Clamp comic-region detect options to safe ranges.</summary>
         public void NormalizeComicRegionSettings()
@@ -360,7 +365,8 @@ namespace SpeakRect
             ComicOrphanRecoverPasses = Math.Clamp(ComicOrphanRecoverPasses, 0, 16);
             // 0 = disabled (keep all non-junk islands regardless of alnum count)
             ComicMinIslandAlnum = Math.Clamp(ComicMinIslandAlnum, 0, 40);
-            ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 256);
+            ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 64);
+            ComicPoiAutoStackMarginPx = Math.Clamp(ComicPoiAutoStackMarginPx, 0, 64);
         }
 
         /// <summary>Restore built-in comic balloon detect defaults.</summary>
@@ -385,6 +391,7 @@ namespace SpeakRect
             ComicPoiFogOutside = true;  // ready when user enables POI
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
             ComicBook = false;
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
@@ -396,6 +403,7 @@ namespace SpeakRect
         // -----------------------------------------------------------------------
 
         public const int DefaultImageUpscaleLongSide = 900;
+        public const int DefaultImageLlmSendMaxLongEdge = 640;
         public const float DefaultImageInkGrayWeight = 0.55f;
         public const int DefaultImageDenoiseRadius = 1;
         public const float DefaultImageDenoiseSigma = 22f;
@@ -428,6 +436,19 @@ namespace SpeakRect
 
         /// <summary>Content long-edge after letterbox (px). Typical 1280–2560.</summary>
         public int ImageUpscaleLongSide { get; set; } = DefaultImageUpscaleLongSide;
+
+        /// <summary>
+        /// After all prep (and optional island stack), downscale the Local-LLM
+        /// payload so its long edge is at most <see cref="ImageLlmSendMaxLongEdge"/>.
+        /// Default on for Default and Comic Book. Detect/boxes stay at prep size.
+        /// </summary>
+        public bool ImageLlmSendDownscale { get; set; } = true;
+
+        /// <summary>
+        /// Max long edge (px) for Local-LLM send when
+        /// <see cref="ImageLlmSendDownscale"/> is on. Default 640.
+        /// </summary>
+        public int ImageLlmSendMaxLongEdge { get; set; } = DefaultImageLlmSendMaxLongEdge;
 
         /// <summary>Ink-preserving grayscale after upscale (before tone).</summary>
         public bool ImageGrayscale { get; set; } = true;
@@ -473,6 +494,7 @@ namespace SpeakRect
             ImageLetterboxBlack = Math.Clamp(ImageLetterboxBlack, 0, 255);
             ImageLetterboxWhite = Math.Clamp(ImageLetterboxWhite, 0, 255);
             ImageUpscaleLongSide = Math.Clamp(ImageUpscaleLongSide, 640, 4096);
+            ImageLlmSendMaxLongEdge = Math.Clamp(ImageLlmSendMaxLongEdge, 256, 4096);
             ImageInkGrayWeight = Math.Clamp(ImageInkGrayWeight, 0f, 1f);
             ImageDenoiseRadius = Math.Clamp(ImageDenoiseRadius, 0, 4);
             ImageDenoiseSigma = Math.Clamp(ImageDenoiseSigma, 1f, 80f);
@@ -493,6 +515,8 @@ namespace SpeakRect
             ImageLetterboxBlack = DefaultImageLetterboxBlack;
             ImageLetterboxWhite = DefaultImageLetterboxWhite;
             ImageUpscaleLongSide = DefaultImageUpscaleLongSide;
+            ImageLlmSendDownscale = true;
+            ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
             ImageGrayscale = true;
             ImageInkGrayWeight = DefaultImageInkGrayWeight;
             ImageDenoiseRadius = DefaultImageDenoiseRadius;
@@ -1261,6 +1285,9 @@ namespace SpeakRect
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
+            ImageLlmSendDownscale = true;
+            ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
             // Detect / island pipeline stock on-state.
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
@@ -1663,6 +1690,10 @@ namespace SpeakRect
                 int.TryParse(poiGapRaw, System.Globalization.NumberStyles.Integer, inv, out int poiGap))
                 ComicPoiAutoStackGapPx = poiGap;
 
+            if (map.TryGetValue("ComicPoiAutoStackMarginPx", out string? poiMarRaw) &&
+                int.TryParse(poiMarRaw, System.Globalization.NumberStyles.Integer, inv, out int poiMar))
+                ComicPoiAutoStackMarginPx = poiMar;
+
             NormalizeComicRegionSettings();
             // After POI keys load: if file has Default mode + POI on, suspend POI
             // (same as a live mode switch — do not force Comic Book on).
@@ -1696,6 +1727,14 @@ namespace SpeakRect
             if (map.TryGetValue("ImageUpscaleLongSide", out string? up) &&
                 int.TryParse(up, System.Globalization.NumberStyles.Integer, inv, out int ups))
                 ImageUpscaleLongSide = ups;
+
+            if (map.TryGetValue("ImageLlmSendDownscale", out string? llmDownRaw) &&
+                TryParseBool(llmDownRaw, out bool llmDown))
+                ImageLlmSendDownscale = llmDown;
+
+            if (map.TryGetValue("ImageLlmSendMaxLongEdge", out string? llmEdgeRaw) &&
+                int.TryParse(llmEdgeRaw, System.Globalization.NumberStyles.Integer, inv, out int llmEdge))
+                ImageLlmSendMaxLongEdge = llmEdge;
 
             if (map.TryGetValue("ImageGrayscale", out string? grayOn) &&
                 TryParseBool(grayOn, out bool gray))
@@ -2504,8 +2543,9 @@ namespace SpeakRect
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine(";   1 island: full-page VL with boxes (± outside fog). 2+: sequential per-island OCR.");
                 sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone canvas.");
-                sb.AppendLine("; PoiAutoStack: debug stack PNG only when islands far (NOT VL input; multi is sequential).");
-                sb.AppendLine("; PoiAutoStackGapPx=8 (default). 0 = always write debug stack when 2+ islands.");
+                sb.AppendLine("; PoiAutoStack=true: for Local-LLM send, crop islands and vertical-stack");
+                sb.AppendLine(";   (preview stays on full page for editing). Gap=between strips; Margin=outer pad.");
+                sb.AppendLine("; PoiAutoStackGapPx=8 (default between islands). PoiAutoStackMarginPx=12 (outer).");
                 sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
                 sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
@@ -2526,18 +2566,23 @@ namespace SpeakRect
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStackGapPx={ComicPoiAutoStackGapPx}");
+                sb.AppendLine($"ComicPoiAutoStackMarginPx={ComicPoiAutoStackMarginPx}");
                 sb.AppendLine();
                 NormalizeImagePrepSettings();
                 sb.AppendLine("[IMAGE_PREP]");
                 sb.AppendLine("; Capture image pipeline: letterbox → scale long-edge → gray → tone (denoise+levels+sharpen).");
                 sb.AppendLine("; ImagePrepEnabled=false → raw snap (no prep). Comic Book uses full tone when on;");
                 sb.AppendLine("; Default and ComicBook share letterbox+scale+gray+tone. Detect fog is under [COMIC_REGIONS].");
+                sb.AppendLine("; LlmSendDownscale=true: after prep (+ optional island stack), cap Local-LLM payload");
+                sb.AppendLine(";   long edge at LlmSendMaxLongEdge (default 640). Detect/boxes stay at prep size.");
                 sb.AppendLine($"ImagePrepEnabled={ImagePrepEnabled.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ImageLetterbox={ImageLetterbox.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ImageLetterboxPad={ImageLetterboxPad}");
                 sb.AppendLine($"ImageLetterboxBlack={ImageLetterboxBlack}");
                 sb.AppendLine($"ImageLetterboxWhite={ImageLetterboxWhite}");
                 sb.AppendLine($"ImageUpscaleLongSide={ImageUpscaleLongSide}");
+                sb.AppendLine($"ImageLlmSendDownscale={ImageLlmSendDownscale.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ImageLlmSendMaxLongEdge={ImageLlmSendMaxLongEdge}");
                 sb.AppendLine($"ImageGrayscale={ImageGrayscale.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ImageInkGrayWeight={ImageInkGrayWeight.ToString("0.###", inv)}");
                 sb.AppendLine($"ImageDenoiseRadius={ImageDenoiseRadius}");
@@ -2754,8 +2799,9 @@ namespace SpeakRect
                 or "ComicOrphanRecoverPasses"
                 or "ComicMinIslandAlnum" or "ComicSequentialRegions"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
-                or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx"
+                or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
                 or "ImagePrepEnabled"
+                or "ImageLlmSendDownscale" or "ImageLlmSendMaxLongEdge"
                 or "ImageLetterbox" or "ImageLetterboxPad"
                 or "ImageLetterboxBlack" or "ImageLetterboxWhite"
                 or "ImageUpscaleLongSide" or "ImageGrayscale" or "ImageInkGrayWeight"

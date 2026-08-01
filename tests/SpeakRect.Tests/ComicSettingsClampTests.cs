@@ -97,6 +97,21 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Local_llm_send_scales_down_to_640_long_edge_only()
+    {
+        // Prep may be 900; Local-LLM send caps at 640. Already-small images unchanged.
+        Assert.Equal(new System.Drawing.Size(400, 300),
+            OcrProcessor.SmokeKoboldSendScaleSize(400, 300, 640));
+        Assert.Equal(new System.Drawing.Size(640, 480),
+            OcrProcessor.SmokeKoboldSendScaleSize(640, 480, 640));
+        var down = OcrProcessor.SmokeKoboldSendScaleSize(900, 600, 640);
+        Assert.Equal(640, Math.Max(down.Width, down.Height));
+        Assert.True(down.Width <= 640 && down.Height <= 640);
+        // Aspect ~ 3:2
+        Assert.InRange(down.Width / (double)down.Height, 1.4, 1.6);
+    }
+
+    [Fact]
     public void Default_mode_clean_for_speech_encodes_voice_pauses()
     {
         var s = AppSettings.Current;
@@ -199,23 +214,26 @@ public class ComicSettingsClampTests
     {
         // Product default = Default mode. First Comic Book MODE enter (no stash)
         // applies Comic Book's own starting point (POI on, etc.).
+        // Note: SetFlag saves ini — restore via full region reset so other tests
+        // are not order-dependent on leftover ComicBook/POI.
         var s = AppSettings.Current;
-        bool prevComic = s.ComicBook;
-        bool prevPoi = s.ComicPoiMarkers;
-        bool prevFog = s.ComicPoiFogOutside;
-        bool prevStack = s.ComicPoiAutoStack;
         try
         {
             s.ResetComicRegionSettingsToDefaults();
             Assert.False(s.ComicBook);
             Assert.False(s.ComicPoiMarkers);
 
-            // Same as sidebar / hotkey COMIC BOOK on.
+            // Same as sidebar / hotkey COMIC BOOK on (skips disk if we can avoid
+            // pollution — still Save inside SetFlag).
             s.SetFlag(AppSettings.FlagIndexComicBook, true);
             Assert.True(s.ComicBook);
             Assert.True(s.ComicPoiMarkers);
             Assert.True(s.ComicPoiFogOutside);
             Assert.True(s.ComicPoiAutoStack);
+            Assert.Equal(ComicPoiGuide.DefaultAutoStackGapPx, s.ComicPoiAutoStackGapPx);
+            Assert.Equal(ComicPoiGuide.LlmSendStackMarginPx, s.ComicPoiAutoStackMarginPx);
+            Assert.True(s.ImageLlmSendDownscale);
+            Assert.Equal(AppSettings.DefaultImageLlmSendMaxLongEdge, s.ImageLlmSendMaxLongEdge);
             Assert.True(s.ComicDynamicFog);
             Assert.True(s.ComicDetectFog);
             Assert.True(s.ComicMergeOverlappingIslands);
@@ -224,11 +242,8 @@ public class ComicSettingsClampTests
         }
         finally
         {
-            s.ComicBook = prevComic;
-            s.ComicPoiMarkers = prevPoi;
-            s.ComicPoiFogOutside = prevFog;
-            s.ComicPoiAutoStack = prevStack;
-            s.NormalizeModeFlags();
+            s.ResetComicRegionSettingsToDefaults();
+            s.ResetImagePrepSettingsToDefaults();
         }
     }
 

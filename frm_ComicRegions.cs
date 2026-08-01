@@ -22,6 +22,8 @@ namespace SpeakRect
         private readonly CheckBox _chkPoiAutoStack;
         private readonly TrackBar _trkPoiAutoStackGap;
         private readonly Label _lblPoiAutoStackGapVal;
+        private readonly TrackBar _trkPoiAutoStackMargin;
+        private readonly Label _lblPoiAutoStackMarginVal;
 
         private readonly CheckBox _chkFog;
         private readonly CheckBox _chkDynamicFog;
@@ -291,7 +293,7 @@ namespace SpeakRect
 
             _chkPoiAutoStack = new CheckBox
             {
-                Text = "    Auto-stack when islands are far apart",
+                Text = "    Stack islands for Local-LLM send",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -309,25 +311,36 @@ namespace SpeakRect
             AddFull(_chkPoiAutoStack, 28);
             _trkPoiAutoStackGap = MakeTrack(0, 64, ComicPoiGuide.DefaultAutoStackGapPx);
             _lblPoiAutoStackGapVal = MakeValueLabel();
-            // Live gap threshold → refresh stack preview while dragging.
             _trkPoiAutoStackGap.ValueChanged += (_, _) =>
             {
                 if (_loading)
                     return;
                 RefreshValueLabels();
                 OnFieldChanged();
-                ApplyPoiPreviewUi();
             };
             AddRow(
-                MakeLabel("    Stack if gap >"),
+                MakeLabel("    Between islands"),
                 WrapTrack(_trkPoiAutoStackGap, _lblPoiAutoStackGapVal),
                 42);
+            _trkPoiAutoStackMargin = MakeTrack(0, 64, ComicPoiGuide.LlmSendStackMarginPx);
+            _lblPoiAutoStackMarginVal = MakeValueLabel();
+            _trkPoiAutoStackMargin.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Outer margin"),
+                WrapTrack(_trkPoiAutoStackMargin, _lblPoiAutoStackMarginVal),
+                42);
             AddFull(MakeHint(
-                "Debug only: when islands are farther than this gap, Speak may save a vertical " +
-                "stack PNG for order inspection (last_poi_stack_debug). Multi-island speak is " +
-                "always sequential — that stack is never the VL input. 0 = always write debug " +
-                "stack when 2+. Default 8."),
-                56);
+                "On (default): for Speak, crop green islands from tone, stack top→bottom, " +
+                "add outer margin, then send that to Local-LLM (then Image long-edge cap if on). " +
+                "Preview stays on the full page so you can drag/add islands. Off: full-page " +
+                "guide (1 island) or sequential crops (2+). Between=8px, Margin=12px stock."),
+                64);
 
             // 1) Detect fog
             AddFull(MakeSection("1 · DETECT FOG"), 20);
@@ -768,6 +781,7 @@ namespace SpeakRect
             Next(_chkPoiFogOutside);
             Next(_chkPoiAutoStack);
             Next(_trkPoiAutoStackGap);
+            Next(_trkPoiAutoStackMargin);
             // 1) Detect fog
             Next(_chkFog);
             Next(_chkDynamicFog);
@@ -1053,6 +1067,10 @@ namespace SpeakRect
                     s.ComicPoiAutoStackGapPx,
                     _trkPoiAutoStackGap.Minimum,
                     _trkPoiAutoStackGap.Maximum);
+                _trkPoiAutoStackMargin.Value = Math.Clamp(
+                    s.ComicPoiAutoStackMarginPx,
+                    _trkPoiAutoStackMargin.Minimum,
+                    _trkPoiAutoStackMargin.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
                 _chkDynamicFog.Checked = s.ComicDynamicFog;
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
@@ -1219,6 +1237,8 @@ namespace SpeakRect
             _chkPoiAutoStack.Enabled = poiOn;
             _trkPoiAutoStackGap.Enabled = poiOn && _chkPoiAutoStack.Checked;
             _lblPoiAutoStackGapVal.Enabled = _trkPoiAutoStackGap.Enabled;
+            _trkPoiAutoStackMargin.Enabled = poiOn && _chkPoiAutoStack.Checked;
+            _lblPoiAutoStackMarginVal.Enabled = _trkPoiAutoStackMargin.Enabled;
             _chkFog.Enabled = ready;
             _chkDynamicFog.Enabled = ready && _chkFog.Checked;
             // Dyn auto-search ignores the slider — keep it off while dyn is on.
@@ -1323,6 +1343,7 @@ namespace SpeakRect
             s.ComicPoiFogOutside = _chkPoiFogOutside.Checked;
             s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
             s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
+            s.ComicPoiAutoStackMarginPx = _trkPoiAutoStackMargin.Value;
             // POI is a Comic Book attack — keep MODE row / sidebar in sync.
             // Only force Comic on when the user actually enables POI (not every Persist).
             if (s.ComicPoiMarkers && !comicWas)
@@ -1388,25 +1409,29 @@ namespace SpeakRect
             try { _onModeChanged?.Invoke(); } catch { /* host refresh */ }
         }
 
-        /// <summary>POI guide on tone (same DrawRegionGuides as live) + honest multi-island banner.</summary>
+        /// <summary>POI guide on tone (same DrawRegionGuides as live). Stack is Speak-only.</summary>
         private void ApplyPoiPreviewUi()
         {
             bool poi = _chkPoiMarkers.Checked;
             bool outside = poi && _chkPoiFogOutside.Checked;
-            bool autoStack = poi && _chkPoiAutoStack.Checked;
-            int stackGap = _trkPoiAutoStackGap.Value;
             try
             {
                 _refine.ShowPoiMarkers = poi;
                 _refine.ShowPoiOutsideFog = outside;
-                _refine.ShowPoiAutoStack = autoStack;
-                _refine.PoiAutoStackGapPx = stackGap;
+                // Never swap preview to stack canvas — user must edit islands on the page.
+                _refine.ShowPoiAutoStack = false;
+                _refine.PoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
                 _refine.Invalidate();
             }
             catch { /* ignore */ }
             if (_lblPreviewHeader != null)
             {
-                if (poi && _refine.RegionCount >= 2)
+                if (poi && _chkPoiAutoStack.Checked)
+                {
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — full page for editing  ·  Speak stacks islands for Local-LLM  ·  drag / resize / add";
+                }
+                else if (poi && _refine.RegionCount >= 2)
                 {
                     _lblPreviewHeader.Text =
                         "PREVIEW — POI island map on TONE (speak = sequential per island)  ·  drag / resize / add";
@@ -2206,9 +2231,8 @@ namespace SpeakRect
             _lblMinAlnumVal.Text = _trkMinAlnum.Value == 0
                 ? "off"
                 : _trkMinAlnum.Value.ToString(inv);
-            _lblPoiAutoStackGapVal.Text = _trkPoiAutoStackGap.Value == 0
-                ? "always"
-                : $"{_trkPoiAutoStackGap.Value}px";
+            _lblPoiAutoStackGapVal.Text = $"{_trkPoiAutoStackGap.Value}px";
+            _lblPoiAutoStackMarginVal.Text = $"{_trkPoiAutoStackMargin.Value}px";
         }
 
         private static int FogToTick(float v) =>

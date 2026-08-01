@@ -558,6 +558,14 @@ namespace SpeakRect
         private const int CropSharpenPasses = 1;
 
         /// <summary>
+        /// Active Local-LLM send long-edge cap from Image tab (or 0 if downscale off).
+        /// </summary>
+        private static int ActiveLlmSendMaxLongEdge =>
+            AppSettings.Current.ImageLlmSendDownscale
+                ? Math.Clamp(AppSettings.Current.ImageLlmSendMaxLongEdge, 256, 4096)
+                : 0;
+
+        /// <summary>
         /// Crops and other small bitmaps go to Kobold as PNG (no JPEG mush).
         /// Larger full-frames use JPEG at <see cref="KoboldFullFrameJpegQuality"/>.
         /// </summary>
@@ -2670,6 +2678,10 @@ namespace SpeakRect
                         name.StartsWith("upscale_bench_", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "upscale_benchmark.txt", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_full_prep.png", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "last_llm_send.png", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "last_llm_island_stack.png", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "last_kobold_send.png", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "last_poi_vl_input.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_stacked_column.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_winocr_detect.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_regions.png", StringComparison.OrdinalIgnoreCase) ||
@@ -2812,6 +2824,15 @@ namespace SpeakRect
                 sb.AppendLine($"  upscale long-edge={PipelineUpscaleLongSideComic}");
                 sb.AppendLine(
                     $"  tone={(EnableImagePrep ? "denoise+levels+sharpen (shared prep)" : "off (prep disabled)")}");
+                if (AppSettings.Current.ImageLlmSendDownscale)
+                {
+                    sb.AppendLine(
+                        $"  Local-LLM send long-edge≤{AppSettings.Current.ImageLlmSendMaxLongEdge}");
+                }
+                else
+                {
+                    sb.AppendLine("  Local-LLM send downscale=off");
+                }
                 sb.AppendLine("  winocr detect=off");
                 sb.AppendLine("  OCR decode=single T=0 + recovery ladder");
                 sb.AppendLine();
@@ -2846,18 +2867,25 @@ namespace SpeakRect
                         : "  poi outside-fog=off");
                 if (AppSettings.Current.ComicPoiAutoStack)
                 {
-                    int thr = AppSettings.Current.ComicPoiAutoStackGapPx;
                     sb.AppendLine(
-                        thr <= 0
-                            ? "  poi auto-stack=always (2+ islands; analytics/preview)"
-                            : $"  poi auto-stack=when gap>{thr}px (analytics/preview)");
+                        $"  poi Local-LLM stack=on " +
+                        $"(between={AppSettings.Current.ComicPoiAutoStackGapPx}px " +
+                        $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px; " +
+                        "preview stays full page)");
                 }
                 else
                 {
-                    sb.AppendLine("  poi auto-stack=off");
+                    sb.AppendLine("  poi Local-LLM stack=off (full-page or sequential speak)");
                 }
-                sb.AppendLine(
-                    "  poi multi-island=sequential per-island (same as Balloons Speak)");
+                if (AppSettings.Current.ImageLlmSendDownscale)
+                {
+                    sb.AppendLine(
+                        $"  Local-LLM send long-edge≤{AppSettings.Current.ImageLlmSendMaxLongEdge}");
+                }
+                else
+                {
+                    sb.AppendLine("  Local-LLM send downscale=off");
+                }
             }
             sb.AppendLine(
                 ActiveDecodeConsensus
@@ -3586,10 +3614,12 @@ namespace SpeakRect
             detail.AppendLine(
                 $"strategy=comic-poi (tone base; islands={boxes.Count}; " +
                 $"outsideFog={sPoi.ComicPoiFogOutside}; " +
-                $"autoStackDbg={sPoi.ComicPoiAutoStack} gapThr={sPoi.ComicPoiAutoStackGapPx})");
+                $"llmStack={sPoi.ComicPoiAutoStack} " +
+                $"gap={sPoi.ComicPoiAutoStackGapPx}px " +
+                $"margin={sPoi.ComicPoiAutoStackMarginPx}px)");
 
             // Full-page guide on TONE — same DrawRegionGuides as Balloons POI preview.
-            // Published for every island count so Analytics matches Preview.
+            // Always published for Analytics; Speak may use island stack instead.
             Bitmap? guideBmp = null;
             try
             {
@@ -3603,27 +3633,41 @@ namespace SpeakRect
                     "poi_guide",
                     fogOutside ? "POI boxes + outside fog (tone)" : "POI green boxes (tone)",
                     guideBmp);
-                SavePoiVlDebug(guideBmp, isVlInput: boxes.Count == 1);
+                // isVlInput only if we will NOT replace with stack (stack overwrites send files).
+                SavePoiVlDebug(guideBmp, isVlInput: !sPoi.ComicPoiAutoStack && boxes.Count == 1);
 
-                // Optional stack for debug/order only — never the multi-island VL input.
-                int maxGap = ComicPoiGuide.MaxConsecutiveSeparation(boxes);
-                bool wouldStack = sPoi.ComicPoiAutoStack &&
-                    ComicPoiGuide.ShouldAutoStack(boxes, sPoi.ComicPoiAutoStackGapPx, out _);
-                detail.AppendLine(
-                    $"poi-auto-stack: on={sPoi.ComicPoiAutoStack} " +
-                    $"maxConsecutiveGap={maxGap}px thr={sPoi.ComicPoiAutoStackGapPx}px " +
-                    $"→ {(wouldStack ? "debug stack only (speak is sequential)" : "off")}");
-                if (boxes.Count >= 2 && wouldStack)
+                // Local-LLM send: when Stack islands is on, always lift islands and
+                // vertical-stack for VL (preview stays on full page for editing).
+                // Gap / margin from Balloons knobs; then optional Image-tab long-edge cap.
+                if (sPoi.ComicPoiAutoStack && boxes.Count >= 1)
                 {
+                    int margin = Math.Clamp(sPoi.ComicPoiAutoStackMarginPx, 0, 64);
+                    int stripGap = Math.Clamp(sPoi.ComicPoiAutoStackGapPx, 0, 64);
+                    int sendCap = ActiveLlmSendMaxLongEdge;
+                    detail.AppendLine(
+                        $"llm-send-stack: on strips={boxes.Count} gap={stripGap}px " +
+                        $"margin={margin}px" +
+                        (sendCap > 0 ? $" then-long-edge≤{sendCap}" : " (no send downscale)"));
+                    Bitmap? stackBmp = null;
                     try
                     {
-                        using var stackBmp = ComicPoiGuide.BuildVerticalStack(
-                            toneImage, boxes, detail, paintBullseyes: false);
+                        sw.Restart();
+                        // Tone crops (clear lettering) + green boxes on strips; white margins.
+                        stackBmp = ComicPoiGuide.BuildVerticalStack(
+                            toneImage,
+                            boxes,
+                            detail,
+                            paintBullseyes: false,
+                            stripGapPx: stripGap,
+                            marginPx: margin);
+                        pipeTimer.Mark("llm-island-stack compose", sw);
                         if (stackBmp != null)
                         {
                             CaptureAnalyticsImage(
-                                "poi_stack_debug",
-                                "POI stack (debug/order only — not VL input)",
+                                "llm_island_stack",
+                                $"Local-LLM island stack {stackBmp.Width}x{stackBmp.Height} " +
+                                $"(gap={stripGap} margin={margin}" +
+                                (sendCap > 0 ? $"; then ≤{sendCap}" : "") + ")",
                                 stackBmp);
                             if (ActiveAnyDebugArtifacts)
                             {
@@ -3631,20 +3675,90 @@ namespace SpeakRect
                                 {
                                     EnsureDebugFolder();
                                     stackBmp.Save(
-                                        Path.Combine(DebugFolder, "last_poi_stack_debug.png"),
+                                        Path.Combine(DebugFolder, "last_llm_island_stack.png"),
                                         ImageFormat.Png);
                                 }
                                 catch { /* debug only */ }
+                            }
+
+                            sw.Restart();
+                            string? stackClean = await RunFullFrameKoboldOnBitmapAsync(
+                                stackBmp,
+                                detail,
+                                token,
+                                savePrep: false,
+                                promptOverride: AppSettings.Current.ResolvePoiPrompt())
+                                .ConfigureAwait(false);
+                            pipeTimer.Mark("full-frame-ocr (llm-island-stack)", sw);
+
+                            var stackParts = new List<string>();
+                            if (!SpeechCleaner.IsUnusableOcrText(stackClean))
+                            {
+                                stackParts.Add(stackClean!);
+                                detail.AppendLine(
+                                    $"winner=comic-poi-stack words=" +
+                                    $"{ComicRegionGeometry.CountWords(stackClean!)}");
+                            }
+                            else
+                            {
+                                detail.AppendLine(
+                                    "comic-poi-stack empty/unusable → fall through");
+                            }
+
+                            if (stackParts.Count > 0)
+                            {
+                                bool duckedStack = alreadyDucked;
+                                if (speakNow)
+                                {
+                                    var speakPieces =
+                                        SpeechCleaner.ExpandToSpeakPieces(stackParts);
+                                    if (speakPieces.Count > 0)
+                                    {
+                                        if (!duckedStack)
+                                        {
+                                            DuckOtherAudio();
+                                            duckedStack = true;
+                                        }
+                                        var spoken = new List<string>();
+                                        for (int pi = 0; pi < speakPieces.Count; pi++)
+                                        {
+                                            token.ThrowIfCancellationRequested();
+                                            string unit = speakPieces[pi].Text;
+                                            spoken.Add(unit);
+                                            detail.AppendLine(
+                                                $"speak[comic-poi-stack {pi + 1}/" +
+                                                $"{speakPieces.Count}]: {unit}");
+                                            sw.Restart();
+                                            await SpeakWithSystemAsync(unit, token)
+                                                .ConfigureAwait(false);
+                                            pipeTimer.Mark(
+                                                $"tts comic-poi-stack[{pi + 1}]", sw);
+                                            int pauseMs = speakPieces[pi].PauseAfterMs;
+                                            if (pauseMs > 0)
+                                            {
+                                                await Task.Delay(pauseMs, token)
+                                                    .ConfigureAwait(false);
+                                            }
+                                        }
+                                        return (spoken, "comic-poi-stack", duckedStack);
+                                    }
+                                }
+                                return (stackParts, "comic-poi-stack", duckedStack);
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        detail.AppendLine($"poi-stack debug compose: {ex.Message}");
+                        detail.AppendLine($"llm-send-stack failed: {ex.Message}");
                     }
+                    finally
+                    {
+                        try { stackBmp?.Dispose(); } catch { /* ignore */ }
+                    }
+                    // Fall through to sequential / full-page guide if stack empty.
                 }
 
-                // Multi-island: sequential OCR on tone crops (same geometry as green boxes).
+                // Multi-island (stack off or stack failed): sequential crops on tone.
                 if (boxes.Count >= 2)
                 {
                     detail.AppendLine(
@@ -3666,7 +3780,7 @@ namespace SpeakRect
                     return (seqParts, tag, seqDucked);
                 }
 
-                // Single island: VL input = guideBmp (same pixels as preview/analytics).
+                // Single island fallback: VL input = full-page guideBmp.
                 sw.Restart();
                 string? poiClean = await RunFullFrameKoboldOnBitmapAsync(
                     guideBmp,
@@ -3738,13 +3852,14 @@ namespace SpeakRect
             try
             {
                 EnsureDebugFolder();
+                // Guide at prep resolution (for box inspection). Actual Local-LLM
+                // payload is written later in ExtractTextWithLocalLlmAsync (post-640).
                 guide.Save(Path.Combine(DebugFolder, "last_poi_guide.png"), ImageFormat.Png);
                 if (isVlInput)
                 {
+                    // Placeholder until Local-LLM send overwrites with scaled payload.
                     guide.Save(
                         Path.Combine(DebugFolder, "last_poi_vl_input.png"), ImageFormat.Png);
-                    guide.Save(
-                        Path.Combine(DebugFolder, "last_full_prep.png"), ImageFormat.Png);
                 }
             }
             catch { /* debug only */ }
@@ -8610,10 +8725,11 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Encode a live pipeline bitmap for Analytics at <b>full resolution</b>
-        /// (same pixels live used). No secondary downscale — that used to make
-        /// Analytics/Preview disagree with live (e.g. 1918 snap shown as 1280).
-        /// Gallery UI thumbs are display-only; stored PNGs stay pipe-native.
+        /// Encode a live pipeline bitmap for Analytics at the size that stage used.
+        /// Prep stages stay pipe-native (no accidental re-sample). The intentional
+        /// Local-LLM send cap (640 long-edge) is a real stage — capture it under
+        /// <c>llm_send</c>, not by downscaling earlier slots.
+        /// Gallery UI thumbs are display-only; stored PNGs stay stage-native.
         /// Optionally replaces an existing entry with the same key.
         /// </summary>
         private void CaptureAnalyticsImage(string key, string title, Bitmap? source)
@@ -9588,14 +9704,65 @@ namespace SpeakRect
             int maxTokens = CropMaxTokens,
             double temperature = KoboldPrimaryTemperature)
         {
+            Bitmap? scaledOwned = null;
             try
             {
+                // Final stage: optional long-edge cap from Image tab (default 640).
+                // Prep / detect may stay at 900; only the Local-LLM payload is capped.
+                Bitmap send = bmp;
+                int maxEdge = ActiveLlmSendMaxLongEdge;
+                bool didScale = maxEdge > 0 &&
+                    Math.Max(bmp.Width, bmp.Height) > maxEdge;
+                if (didScale)
+                {
+                    scaledOwned = ScaleDownToMaxLongEdge(bmp, maxEdge);
+                    send = scaledOwned;
+                    Debug.WriteLine(
+                        $"[LocalLlm] send scale {bmp.Width}x{bmp.Height} → " +
+                        $"{send.Width}x{send.Height} (max long-edge {maxEdge})");
+                }
+
+                // Analytics + debug: exact pixels Local-LLM receives (not pre-scale tone).
+                string scaleNote = didScale
+                    ? $" (from {bmp.Width}x{bmp.Height})"
+                    : (maxEdge > 0 ? "" : " (downscale off)");
+                try
+                {
+                    CaptureAnalyticsImage(
+                        "llm_send",
+                        $"Local-LLM send {send.Width}x{send.Height}{scaleNote}",
+                        send);
+                }
+                catch { /* ignore */ }
+
+                if (ActiveAnyDebugArtifacts)
+                {
+                    try
+                    {
+                        EnsureDebugFolder();
+                        // Exact API payload (post optional cap). Overwrites POI pre-scale aliases.
+                        send.Save(
+                            Path.Combine(DebugFolder, "last_llm_send.png"),
+                            ImageFormat.Png);
+                        send.Save(
+                            Path.Combine(DebugFolder, "last_full_prep.png"),
+                            ImageFormat.Png);
+                        send.Save(
+                            Path.Combine(DebugFolder, "last_poi_vl_input.png"),
+                            ImageFormat.Png);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[LocalLlm] send debug save: {ex.Message}");
+                    }
+                }
+
                 // Crops / small images: PNG (no DCT mush on lettering).
                 // Full-frame / large: JPEG q95 (bandwidth without much quality loss).
-                bool usePng = (long)bmp.Width * bmp.Height <= KoboldPngMaxPixels;
+                bool usePng = (long)send.Width * send.Height <= KoboldPngMaxPixels;
                 string mime;
                 byte[] imageBytes;
-                using (var clone = (Bitmap)bmp.Clone())
+                using (var clone = (Bitmap)send.Clone())
                 using (var ms = new MemoryStream())
                 {
                     if (usePng)
@@ -9628,6 +9795,69 @@ namespace SpeakRect
                 Debug.WriteLine($"[LocalLlm] failed: {ex.Message}");
                 return "";
             }
+            finally
+            {
+                try { scaledOwned?.Dispose(); } catch { /* ignore */ }
+            }
+        }
+
+        /// <summary>
+        /// Downscale so the long edge is at most <paramref name="maxLongEdge"/>
+        /// (aspect preserved). No-op clone if already within limit. Caller owns result.
+        /// </summary>
+        private static Bitmap ScaleDownToMaxLongEdge(Bitmap source, int maxLongEdge)
+        {
+            int w = source.Width;
+            int h = source.Height;
+            if (w < 1 || h < 1)
+                return (Bitmap)source.Clone();
+
+            int longEdge = Math.Max(w, h);
+            if (longEdge <= maxLongEdge)
+                return (Bitmap)source.Clone();
+
+            double scale = (double)maxLongEdge / longEdge;
+            int tw = Math.Max(1, (int)Math.Round(w * scale));
+            int th = Math.Max(1, (int)Math.Round(h * scale));
+            // Guard float rounding above the cap.
+            if (Math.Max(tw, th) > maxLongEdge)
+            {
+                if (tw >= th)
+                {
+                    tw = maxLongEdge;
+                    th = Math.Max(1, (int)Math.Round(h * ((double)maxLongEdge / w)));
+                }
+                else
+                {
+                    th = maxLongEdge;
+                    tw = Math.Max(1, (int)Math.Round(w * ((double)maxLongEdge / h)));
+                }
+            }
+
+            var result = new Bitmap(tw, th, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(result))
+            {
+                g.Clear(Color.Transparent);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.DrawImage(source, new Rectangle(0, 0, tw, th));
+            }
+            return result;
+        }
+
+        /// <summary>Smoke: long-edge downscale for Local-LLM send (does not upscale).</summary>
+        public static Size SmokeKoboldSendScaleSize(int width, int height, int maxLongEdge = 640)
+        {
+            if (width < 1 || height < 1)
+                return Size.Empty;
+            int longEdge = Math.Max(width, height);
+            if (longEdge <= maxLongEdge)
+                return new Size(width, height);
+            double scale = (double)maxLongEdge / longEdge;
+            return new Size(
+                Math.Max(1, (int)Math.Round(width * scale)),
+                Math.Max(1, (int)Math.Round(height * scale)));
         }
 
         private static void SaveJpeg(Bitmap bmp, Stream stream, long quality)

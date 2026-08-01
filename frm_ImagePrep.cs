@@ -26,6 +26,10 @@ namespace SpeakRect
         private readonly TrackBar _trkUpscale;
         private readonly Label _lblUpscaleVal;
 
+        private readonly CheckBox _chkLlmSendDownscale;
+        private readonly TrackBar _trkLlmSendMaxEdge;
+        private readonly Label _lblLlmSendMaxEdgeVal;
+
         private readonly CheckBox _chkGray;
         private readonly TrackBar _trkInkWeight;
         private readonly Label _lblInkWeightVal;
@@ -229,8 +233,32 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "After letterbox, resize so the longer side equals this many pixels. " +
                 "Aspect ratio is always kept (no stretch). Not a free width×height — " +
-                "if the image is already larger, this downscales."),
+                "if the image is already larger, this downscales. Used for detect/boxes " +
+                "and the prep canvas (default 900)."),
                 52);
+
+            // Local-LLM send size (Default + Comic Book) — after prep / island stack.
+            AddFull(MakeSection("LOCAL-LLM SEND SIZE"), 20);
+            _chkLlmSendDownscale = MakeCheck("Downscale for Local-LLM send");
+            _chkLlmSendDownscale.Checked = true;
+            _chkLlmSendDownscale.CheckedChanged += (_, _) =>
+            {
+                OnFieldChanged();
+                ApplyKeyboardTabOrder();
+            };
+            AddFull(_chkLlmSendDownscale, 28);
+            _trkLlmSendMaxEdge = MakeTrack(256, 2048, AppSettings.DefaultImageLlmSendMaxLongEdge);
+            _trkLlmSendMaxEdge.TickFrequency = 64;
+            _lblLlmSendMaxEdgeVal = MakeValueLabel();
+            AddRow(
+                MakeLabel("Max long edge"),
+                WrapTrack(_trkLlmSendMaxEdge, _lblLlmSendMaxEdgeVal, valueWidth: 90),
+                42);
+            AddFull(MakeHint(
+                "On (default for Default and Comic Book): after prep (and island stack when " +
+                "Comic Book uses it), cap the Local-LLM payload long edge here (stock 640). " +
+                "Detect, green boxes, and Analytics prep stages stay at the Scale long edge."),
+                56);
 
             // Gray
             AddFull(MakeSection("INK GRAYSCALE"), 20);
@@ -452,6 +480,7 @@ namespace SpeakRect
             WireTrack(_trkLetterboxBlack);
             WireTrack(_trkLetterboxWhite);
             WireTrack(_trkUpscale);
+            WireTrack(_trkLlmSendMaxEdge);
             WireTrack(_trkInkWeight);
             WireTrack(_trkDenoiseR);
             WireTrack(_trkDenoiseSigma);
@@ -520,6 +549,8 @@ namespace SpeakRect
             Next(_trkLetterboxBlack);
             Next(_trkLetterboxWhite);
             Next(_trkUpscale);
+            Next(_chkLlmSendDownscale);
+            Next(_trkLlmSendMaxEdge);
             Next(_chkGray);
             Next(_trkInkWeight);
             Next(_trkDenoiseR);
@@ -558,6 +589,8 @@ namespace SpeakRect
                 _trkLetterboxBlack.Value = Clamp(_trkLetterboxBlack, s.ImageLetterboxBlack);
                 _trkLetterboxWhite.Value = Clamp(_trkLetterboxWhite, s.ImageLetterboxWhite);
                 _trkUpscale.Value = Clamp(_trkUpscale, s.ImageUpscaleLongSide);
+                _chkLlmSendDownscale.Checked = s.ImageLlmSendDownscale;
+                _trkLlmSendMaxEdge.Value = Clamp(_trkLlmSendMaxEdge, s.ImageLlmSendMaxLongEdge);
                 _chkGray.Checked = s.ImageGrayscale;
                 _trkInkWeight.Value = Clamp(_trkInkWeight, (int)Math.Round(s.ImageInkGrayWeight * 100));
                 _trkDenoiseR.Value = Clamp(_trkDenoiseR, s.ImageDenoiseRadius);
@@ -674,6 +707,8 @@ namespace SpeakRect
             s.ImageLetterboxBlack = _trkLetterboxBlack.Value;
             s.ImageLetterboxWhite = _trkLetterboxWhite.Value;
             s.ImageUpscaleLongSide = _trkUpscale.Value;
+            s.ImageLlmSendDownscale = _chkLlmSendDownscale.Checked;
+            s.ImageLlmSendMaxLongEdge = _trkLlmSendMaxEdge.Value;
             s.ImageGrayscale = _chkGray.Checked;
             s.ImageInkGrayWeight = _trkInkWeight.Value / 100f;
             s.ImageDenoiseRadius = _trkDenoiseR.Value;
@@ -747,6 +782,11 @@ namespace SpeakRect
             _trkLetterboxWhite.Enabled = prep && _chkLetterbox.Checked;
 
             _trkUpscale.Enabled = prep;
+
+            // Local-LLM send size is independent of prep master switch (applies to payload).
+            _chkLlmSendDownscale.Enabled = ready;
+            _trkLlmSendMaxEdge.Enabled = ready && _chkLlmSendDownscale.Checked;
+            _lblLlmSendMaxEdgeVal.Enabled = _trkLlmSendMaxEdge.Enabled;
 
             _chkGray.Enabled = prep;
             _trkInkWeight.Enabled = prep && _chkGray.Checked;
@@ -1082,6 +1122,7 @@ namespace SpeakRect
             {
                 _lblUpscaleVal.Text = $"{longEdge}px";
             }
+            _lblLlmSendMaxEdgeVal.Text = $"{_trkLlmSendMaxEdge.Value}px";
             _lblInkWeightVal.Text = (_trkInkWeight.Value / 100.0).ToString("0.00", inv);
             _lblDenoiseRVal.Text = _trkDenoiseR.Value == 0 ? "off" : _trkDenoiseR.Value.ToString(inv);
             _lblDenoiseSigmaVal.Text = _trkDenoiseSigma.Value.ToString(inv);
