@@ -147,12 +147,9 @@ public class ComicSettingsClampTests
     public void Leaving_comic_book_suspends_poi_and_restore_brings_it_back()
     {
         var s = AppSettings.Current;
-        bool prevComic = s.ComicBook;
-        bool prevPoi = s.ComicPoiMarkers;
-        bool prevFog = s.ComicPoiFogOutside;
-        bool prevStack = s.ComicPoiAutoStack;
         try
         {
+            s.ResetComicRegionSettingsToDefaults();
             s.ComicBook = true;
             s.ComicPoiMarkers = true;
             s.ComicPoiFogOutside = true;
@@ -176,11 +173,7 @@ public class ComicSettingsClampTests
         }
         finally
         {
-            s.ComicBook = prevComic;
-            s.ComicPoiMarkers = prevPoi;
-            s.ComicPoiFogOutside = prevFog;
-            s.ComicPoiAutoStack = prevStack;
-            s.NormalizeModeFlags();
+            s.ResetComicRegionSettingsToDefaults();
         }
     }
 
@@ -188,10 +181,9 @@ public class ComicSettingsClampTests
     public void Leaving_comic_book_does_not_force_comic_back_on_when_poi_was_on()
     {
         var s = AppSettings.Current;
-        bool prevComic = s.ComicBook;
-        bool prevPoi = s.ComicPoiMarkers;
         try
         {
+            s.ResetComicRegionSettingsToDefaults();
             s.ComicBook = true;
             s.ComicPoiMarkers = true;
             s.NormalizeModeFlags();
@@ -203,9 +195,7 @@ public class ComicSettingsClampTests
         }
         finally
         {
-            s.ComicBook = prevComic;
-            s.ComicPoiMarkers = prevPoi;
-            s.NormalizeModeFlags();
+            s.ResetComicRegionSettingsToDefaults();
         }
     }
 
@@ -253,8 +243,6 @@ public class ComicSettingsClampTests
         // Ini/profile load sets ComicBook=true, POI=false — NormalizeModeFlags
         // must not force Comic starting defaults (only SetFlag enter does that).
         var s = AppSettings.Current;
-        bool prevComic = s.ComicBook;
-        bool prevPoi = s.ComicPoiMarkers;
         try
         {
             s.ResetComicRegionSettingsToDefaults();
@@ -266,9 +254,7 @@ public class ComicSettingsClampTests
         }
         finally
         {
-            s.ComicBook = prevComic;
-            s.ComicPoiMarkers = prevPoi;
-            s.NormalizeModeFlags();
+            s.ResetComicRegionSettingsToDefaults();
         }
     }
 }
