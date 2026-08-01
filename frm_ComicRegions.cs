@@ -24,6 +24,10 @@ namespace SpeakRect
         private readonly Label _lblPoiAutoStackGapVal;
         private readonly TrackBar _trkPoiAutoStackMargin;
         private readonly Label _lblPoiAutoStackMarginVal;
+        private readonly TrackBar _trkPoiStackBeef;
+        private readonly Label _lblPoiStackBeefVal;
+        private readonly TrackBar _trkPoiStackBottomPad;
+        private readonly Label _lblPoiStackBottomPadVal;
 
         private readonly CheckBox _chkFog;
         private readonly CheckBox _chkDynamicFog;
@@ -262,9 +266,9 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "On: switches to Comic Book mode (sidebar MODE updates). OCR finds text islands, " +
                 "draws bright green boxes on the gray prep (same as this preview), optional fog " +
-                "outside them. Multi-island Speak reads each island in order. " +
-                "Edit the POI prompt under Speech → Prompts. " +
-                "Grow / crop pad size the islands."),
+                "outside them. Speak: with Stack on (stock) → orange island stack to Local-LLM; " +
+                "Stack off/fail multi → §9 Sequential or crop-stack; 1 island → full-page guide. " +
+                "Edit the POI prompt under Speech → Prompts. Grow / crop pad size the islands."),
                 72);
 
             _chkPoiFogOutside = new CheckBox
@@ -335,12 +339,44 @@ namespace SpeakRect
                 MakeLabel("    Outer margin"),
                 WrapTrack(_trkPoiAutoStackMargin, _lblPoiAutoStackMarginVal),
                 42);
+            // A/B: canvas beef (+% size) and vertical pad bias (bottom-heavy vs center).
+            int defaultBeefPct = (int)Math.Round(
+                ComicPoiGuide.DefaultStackBeefExtra * 100.0);
+            _trkPoiStackBeef = MakeTrack(0, 100, defaultBeefPct);
+            _lblPoiStackBeefVal = MakeValueLabel();
+            _trkPoiStackBeef.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Canvas beef (+%)"),
+                WrapTrack(_trkPoiStackBeef, _lblPoiStackBeefVal),
+                42);
+            int defaultBotPct = (int)Math.Round(
+                ComicPoiGuide.DefaultStackBottomPadShare * 100.0);
+            _trkPoiStackBottomPad = MakeTrack(0, 100, defaultBotPct);
+            _lblPoiStackBottomPadVal = MakeValueLabel();
+            _trkPoiStackBottomPad.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Bottom pad share"),
+                WrapTrack(_trkPoiStackBottomPad, _lblPoiStackBottomPadVal),
+                42);
             AddFull(MakeHint(
-                "On (default): for Speak, crop green islands from tone, stack top→bottom, " +
-                "add outer margin, then send that to Local-LLM (then Image long-edge cap if on). " +
-                "Preview stays on the full page so you can drag/add islands. Off: full-page " +
-                "guide (1 island) or sequential crops (2+). Between=8px, Margin=12px stock."),
-                64);
+                "On (default): Speak crops green islands, stacks on orange canvas (beef knobs), " +
+                "sends that image to Local-LLM (primary VL path). Preview stays full page for edit. " +
+                "Same canvas rules apply to non-POI crop-stack and to POI multi when Stack fails " +
+                "and §9 is off. Stock beef +67%, bottom pad 50%. Between=8px, Margin=12px. " +
+                "Compose hard-caps stack long edge at 2560; Image-tab downscale is separate (off)."),
+                72);
 
             // 1) Detect fog
             AddFull(MakeSection("1 · DETECT FOG"), 20);
@@ -488,15 +524,15 @@ namespace SpeakRect
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
                 AutoSize = false,
-                Checked = true,
+                Checked = false,
             };
             _chkSequential.CheckedChanged += (_, _) => OnFieldChanged();
             AddFull(_chkSequential, 28);
             AddFull(MakeHint(
-                "On (default): crop one balloon → speak it → wait for TTS → next. " +
-                "Short replies like \"Really?\" stay spoken even if that word appeared earlier. " +
-                "Off: one vertical crop-stack OCR for the page, then a global speak plan " +
-                "(faster on busy pages; uses speak-dedupe across balloons)."),
+                "Off (default): crop-stack (one stacked OCR + global speak plan) when not using " +
+                "POI AutoStack. On: OCR+speak each balloon alone (isolates short replies like " +
+                "\"Really?\" from global speak-dedupe). Under POI: used when AutoStack is off " +
+                "or the stack VL fails on multi-island pages."),
                 56);
 
             scroll.Controls.Add(body);
@@ -782,6 +818,8 @@ namespace SpeakRect
             Next(_chkPoiAutoStack);
             Next(_trkPoiAutoStackGap);
             Next(_trkPoiAutoStackMargin);
+            Next(_trkPoiStackBeef);
+            Next(_trkPoiStackBottomPad);
             // 1) Detect fog
             Next(_chkFog);
             Next(_chkDynamicFog);
@@ -1071,6 +1109,14 @@ namespace SpeakRect
                     s.ComicPoiAutoStackMarginPx,
                     _trkPoiAutoStackMargin.Minimum,
                     _trkPoiAutoStackMargin.Maximum);
+                _trkPoiStackBeef.Value = Math.Clamp(
+                    (int)Math.Round(s.ComicPoiStackBeefExtra * 100.0),
+                    _trkPoiStackBeef.Minimum,
+                    _trkPoiStackBeef.Maximum);
+                _trkPoiStackBottomPad.Value = Math.Clamp(
+                    (int)Math.Round(s.ComicPoiStackBottomPadShare * 100.0),
+                    _trkPoiStackBottomPad.Minimum,
+                    _trkPoiStackBottomPad.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
                 _chkDynamicFog.Checked = s.ComicDynamicFog;
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
@@ -1228,17 +1274,22 @@ namespace SpeakRect
         private void ApplyControlsEnabled()
         {
             bool ready = HasSource && !_speakBusy;
-            // Sequential = per-balloon crop speak path only (not used by POI full-frame).
-            bool sequentialOk = ready && !_chkPoiMarkers.Checked;
+            // §9 Sequential: non-POI speak path, and POI multi fallback when stack off/fail.
+            bool sequentialOk = ready;
 
             bool poiOn = ready && _chkPoiMarkers.Checked;
             _chkPoiMarkers.Enabled = ready;
             _chkPoiFogOutside.Enabled = poiOn;
             _chkPoiAutoStack.Enabled = poiOn;
-            _trkPoiAutoStackGap.Enabled = poiOn && _chkPoiAutoStack.Checked;
-            _lblPoiAutoStackGapVal.Enabled = _trkPoiAutoStackGap.Enabled;
-            _trkPoiAutoStackMargin.Enabled = poiOn && _chkPoiAutoStack.Checked;
-            _lblPoiAutoStackMarginVal.Enabled = _trkPoiAutoStackMargin.Enabled;
+            bool stackOn = poiOn && _chkPoiAutoStack.Checked;
+            _trkPoiAutoStackGap.Enabled = stackOn;
+            _lblPoiAutoStackGapVal.Enabled = stackOn;
+            _trkPoiAutoStackMargin.Enabled = stackOn;
+            _lblPoiAutoStackMarginVal.Enabled = stackOn;
+            _trkPoiStackBeef.Enabled = stackOn;
+            _lblPoiStackBeefVal.Enabled = stackOn;
+            _trkPoiStackBottomPad.Enabled = stackOn;
+            _lblPoiStackBottomPadVal.Enabled = stackOn;
             _chkFog.Enabled = ready;
             _chkDynamicFog.Enabled = ready && _chkFog.Checked;
             // Dyn auto-search ignores the slider — keep it off while dyn is on.
@@ -1344,6 +1395,8 @@ namespace SpeakRect
             s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
             s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
             s.ComicPoiAutoStackMarginPx = _trkPoiAutoStackMargin.Value;
+            s.ComicPoiStackBeefExtra = _trkPoiStackBeef.Value / 100.0;
+            s.ComicPoiStackBottomPadShare = _trkPoiStackBottomPad.Value / 100.0;
             // POI is a Comic Book attack — keep MODE row / sidebar in sync.
             // Only force Comic on when the user actually enables POI (not every Persist).
             if (s.ComicPoiMarkers && !comicWas)
@@ -1429,12 +1482,13 @@ namespace SpeakRect
                 if (poi && _chkPoiAutoStack.Checked)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — full page for editing  ·  Speak stacks islands for Local-LLM  ·  drag / resize / add";
+                        "PREVIEW — full page for editing  ·  Speak = orange island stack VL  ·  drag / resize / add";
                 }
                 else if (poi && _refine.RegionCount >= 2)
                 {
-                    _lblPreviewHeader.Text =
-                        "PREVIEW — POI island map on TONE (speak = sequential per island)  ·  drag / resize / add";
+                    _lblPreviewHeader.Text = _chkSequential.Checked
+                        ? "PREVIEW — POI map on TONE (Speak multi = sequential)  ·  drag / resize / add"
+                        : "PREVIEW — POI map on TONE (Speak multi = crop-stack)  ·  drag / resize / add";
                 }
                 else if (poi && outside)
                 {
@@ -1627,11 +1681,20 @@ namespace SpeakRect
 
         private void ResetDefaults()
         {
-            AppSettings.Current.ResetComicRegionSettingsToDefaults();
+            // Default mode → product defaults (POI off). Comic Book mode → Comic
+            // Book stock including POI on (same as first MODE enter / fresh comic path).
+            bool comic = AppSettings.Current.ComicBook;
+            AppSettings.Current.ResetComicRegionSettingsToDefaults(asComicBookMode: comic);
             LoadFromSettings();
             Persist(writeDiskNow: true);
-            _lblStatus.Text = "Restored built-in balloon detect defaults.";
+            _lblStatus.Text = comic
+                ? "Restored Comic Book balloon defaults (POI on)."
+                : "Restored built-in balloon detect defaults.";
             _lblStatus.ForeColor = UiTheme.Ok;
+            if (comic)
+            {
+                try { _onModeChanged?.Invoke(); } catch { /* host refresh */ }
+            }
         }
 
         private void OpenImageFile()
@@ -2233,6 +2296,8 @@ namespace SpeakRect
                 : _trkMinAlnum.Value.ToString(inv);
             _lblPoiAutoStackGapVal.Text = $"{_trkPoiAutoStackGap.Value}px";
             _lblPoiAutoStackMarginVal.Text = $"{_trkPoiAutoStackMargin.Value}px";
+            _lblPoiStackBeefVal.Text = $"+{_trkPoiStackBeef.Value}%";
+            _lblPoiStackBottomPadVal.Text = $"{_trkPoiStackBottomPad.Value}% bot";
         }
 
         private static int FogToTick(float v) =>

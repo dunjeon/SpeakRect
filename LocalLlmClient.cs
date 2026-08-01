@@ -131,6 +131,12 @@ namespace SpeakRect
             if (string.IsNullOrEmpty(text))
                 return "";
 
+            // Markdown / assistant chrome first (while ``` * # still present).
+            // Then typography + Latin allow-list drop residual structure chars.
+            text = SpeechCleaner.StripMarkdownLlmJunk(text);
+            if (string.IsNullOrEmpty(text))
+                return "";
+
             // Typography → ASCII so curly quotes / dashes survive the allow-list.
             var sb = new StringBuilder(text.Length);
             foreach (char c in text)

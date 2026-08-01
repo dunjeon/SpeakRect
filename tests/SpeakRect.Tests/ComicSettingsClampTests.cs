@@ -27,10 +27,23 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
-    public void Sequential_regions_defaults_on()
+    public void Sequential_regions_defaults_off()
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
-        Assert.True(AppSettings.Current.ComicSequentialRegions);
+        Assert.False(AppSettings.Current.ComicSequentialRegions);
+    }
+
+    [Fact]
+    public void Stack_compose_max_long_edge_is_2560()
+    {
+        Assert.Equal(2560, ComicPoiGuide.StackComposeMaxLongEdge);
+    }
+
+    [Fact]
+    public void Image_llm_send_downscale_defaults_off()
+    {
+        AppSettings.Current.ResetImagePrepSettingsToDefaults();
+        Assert.False(AppSettings.Current.ImageLlmSendDownscale);
     }
 
     [Fact]
@@ -76,6 +89,33 @@ public class ComicSettingsClampTests
         // Sub-options ready for when user enables POI under Comic Book.
         Assert.True(AppSettings.Current.ComicPoiFogOutside);
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
+    }
+
+    [Fact]
+    public void Comic_book_mode_reset_defaults_poi_on()
+    {
+        // Balloons "Reset defaults" while in Comic Book — stock Comic Book
+        // (fresh comic path), not product Default mode.
+        var s = AppSettings.Current;
+        try
+        {
+            s.ResetComicRegionSettingsToDefaults(asComicBookMode: true);
+            Assert.True(s.ComicBook);
+            Assert.True(s.ComicPoiMarkers);
+            Assert.True(s.ComicPoiFogOutside);
+            Assert.True(s.ComicPoiAutoStack);
+            Assert.True(s.ComicDynamicFog);
+            Assert.True(s.ComicDetectFog);
+            Assert.False(s.ComicSequentialRegions);
+            Assert.False(s.ImageLlmSendDownscale);
+            Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);
+            Assert.Equal(ComicPoiGuide.DefaultStackBottomPadShare, s.ComicPoiStackBottomPadShare);
+        }
+        finally
+        {
+            s.ResetComicRegionSettingsToDefaults();
+            s.ResetImagePrepSettingsToDefaults();
+        }
     }
 
     [Fact]
@@ -222,12 +262,14 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiAutoStack);
             Assert.Equal(ComicPoiGuide.DefaultAutoStackGapPx, s.ComicPoiAutoStackGapPx);
             Assert.Equal(ComicPoiGuide.LlmSendStackMarginPx, s.ComicPoiAutoStackMarginPx);
-            Assert.True(s.ImageLlmSendDownscale);
+            Assert.False(s.ImageLlmSendDownscale);
             Assert.Equal(AppSettings.DefaultImageLlmSendMaxLongEdge, s.ImageLlmSendMaxLongEdge);
+            Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);
+            Assert.Equal(ComicPoiGuide.DefaultStackBottomPadShare, s.ComicPoiStackBottomPadShare);
             Assert.True(s.ComicDynamicFog);
             Assert.True(s.ComicDetectFog);
             Assert.True(s.ComicMergeOverlappingIslands);
-            Assert.True(s.ComicSequentialRegions);
+            Assert.False(s.ComicSequentialRegions);
             Assert.True(s.ComicSplitLargeRegions);
         }
         finally

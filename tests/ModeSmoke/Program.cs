@@ -839,8 +839,8 @@ Console.WriteLine("--- Speech cleaner ---");
     // Regression (look/Bug): speak-dedupe must not drop "really?" when the
     // word "really" already appeared inside a longer earlier balloon.
     // Token bag coverage was 1.0 and TTS skipped region 2 entirely.
-    // (Defense in depth — default ComicSequentialRegions avoids global dedupe
-    // across balloons entirely.)
+    // Sequential regions is off by default; global dedupe still must keep
+    // short "really?" after a longer balloon that used the same stem.
     {
         var emmaPanel = new List<string>
         {
@@ -868,8 +868,8 @@ Console.WriteLine("--- Speech cleaner ---");
             megaEcho.Count == 1 &&
             megaEcho[0].Contains("singapore", StringComparison.Ordinal),
             $"mega=[{string.Join(" | ", megaEcho)}]");
-        Check("ComicSequentialRegions defaults on (isolates balloons at speak time)",
-            AppSettings.Current.ComicSequentialRegions);
+        Check("ComicSequentialRegions defaults off (Balloons §9)",
+            !AppSettings.Current.ComicSequentialRegions);
     }
     Check("Bare 'no' (no punct) is usable OCR",
         OcrProcessor.SmokeIsUsableOcrText("no"));

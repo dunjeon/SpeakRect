@@ -329,15 +329,22 @@ namespace SpeakRect
                 " ", ignoreCase: false);
 
             // Markdown
+            // Prefer SpeechCleaner.StripMarkdownLlmJunk (always-on). These catalog
+            // rules remain as a second pass if users keep BuiltIn noise rules on.
             Add(list, "noise-md-fence-tick", "Markdown ``` fences",
                 SpeechTextRuleStage.Noise,
-                @"```[\w+-]*\r?\n?[\s\S]*?```",
-                " ", ignoreCase: false);
+                @"```[\w+-]*\s*\r?\n?([\s\S]*?)\r?\n?```",
+                " $1 ", ignoreCase: false);
 
             Add(list, "noise-md-fence-tilde", "Markdown ~~~ fences",
                 SpeechTextRuleStage.Noise,
-                @"~~~[\w+-]*\r?\n?[\s\S]*?~~~",
-                " ", ignoreCase: false);
+                @"~~~[\w+-]*\s*\r?\n?([\s\S]*?)\r?\n?~~~",
+                " $1 ", ignoreCase: false);
+
+            Add(list, "noise-md-fence-unclosed", "Markdown unclosed ``` fence",
+                SpeechTextRuleStage.Noise,
+                @"```[\w+-]*\s*\r?\n?([\s\S]*)$",
+                " $1 ", ignoreCase: false);
 
             Add(list, "noise-md-inline-code", "Markdown inline code",
                 SpeechTextRuleStage.Noise,

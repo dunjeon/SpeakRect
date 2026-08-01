@@ -11,7 +11,8 @@ namespace SpeakRect
     /// Comic Book alternate POI guide: WinOCR finds text islands, optional thick fog
     /// outside them, then <b>bright green region boxes</b> (same idea as Balloons
     /// preview) on the ink-gray prep. No free-floating markers that can cover text.
-    /// Multi-island speak uses sequential OCR; single-island uses this full-page guide.
+    /// Speak: AutoStack on → orange island stack is the VL payload; stack off/fail +
+    /// multi-island → Balloons §9 (sequential or crop-stack); 1 island → full-page guide.
     /// </summary>
     public static class ComicPoiGuide
     {
@@ -36,8 +37,28 @@ namespace SpeakRect
         /// <summary>Extra clear pad (px) around each island so ink on the rim is not fogged.</summary>
         public const int OutsideFogClearPadPx = 4;
 
-        /// <summary>White gap between auto-stacked POI strips (px).</summary>
+        /// <summary>Gap between auto-stacked POI strips (px).</summary>
         public const int StackStripGapPx = 8;
+
+        /// <summary>
+        /// Orange fill for the auto-stack canvas (margins + gaps between strips).
+        /// Not white — separates from balloon paper so Local-LLM / preview read
+        /// islands as distinct strips. Matches SpeakRect accent orange.
+        /// </summary>
+        public static readonly Color StackCanvasColor =
+            Color.FromArgb(255, 240, 128, 24);
+
+        /// <summary>
+        /// Default extra canvas vs content (⅔ larger). Matched live VL A/B
+        /// (SpeakRect.ini ComicPoiStackBeefExtra=0.66). Balloons can still retune.
+        /// </summary>
+        public const double DefaultStackBeefExtra = 2.0 / 3.0;
+
+        /// <summary>
+        /// Default share of vertical pad on the bottom (0.5 = centered).
+        /// Higher (0.8–0.9) = bottom-heavy beef.
+        /// </summary>
+        public const double DefaultStackBottomPadShare = 0.5;
 
         /// <summary>
         /// Local-LLM send experiment: outer margin (px) on top/left/right/bottom of
@@ -47,6 +68,56 @@ namespace SpeakRect
 
         /// <summary>Hard cap on auto-stack canvas height before scale-down.</summary>
         public const int StackMaxHeight = 4096;
+
+        /// <summary>
+        /// Hard long-edge cap when composing POI/crop stacks (before optional Image-tab
+        /// send downscale). Always applied so huge multi-strip stacks stay VL-safe.
+        /// </summary>
+        public const int StackComposeMaxLongEdge = 2560;
+
+        /// <summary>
+        /// Canvas for a composed stack: content stays native; canvas is
+        /// <paramref name="beefExtra"/> larger on each axis (pad only).
+        /// Horizontal pad is centered; vertical pad uses
+        /// <paramref name="bottomPadShare"/> (0=all top, 0.5=center, 1=all bottom).
+        /// </summary>
+        public static void ComputeBeefyStackCanvas(
+            int contentW,
+            int contentH,
+            out int canvasW,
+            out int canvasH,
+            out float offsetX,
+            out float offsetY,
+            double beefExtra = DefaultStackBeefExtra,
+            double bottomPadShare = DefaultStackBottomPadShare)
+        {
+            contentW = Math.Max(1, contentW);
+            contentH = Math.Max(1, contentH);
+            beefExtra = Math.Clamp(beefExtra, 0.0, 1.5);
+            bottomPadShare = Math.Clamp(bottomPadShare, 0.0, 1.0);
+
+            double factor = 1.0 + beefExtra;
+            canvasW = Math.Max(contentW, (int)Math.Ceiling(contentW * factor));
+            canvasH = Math.Max(contentH, (int)Math.Ceiling(contentH * factor));
+
+            int padX = canvasW - contentW;
+            int padY = canvasH - contentH;
+            offsetX = padX * 0.5f;
+            // bottomPadShare of vertical beef below content; rest above.
+            offsetY = padY * (1.0f - (float)bottomPadShare);
+        }
+
+        /// <summary>
+        /// Resolve stack beef knobs from current settings (Balloons A/B).
+        /// </summary>
+        public static void ResolveStackBeefFromSettings(
+            out double beefExtra,
+            out double bottomPadShare)
+        {
+            var s = AppSettings.Current;
+            beefExtra = s.ComicPoiStackBeefExtra;
+            bottomPadShare = s.ComicPoiStackBottomPadShare;
+        }
 
         /// <summary>Default gap threshold: stack when consecutive islands are farther than this.</summary>
         public const int DefaultAutoStackGapPx = 8;
@@ -247,8 +318,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Vertical stack of island crops (reading order) with a white gap and a
-        /// green guide box around each strip. Caller owns result.
+        /// POI path: clone island boxes from <paramref name="source"/>, then
+        /// <see cref="ComposeVerticalStripStack"/> (orange canvas + Balloons beef).
+        /// Caller owns result.
         /// </summary>
         public static Bitmap? BuildVerticalStack(
             Bitmap source,
@@ -284,69 +356,13 @@ namespace SpeakRect
                     strips.Add(strip);
                 }
 
-                if (strips.Count == 0)
-                    return null;
-
-                int margin = Math.Max(0, marginPx);
-                int contentW = strips.Max(s => s.Width);
-                int gap = Math.Max(0, stripGapPx);
-                int contentH = strips.Sum(s => s.Height) + gap * Math.Max(0, strips.Count - 1);
-                // Outer margin on all four sides of the final canvas.
-                int width = contentW + margin * 2;
-                int rawH = contentH + margin * 2;
-                double fit = 1.0;
-                if (rawH > StackMaxHeight)
-                    fit = (double)StackMaxHeight / rawH;
-
-                int outW = Math.Max(1, (int)Math.Round(width * fit));
-                int outH = Math.Max(1, (int)Math.Round(rawH * fit));
-                const int stackMaxLongEdge = 2560;
-                int maxEdge = Math.Max(outW, outH);
-                if (maxEdge > stackMaxLongEdge)
-                {
-                    double edgeFit = (double)stackMaxLongEdge / maxEdge;
-                    outW = Math.Max(1, (int)Math.Round(outW * edgeFit));
-                    outH = Math.Max(1, (int)Math.Round(outH * edgeFit));
-                    fit *= edgeFit;
-                }
-
-                var canvas = new Bitmap(outW, outH, PixelFormat.Format32bppArgb);
-                using (var g = Graphics.FromImage(canvas))
-                {
-                    g.Clear(Color.White);
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    g.CompositingMode = CompositingMode.SourceOver;
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-
-                    float m = (float)(margin * fit);
-                    float y = m;
-                    float contentDrawW = Math.Max(1f, outW - m * 2f);
-                    for (int i = 0; i < strips.Count; i++)
-                    {
-                        var s = strips[i];
-                        float dw = (float)(s.Width * fit);
-                        float dh = (float)(s.Height * fit);
-                        // Center strips in the content band (inside left/right margin).
-                        float x = m + Math.Max(0, (contentDrawW - dw) * 0.5f);
-                        g.DrawImage(s, x, y, dw, dh);
-
-                        // Green guide box around the strip (stroke only — text untouched).
-                        var box = Rectangle.Round(new RectangleF(x, y, dw, dh));
-                        if (box.Width > 2 && box.Height > 2)
-                            PaintOneGuideBox(g, box);
-
-                        y += dh;
-                        if (i < strips.Count - 1)
-                            y += (float)(gap * fit);
-                    }
-                }
-
-                detail?.AppendLine(
-                    $"poi-stack composed: strips={strips.Count} {outW}x{outH} " +
-                    $"(content={contentW}x{contentH} margin={margin}px gap={gap} " +
-                    $"fit={fit:F3} green-boxes)");
-                return canvas;
+                return ComposeVerticalStripStack(
+                    strips,
+                    detail,
+                    stripGapPx,
+                    marginPx,
+                    paintGreenBoxes: true,
+                    logPrefix: "poi-stack");
             }
             finally
             {
@@ -355,6 +371,97 @@ namespace SpeakRect
                     try { s.Dispose(); } catch { /* ignore */ }
                 }
             }
+        }
+
+        /// <summary>
+        /// Shared canvas compose for POI island stack and Comic Book crop-stack.
+        /// Orange fill, Balloons beef (+⅔ stock) / bottom-pad share, optional green
+        /// strip boxes. Hard long-edge cap 2560 (independent of Image-tab downscale).
+        /// Does not dispose <paramref name="strips"/> — caller owns them.
+        /// Caller owns the returned bitmap.
+        /// </summary>
+        public static Bitmap? ComposeVerticalStripStack(
+            IReadOnlyList<Bitmap> strips,
+            StringBuilder? detail,
+            int stripGapPx,
+            int marginPx = 0,
+            bool paintGreenBoxes = true,
+            string logPrefix = "stack")
+        {
+            if (strips == null || strips.Count == 0)
+                return null;
+
+            int margin = Math.Max(0, marginPx);
+            int contentW = strips.Max(s => s.Width);
+            int gap = Math.Max(0, stripGapPx);
+            int contentH = strips.Sum(s => s.Height) + gap * Math.Max(0, strips.Count - 1);
+            // Outer margin on all four sides of the content band (inside beef).
+            int width = contentW + margin * 2;
+            int rawH = contentH + margin * 2;
+            double fit = 1.0;
+            if (rawH > StackMaxHeight)
+                fit = (double)StackMaxHeight / rawH;
+
+            int outW = Math.Max(1, (int)Math.Round(width * fit));
+            int outH = Math.Max(1, (int)Math.Round(rawH * fit));
+            // Always apply — even when Image-tab send downscale is off.
+            const int stackMaxLongEdge = StackComposeMaxLongEdge;
+            int maxEdge = Math.Max(outW, outH);
+            if (maxEdge > stackMaxLongEdge)
+            {
+                double edgeFit = (double)stackMaxLongEdge / maxEdge;
+                outW = Math.Max(1, (int)Math.Round(outW * edgeFit));
+                outH = Math.Max(1, (int)Math.Round(outH * edgeFit));
+                fit *= edgeFit;
+            }
+
+            ResolveStackBeefFromSettings(out double beefExtra, out double bottomShare);
+            ComputeBeefyStackCanvas(
+                outW, outH,
+                out int canvasW, out int canvasH,
+                out float ox, out float oy,
+                beefExtra, bottomShare);
+
+            var canvas = new Bitmap(canvasW, canvasH, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(canvas))
+            {
+                g.Clear(StackCanvasColor);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.CompositingMode = CompositingMode.SourceOver;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                float m = (float)(margin * fit);
+                float y = oy + m;
+                float contentDrawW = Math.Max(1f, outW - m * 2f);
+                for (int i = 0; i < strips.Count; i++)
+                {
+                    var s = strips[i];
+                    float dw = (float)(s.Width * fit);
+                    float dh = (float)(s.Height * fit);
+                    // Center strips in the content band (inside left/right margin).
+                    float x = ox + m + Math.Max(0, (contentDrawW - dw) * 0.5f);
+                    g.DrawImage(s, x, y, dw, dh);
+
+                    if (paintGreenBoxes)
+                    {
+                        var box = Rectangle.Round(new RectangleF(x, y, dw, dh));
+                        if (box.Width > 2 && box.Height > 2)
+                            PaintOneGuideBox(g, box);
+                    }
+
+                    y += dh;
+                    if (i < strips.Count - 1)
+                        y += (float)(gap * fit);
+                }
+            }
+
+            detail?.AppendLine(
+                $"{logPrefix} composed: strips={strips.Count} {canvasW}x{canvasH} " +
+                $"(content={contentW}x{contentH}→{outW}x{outH} margin={margin}px gap={gap} " +
+                $"fit={fit:F3} beef+{beefExtra:0.###} bottomShare={bottomShare:0.##} " +
+                $"orange-canvas{(paintGreenBoxes ? " green-boxes" : "")})");
+            return canvas;
         }
 
         /// <summary>

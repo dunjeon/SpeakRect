@@ -77,18 +77,20 @@ Optional OCR fallback for very short text on busy art (settings-dependent).
 shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads tone)
   → BalloonOcrDetect multi-pass / cluster
   → ComicRegionGeometry merge/sort/pad
-  → [if ComicPoiMarkers] red bullseye POI (+ optional outside fog) → one full-frame Local-LLM
-  → else sequential / crop-stack / best-of as configured
+  → [if ComicPoiMarkers] RunComicPoiGuideAsync (see POI below)
+  → else [if ComicSequentialRegions] sequential per island
+  → else crop-stack best-of (RunFullAndCropsBestOfAsync)
   → SpeechCleaner → TTS
 ```
 
 **POI guide** (`AppSettings.ComicPoiMarkers`, Balloons tab): Comic Book alternate.
 Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**
 - **Canvas is always TONE** (detect fog is WinOCR-only; never POI base).  
-- Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final).  
-- 1 island: `DrawRegionGuides` on tone → that bitmap is VL input + `poi_guide` + `last_poi_vl_input.png`.  
-- 2+ islands: same guide published for analytics/preview map; **speak = sequential tone crops**  
-  (stack debug PNG only; not VL input).  
+- Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final). Full-page green guide always published for analytics/preview (`poi_guide`).  
+- **`ComicPoiAutoStack` on (stock):** islands → orange stack (`ComposeVerticalStripStack`) → **one VL call is the primary speak path** (`comic-poi-stack`). Preview stays full page for editing.  
+- **Stack off/fail + multi-island:** honor Balloons §9 — Sequential **on** → per-island OCR+TTS; Sequential **off** → crop-stack best-of on tone.  
+- **1 island + stack off/fail:** full-page guide VL.  
+- Stack compose: orange + beef/bottom-pad; hard long-edge **2560** (even if Image downscale is off). Image-tab downscale default **off**.  
 - Balloons Speak publishes Analytics (`_runImages`) without clearing refine session.
 
 **Regression anchors (ModeSmoke):**

@@ -560,8 +560,11 @@ namespace SpeakRect
             _cmbAppendedSilence.Enabled = !sapi;
             _cmbPunctuationSilence.Enabled = !sapi;
             _lblVoiceHint.Text = sapi
-                ? "SAPI 5: Control Panel + registered engines (e.g. NaturalVoiceSAPIAdapter). Blank = SAPI default. Setup steps are in README."
-                : "Windows (default): OneCore / UWP voices — no adapter needed. Blank = system default. Add more under Windows Speech settings.";
+                ? "SAPI 5: Control Panel + registered engines (e.g. NaturalVoiceSAPIAdapter). " +
+                  "(System default) = engine default voice. Setup steps are in README."
+                : "Windows (default): OneCore / UWP voices. (System default) = Windows " +
+                  "SpeechSynthesizer.DefaultVoice (OS setting), not “first English in the list.” " +
+                  "Add voices under Windows Speech settings.";
             _lblSilenceHint.Text = sapi
                 ? "Silence options apply only to the Windows (UWP) engine."
                 : "Default ≈ normal pauses. Min reduces trailing / punctuation silence between phrases.";
@@ -704,9 +707,10 @@ namespace SpeakRect
             string name = OcrProcessor.DescribeCurrentVoice();
             double rate = TickToRate(_trkRate.Value);
             double pitch = TickToPitch(_trkPitch.Value);
+            // name matches the voice ApplyVoiceSettings will use (system default or pick).
             OcrProcessor.SpeakAnnouncement(
-                $"This is the SpeakRect voice preview. Rate {rate:0.0}, pitch {pitch:0.0}. {name}.");
-            _lblStatus.Text = "Playing preview…";
+                $"This is the SpeakRect voice preview. Rate {rate:0.0}, pitch {pitch:0.0}. Using {name}.");
+            _lblStatus.Text = "Playing preview… · " + name;
         }
 
         private void Reset_Click()

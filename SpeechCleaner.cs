@@ -453,6 +453,10 @@ namespace SpeakRect
             // speaks the key name "text" or escape leftovers ("n" from \n).
             s = UnwrapModelJsonPayload(s);
 
+            // Hard markdown / VL chrome strip (always on — not only Text rules catalog).
+            // Catches fences, headings, bold, lists, "Here is the text:" preambles.
+            s = StripMarkdownLlmJunk(s);
+
             // First post-OCR step: ellipsis → single period (then a normal sentence
             // pause via NormalizeSpeechPunctuation). Avoids spoken "dot dot dot"
             // and must run before CollapseAdjacentPunctuation (which would leave one .).
@@ -1062,6 +1066,139 @@ namespace SpeakRect
 
 
         /// <summary>
+        /// Strip markdown / assistant chrome that VL models inject around comic OCR.
+        /// Runs before Latin allow-list and Text-rule Noise so fence language tags
+        /// (json, text) and "Here is the extracted text:" never reach TTS.
+        /// Keeps inner dialogue; drops structure only.
+        /// </summary>
+        public static string StripMarkdownLlmJunk(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return "";
+
+            string s = input;
+
+            // Closed fenced blocks (``` or ~~~), any language tag — keep inner body.
+            s = Regex.Replace(
+                s,
+                @"```[\w+-]*\s*\r?\n?([\s\S]*?)\r?\n?```",
+                " $1 ",
+                RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"~~~[\w+-]*\s*\r?\n?([\s\S]*?)\r?\n?~~~",
+                " $1 ",
+                RegexOptions.CultureInvariant);
+
+            // Unclosed fence from opener to end of string (common VL truncations).
+            s = Regex.Replace(
+                s,
+                @"```[\w+-]*\s*\r?\n?([\s\S]*)$",
+                " $1 ",
+                RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"~~~[\w+-]*\s*\r?\n?([\s\S]*)$",
+                " $1 ",
+                RegexOptions.CultureInvariant);
+
+            // Orphan fence ticks left after partial strip.
+            s = Regex.Replace(s, @"```+|~~~+", " ", RegexOptions.CultureInvariant);
+
+            // Common assistant preambles / postambles (whole line or leading clause).
+            s = Regex.Replace(
+                s,
+                @"(?im)^\s*(?:sure[!.,]?\s+)?(?:here(?:'s| is)\s+(?:the\s+)?(?:extracted\s+|ocr\s+|recognized\s+|full\s+)?(?:text|transcript|dialogue|result|output)|" +
+                @"(?:i(?:'ve| have)\s+)?(?:extracted|recognized|read|transcribed)\s+(?:the\s+)?(?:text|dialogue|content)|" +
+                @"(?:ocr|transcription|output)\s*result|the\s+text\s+(?:in\s+the\s+image\s+)?(?:is|reads)|" +
+                @"as\s+(?:an?\s+)?(?:ocr|vision)\s+(?:model|assistant))\s*[:.\-–—]?\s*",
+                " ",
+                RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"(?im)^\s*(?:let me know if you need anything else|hope that helps|happy to help)[!.]?\s*$",
+                " ",
+                RegexOptions.CultureInvariant);
+
+            // HTML tags + common entities (before * strip loses structure).
+            s = Regex.Replace(s, @"</?[a-zA-Z][^>]*>", " ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&nbsp;", " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&amp;", "&", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&lt;", "<", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&gt;", ">", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&quot;", "\"", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"&#39;", "'", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Images / links — keep visible label only.
+            s = Regex.Replace(s, @"!\[([^\]]*)\]\([^)]+\)", " $1 ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"\[([^\]]+)\]\([^)]+\)", " $1 ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"\[([^\]]+)\]\[[^\]]*\]", " $1 ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^\s*\[[^\]]+\]:\s+\S+.*$", " ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"<(https?://[^>]+|mailto:[^>]+)>",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Headings, blockquotes, list markers, task boxes, setext / hr / tables.
+            s = Regex.Replace(s, @"(?m)^\s{0,3}#{1,6}\s+", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)\s+#+\s*$", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^\s{0,3}>\s?", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^\s{0,3}[-*+]\s+", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^\s{0,3}\d+[.)]\s+", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^\s*\[[ xX]\]\s+", "", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"(?m)^[=\-]{2,}\s*$", " ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"(?m)^\s{0,3}([-*_])(?:\s*\1){2,}\s*$",
+                " ",
+                RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"(?m)^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$",
+                " ",
+                RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"\|", " ", RegexOptions.CultureInvariant);
+
+            // Emphasis / code — keep inner text (non-greedy, multi-pass for nesting).
+            for (int pass = 0; pass < 3; pass++)
+            {
+                string before = s;
+                s = Regex.Replace(s, @"\*\*\*(.+?)\*\*\*", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"___(.+?)___", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"\*\*(.+?)\*\*", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"__(.+?)__", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"~~(.+?)~~", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"==(.+?)==", " $1 ", RegexOptions.CultureInvariant);
+                s = Regex.Replace(s, @"`([^`\n]+)`", " $1 ", RegexOptions.CultureInvariant);
+                if (s == before)
+                    break;
+            }
+
+            // Footnotes / orphan emphasis ticks / backslash escapes.
+            s = Regex.Replace(s, @"\[\^[^\]]+\]", " ", RegexOptions.CultureInvariant);
+            s = Regex.Replace(s, @"\\([\\`*_{}\[\]()#+\-.!|>])", "$1", RegexOptions.CultureInvariant);
+            s = Regex.Replace(
+                s,
+                @"(?<!\w)(\*{1,3}|_{1,3}|`{1,3})(?!\w)",
+                " ",
+                RegexOptions.CultureInvariant);
+
+            // Bare meta tags the model leaves after fence strip (whole token only).
+            s = Regex.Replace(
+                s,
+                @"(?i)(?<!\p{L})(?:json|yaml|xml|html|markdown|plaintext|output|ocr_result|transcript)\s*(?=\r?\n|$)",
+                " ",
+                RegexOptions.CultureInvariant);
+
+            s = Regex.Replace(s, @"[ \t]{2,}", " ");
+            s = Regex.Replace(s, @"\n{3,}", "\n\n");
+            return s.Trim();
+        }
+
+        /// <summary>
         /// Extract prose from model JSON wrappers. Handles:
         /// <list type="bullet">
         /// <item>Whole reply is <c>{"text":"…"}</c> (also content/ocr/result/…)</item>
@@ -1076,7 +1213,7 @@ namespace SpeakRect
 
             string s = input.Trim();
 
-            // ```json … ``` fences around an object
+            // ```json … ``` fences around an object (also handled by StripMarkdownLlmJunk).
             var fence = Regex.Match(
                 s,
                 @"^```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```\s*$",

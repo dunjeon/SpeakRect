@@ -540,12 +540,6 @@ namespace SpeakRect
         /// </summary>
         private const double MaxCropUpscale = 8.0;
 
-        /// <summary>White gap between stacked balloon strips (px at crop scale).</summary>
-        private const int CropStackGapPx = 8;
-
-        /// <summary>Hard cap on stack height after composition (then scale down).</summary>
-        private const int CropStackMaxHeight = 4096;
-
         /// <summary>Unsharp for full-frame prep (if enabled).</summary>
         private const float LightSharpenAmount = 0.75f;
         private const int SharpenPasses = 2;
@@ -2349,13 +2343,6 @@ namespace SpeakRect
                         //   2) regions from BuildComicRegionsSharedDetectAsync (dyn fog when on)
                         //   3) POI / sequential / best-of on ocrImage (tone)
                         {
-                            detail.AppendLine(
-                                $"strategy=detect+crop-stack " +
-                                $"(ComicBook always; regions={regions.Count} fogUsed={fogUsedLive:0.###})");
-                            Debug.WriteLine(
-                                $"[OCR] ComicBook full path: detect+crop-stack " +
-                                $"(regions={regions.Count} fog={fogUsedLive:0.###})");
-
                             int pipeW = ocrImage.Width;
                             int pipeH = ocrImage.Height;
 
@@ -2368,21 +2355,35 @@ namespace SpeakRect
                                 regions, pipeW, pipeH);
                             bool scrapDetect = LooksLikeScrapDetect(
                                 regions, pipeW, pipeH, fragmented);
-                            detail.AppendLine(
-                                $"(lowConf={detection.LowConfidence} frag={fragmented} " +
-                                $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
 
                             // POI guide: Comic Book alternate (shared with Balloons Speak).
                             bool usePoi =
                                 AppSettings.Current.ComicPoiMarkers &&
                                 regions.Count > 0;
 
-                            // Sequential (default when not POI): OCR+TTS each balloon alone.
-                            // Multi-island POI also uses sequential (see RunComicPoiGuideAsync).
+                            // Non-POI only: §9 sequential. Under POI, multi-island
+                            // fallback after stack uses §9 inside RunComicPoiGuideAsync.
                             bool useSequential =
                                 !usePoi &&
                                 AppSettings.Current.ComicSequentialRegions &&
                                 regions.Count > 0;
+
+                            string strategyHint = usePoi
+                                ? (AppSettings.Current.ComicPoiAutoStack
+                                    ? "detect+poi-stack (AutoStack; multi fail → §9 seq or crop-stack)"
+                                    : "detect+poi (no AutoStack; multi → §9 seq or crop-stack)")
+                                : useSequential
+                                    ? "detect+sequential"
+                                    : "detect+crop-stack";
+                            detail.AppendLine(
+                                $"strategy={strategyHint} " +
+                                $"(ComicBook; regions={regions.Count} fogUsed={fogUsedLive:0.###})");
+                            Debug.WriteLine(
+                                $"[OCR] ComicBook full path: {strategyHint} " +
+                                $"(regions={regions.Count} fog={fogUsedLive:0.###})");
+                            detail.AppendLine(
+                                $"(lowConf={detection.LowConfidence} frag={fragmented} " +
+                                $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
 
                             if (usePoi)
                             {
@@ -2840,10 +2841,17 @@ namespace SpeakRect
             }
 
             bool poi = AppSettings.Current.ComicPoiMarkers;
+            bool autoStack = AppSettings.Current.ComicPoiAutoStack;
+            bool sequential = AppSettings.Current.ComicSequentialRegions;
             sb.AppendLine(
                 poi
                     ? "profile=full+poi (ComicBook: detect → POI guide; " +
-                      "1 island full-page / 2+ sequential per-island — live=Balloons)"
+                      (autoStack
+                          ? "AutoStack=VL island stack primary; " +
+                            "multi stack-fail → §9 seq or crop-stack"
+                          : "AutoStack off; multi → §9 seq or crop-stack; " +
+                            "1 island → full-page guide") +
+                      " — live=Balloons)"
                     : "profile=full (ComicBook ON)");
             sb.AppendLine("pipe detail:");
             sb.AppendLine($"  upscale long-edge={ActivePipelineUpscaleLongSide}");
@@ -2865,17 +2873,21 @@ namespace SpeakRect
                     AppSettings.Current.ComicPoiFogOutside
                         ? "  poi outside-fog=thick (hide art/UI outside islands)"
                         : "  poi outside-fog=off");
-                if (AppSettings.Current.ComicPoiAutoStack)
+                if (autoStack)
                 {
                     sb.AppendLine(
-                        $"  poi Local-LLM stack=on " +
+                        $"  poi Local-LLM stack=on (VL speak path) " +
                         $"(between={AppSettings.Current.ComicPoiAutoStackGapPx}px " +
-                        $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px; " +
-                        "preview stays full page)");
+                        $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px " +
+                        $"beef+{AppSettings.Current.ComicPoiStackBeefExtra:0.###}; " +
+                        "preview stays full page; compose long-edge cap 2560)");
                 }
                 else
                 {
-                    sb.AppendLine("  poi Local-LLM stack=off (full-page or sequential speak)");
+                    sb.AppendLine(
+                        sequential
+                            ? "  poi Local-LLM stack=off (multi → sequential; 1 → full-page)"
+                            : "  poi Local-LLM stack=off (multi → crop-stack; 1 → full-page)");
                 }
                 if (AppSettings.Current.ImageLlmSendDownscale)
                 {
@@ -2884,7 +2896,9 @@ namespace SpeakRect
                 }
                 else
                 {
-                    sb.AppendLine("  Local-LLM send downscale=off");
+                    sb.AppendLine(
+                        "  Local-LLM send downscale=off " +
+                        "(stack compose still caps long-edge at 2560)");
                 }
             }
             sb.AppendLine(
@@ -2899,12 +2913,18 @@ namespace SpeakRect
             sb.AppendLine("  dual-balloon dash promote (TTS pauses)=on");
             if (poi)
             {
-                sb.AppendLine("  crop-stack=off (POI uses full-page or sequential)");
+                sb.AppendLine(
+                    autoStack
+                        ? "  speak=poi-stack VL when AutoStack succeeds; " +
+                          "else multi uses §9 (seq on / crop-stack off)"
+                        : sequential
+                            ? "  sequential-regions=on under POI multi (stack off)"
+                            : "  crop-stack under POI multi (stack off, §9 off)");
             }
             else
             {
                 sb.AppendLine(
-                    AppSettings.Current.ComicSequentialRegions
+                    sequential
                         ? "  sequential-regions=on (OCR+TTS per balloon; no global dedupe bag)"
                         : "  crop-stack=on when detect finds islands (global speak plan)");
             }
@@ -3435,7 +3455,9 @@ namespace SpeakRect
             {
                 detail.AppendLine(
                     $"crop-stack: building strips={regions.Count} " +
-                    $"(native prep crops, gap={CropStackGapPx})");
+                    $"(native prep crops; canvas=shared orange+beef " +
+                    $"gap={AppSettings.Current.ComicPoiAutoStackGapPx} " +
+                    $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx})");
                 sw.Restart();
                 using var stackBmp = BuildVerticalCropStack(
                     pipelineImage, regions, detail, ActiveCropPadPx);
@@ -3572,11 +3594,13 @@ namespace SpeakRect
         /// <item>Compose base is always <b>tone</b> (never detect fog).</item>
         /// <item>Display boxes: if override pad is 0 (Balloons refine boxes),
         /// region bounds are already final; else expand cores with crop pad once.</item>
-        /// <item>1 island: full-page <see cref="ComicPoiGuide.DrawRegionGuides"/> → one VL call
-        /// (that bitmap is the VL input + analytics <c>poi_guide</c>).</item>
-        /// <item>2+ islands: same full-page guide published for analytics/preview parity;
-        /// speak is sequential per-island OCR on tone crops (reliable). Stack is optional
-        /// debug only — never claimed as VL input.</item>
+        /// <item>Full-page green guide always published for analytics/preview map.</item>
+        /// <item><see cref="AppSettings.ComicPoiAutoStack"/> on (stock): islands → orange
+        /// stack → one VL call is the primary speak path (<c>comic-poi-stack</c>).</item>
+        /// <item>Stack off/fail + multi-island: honor Balloons §9 —
+        /// <see cref="AppSettings.ComicSequentialRegions"/> on → sequential per-island;
+        /// off → crop-stack best-of on tone.</item>
+        /// <item>1 island + stack off/fail: full-page guide VL.</item>
         /// </list>
         /// </summary>
         private async Task<(List<string> Parts, string Tag, bool Ducked)> RunComicPoiGuideAsync(
@@ -3652,7 +3676,7 @@ namespace SpeakRect
                     try
                     {
                         sw.Restart();
-                        // Tone crops (clear lettering) + green boxes on strips; white margins.
+                        // Tone crops (clear lettering) + green boxes on strips; orange canvas.
                         stackBmp = ComicPoiGuide.BuildVerticalStack(
                             toneImage,
                             boxes,
@@ -3755,29 +3779,87 @@ namespace SpeakRect
                     {
                         try { stackBmp?.Dispose(); } catch { /* ignore */ }
                     }
-                    // Fall through to sequential / full-page guide if stack empty.
+                    // Fall through if stack empty/failed.
                 }
 
-                // Multi-island (stack off or stack failed): sequential crops on tone.
+                // Multi-island (stack off or stack failed): honor Balloons §9.
                 if (boxes.Count >= 2)
                 {
+                    if (AppSettings.Current.ComicSequentialRegions)
+                    {
+                        detail.AppendLine(
+                            "poi-speak: sequential per-island on tone " +
+                            "(§9 on; stack off/fail)");
+                        Debug.WriteLine(
+                            $"[OCR] ComicBook POI multi → sequential islands={boxes.Count}");
+                        var (seqParts, seqTag, seqDucked) =
+                            await RunSequentialRegionsSpeakAsync(
+                                toneImage, regions, detail, pipeTimer, token,
+                                speakNow: speakNow, alreadyDucked: alreadyDucked)
+                            .ConfigureAwait(false);
+                        string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
+                            ? "comic-poi-seq"
+                            : $"comic-poi-seq/{seqTag}";
+                        detail.AppendLine(
+                            $"winner={tag} parts={seqParts.Count} " +
+                            $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
+                        return (seqParts, tag, seqDucked);
+                    }
+
+                    // §9 off (stock): same crop-stack best-of as non-POI Comic Book.
                     detail.AppendLine(
-                        "poi-speak: sequential per-island on tone " +
-                        "(VL does NOT receive full-page guide or stack)");
+                        "poi-speak: crop-stack best-of on tone " +
+                        "(§9 off; stack off/fail)");
                     Debug.WriteLine(
-                        $"[OCR] ComicBook POI multi → sequential islands={boxes.Count}");
-                    var (seqParts, seqTag, seqDucked) =
-                        await RunSequentialRegionsSpeakAsync(
-                            toneImage, regions, detail, pipeTimer, token,
-                            speakNow: speakNow, alreadyDucked: alreadyDucked)
-                        .ConfigureAwait(false);
-                    string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
-                        ? "comic-poi-seq"
-                        : $"comic-poi-seq/{seqTag}";
+                        $"[OCR] ComicBook POI multi → crop-stack islands={boxes.Count}");
+                    bool solidPoi = HasWellSeparatedSolidIslands(
+                        regions, toneImage.Width, toneImage.Height);
+                    bool scrapPoi = LooksLikeScrapDetect(
+                        regions, toneImage.Width, toneImage.Height, fragmented: false);
+                    var (cropChosen, cropTag) = await RunFullAndCropsBestOfAsync(
+                        toneImage, regions, scrapPoi, solidPoi,
+                        detail, pipeTimer, token).ConfigureAwait(false);
+                    var cropParts = cropChosen
+                        .Where(p => !SpeechCleaner.IsUnusableOcrText(p))
+                        .ToList();
+                    string poiCropTag = cropTag.StartsWith("crop", StringComparison.Ordinal)
+                        ? "comic-poi-crop-stack"
+                        : $"comic-poi-crop-stack/{cropTag}";
                     detail.AppendLine(
-                        $"winner={tag} parts={seqParts.Count} " +
-                        $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
-                    return (seqParts, tag, seqDucked);
+                        $"winner={poiCropTag} parts={cropParts.Count} " +
+                        $"words={cropParts.Sum(ComicRegionGeometry.CountWords)}");
+
+                    bool duckedCrop = alreadyDucked;
+                    if (speakNow && cropParts.Count > 0)
+                    {
+                        var speakPieces = SpeechCleaner.ExpandToSpeakPieces(cropParts);
+                        if (speakPieces.Count > 0)
+                        {
+                            if (!duckedCrop)
+                            {
+                                DuckOtherAudio();
+                                duckedCrop = true;
+                            }
+                            var spoken = new List<string>();
+                            for (int pi = 0; pi < speakPieces.Count; pi++)
+                            {
+                                token.ThrowIfCancellationRequested();
+                                string unit = speakPieces[pi].Text;
+                                spoken.Add(unit);
+                                detail.AppendLine(
+                                    $"speak[{poiCropTag} {pi + 1}/{speakPieces.Count}]: {unit}");
+                                sw.Restart();
+                                await SpeakWithSystemAsync(unit, token)
+                                    .ConfigureAwait(false);
+                                pipeTimer.Mark($"tts {poiCropTag}[{pi + 1}]", sw);
+                                int pauseMs = speakPieces[pi].PauseAfterMs;
+                                if (pauseMs > 0)
+                                    await Task.Delay(pauseMs, token).ConfigureAwait(false);
+                            }
+                            return (spoken, poiCropTag, duckedCrop);
+                        }
+                    }
+                    return (cropParts, poiCropTag, duckedCrop);
                 }
 
                 // Single island fallback: VL input = full-page guideBmp.
@@ -3866,9 +3948,10 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Crop each reading-order region from the prepped pipeline image and stack
-        /// top→bottom with a gap. Strips keep native prep pixels (no second-pass
-        /// upscale/tone). Composition may scale down only to honor height/edge caps.
+        /// Crop each reading-order region (pad vs neighbors), then the same
+        /// <see cref="ComicPoiGuide.ComposeVerticalStripStack"/> as POI island stack
+        /// (orange canvas + Balloons beef). Strip cut is crop-stack specific;
+        /// canvas rules are shared.
         /// </summary>
         private static Bitmap? BuildVerticalCropStack(
             Bitmap pipelineImage,
@@ -3908,57 +3991,22 @@ namespace SpeakRect
                     strips.Add(strip);
                 }
 
-                if (strips.Count == 0)
-                    return null;
+                // Same canvas as POI: orange + beef/bottom-share from Balloons.
+                // Gap/margin from stack knobs so one UI drives both paths.
+                int gap = Math.Clamp(
+                    AppSettings.Current.ComicPoiAutoStackGapPx, 0, 64);
+                int margin = Math.Clamp(
+                    AppSettings.Current.ComicPoiAutoStackMarginPx, 0, 64);
+                var canvas = ComicPoiGuide.ComposeVerticalStripStack(
+                    strips,
+                    detail,
+                    stripGapPx: gap,
+                    marginPx: margin,
+                    paintGreenBoxes: true,
+                    logPrefix: "crop-stack");
 
-                int width = strips.Max(s => s.Width);
-                int gap = Math.Max(0, CropStackGapPx);
-                int rawH = strips.Sum(s => s.Height) + gap * Math.Max(0, strips.Count - 1);
-                double fit = 1.0;
-                if (rawH > CropStackMaxHeight)
-                    fit = (double)CropStackMaxHeight / rawH;
-
-                int outW = Math.Max(1, (int)Math.Round(width * fit));
-                int outH = Math.Max(1, (int)Math.Round(rawH * fit));
-                // Cap stack long-edge for VL cost (allow slightly above panel scale
-                // so multi-strip stacks keep lettering; still below old 2560 panel).
-                const int stackMaxLongEdge = 2560;
-                int maxEdge = Math.Max(outW, outH);
-                if (maxEdge > stackMaxLongEdge)
-                {
-                    double edgeFit = (double)stackMaxLongEdge / maxEdge;
-                    outW = Math.Max(1, (int)Math.Round(outW * edgeFit));
-                    outH = Math.Max(1, (int)Math.Round(outH * edgeFit));
-                    fit *= edgeFit;
-                }
-
-                var canvas = new Bitmap(outW, outH, PixelFormat.Format32bppArgb);
-                using (var g = Graphics.FromImage(canvas))
-                {
-                    g.Clear(Color.White);
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    g.CompositingMode = CompositingMode.SourceOver;
-
-                    float y = 0;
-                    for (int i = 0; i < strips.Count; i++)
-                    {
-                        var s = strips[i];
-                        float dw = (float)(s.Width * fit);
-                        float dh = (float)(s.Height * fit);
-                        float x = (outW - dw) * 0.5f;
-                        g.DrawImage(s, x, y, dw, dh);
-                        y += dh;
-                        if (i < strips.Count - 1)
-                            y += (float)(gap * fit);
-                    }
-                }
-
-                detail.AppendLine(
-                    $"  crop-stack composed: strips={strips.Count} " +
-                    $"{outW}x{outH} (rawH={rawH} fit={fit:F3})");
-
-                if (ActiveHeavyDebugImages || ActiveAnyDebugArtifacts)
+                if (canvas != null &&
+                    (ActiveHeavyDebugImages || ActiveAnyDebugArtifacts))
                 {
                     try
                     {
@@ -10468,9 +10516,8 @@ namespace SpeakRect
 
             try
             {
-                // Prefer configured name only when it is an English voice; otherwise
-                // pick any installed English voice, then CultureInfo en-US hints.
-                string? pick = null;
+                // Explicit name → that voice (any culture — user picked it).
+                // Blank → leave engine default (do not substitute first English).
                 if (!string.IsNullOrWhiteSpace(s.SapiVoiceName))
                 {
                     var named = synth.GetInstalledVoices()
@@ -10478,36 +10525,11 @@ namespace SpeakRect
                             string.Equals(
                                 v.VoiceInfo.Name, s.SapiVoiceName,
                                 StringComparison.OrdinalIgnoreCase));
-                    if (named != null &&
-                        IsEnglishCultureName(named.VoiceInfo.Culture?.Name))
-                        pick = named.VoiceInfo.Name;
-                }
-
-                if (pick == null)
-                {
-                    pick = synth.GetInstalledVoices()
-                        .Where(v => v.Enabled &&
-                            IsEnglishCultureName(v.VoiceInfo.Culture?.Name))
-                        .Select(v => v.VoiceInfo.Name)
-                        .FirstOrDefault();
-                }
-
-                if (pick != null)
-                    synth.SelectVoice(pick);
-                else
-                {
-                    try
-                    {
-                        synth.SelectVoiceByHints(
-                            SapiSpeech.VoiceGender.NotSet,
-                            SapiSpeech.VoiceAge.NotSet,
-                            0,
-                            new CultureInfo(TtsForcedLanguage));
-                    }
-                    catch
-                    {
-                        // No English pack — leave engine default.
-                    }
+                    if (named != null)
+                        synth.SelectVoice(named.VoiceInfo.Name);
+                    else
+                        Debug.WriteLine(
+                            $"[SapiTTS] voice missing: {s.SapiVoiceName}");
                 }
             }
             catch (Exception ex)
@@ -10634,23 +10656,20 @@ namespace SpeakRect
              lang.StartsWith("en_", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
-        /// Prefer an installed English OneCore voice; fall back to system default.
-        /// Configured <see cref="AppSettings.VoiceId"/> is used only when that voice is English.
+        /// Resolve UWP/OneCore voice: explicit <paramref name="preferredId"/> if
+        /// installed; otherwise true OS default (<see cref="WinSpeech.SpeechSynthesizer.DefaultVoice"/>).
+        /// Blank VoiceId must not substitute "first English in AllVoices" — that
+        /// diverged from DefaultVoice and made "(System default)" preview/status lie.
         /// </summary>
-        private static WinSpeech.VoiceInformation ResolveEnglishWinRtVoice(string? preferredId)
+        private static WinSpeech.VoiceInformation ResolveWinRtVoice(string? preferredId)
         {
-            var all = WinSpeech.SpeechSynthesizer.AllVoices;
             if (!string.IsNullOrWhiteSpace(preferredId))
             {
-                var named = all.FirstOrDefault(v =>
+                var named = WinSpeech.SpeechSynthesizer.AllVoices.FirstOrDefault(v =>
                     string.Equals(v.Id, preferredId, StringComparison.OrdinalIgnoreCase));
-                if (named != null && IsEnglishCultureName(named.Language))
+                if (named != null)
                     return named;
             }
-
-            var english = all.FirstOrDefault(v => IsEnglishCultureName(v.Language));
-            if (english != null)
-                return english;
 
             return WinSpeech.SpeechSynthesizer.DefaultVoice;
         }
@@ -10668,14 +10687,14 @@ namespace SpeakRect
 
             try
             {
-                synth.Voice = ResolveEnglishWinRtVoice(s.VoiceId);
+                synth.Voice = ResolveWinRtVoice(s.VoiceId);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[SystemTTS] voice select: {ex.Message}");
                 try
                 {
-                    synth.Voice = ResolveEnglishWinRtVoice(null);
+                    synth.Voice = WinSpeech.SpeechSynthesizer.DefaultVoice;
                 }
                 catch { /* ignore */ }
             }
@@ -10755,7 +10774,11 @@ namespace SpeakRect
             }
         }
 
-        /// <summary>Display label for the currently configured voice (or system default).</summary>
+        /// <summary>
+        /// Display label for the voice that speak/preview will actually use
+        /// (same resolution as <see cref="ApplyVoiceSettings"/> /
+        /// <see cref="ApplySapiVoiceSettings"/>).
+        /// </summary>
         public static string DescribeCurrentVoice()
         {
             try
@@ -10778,15 +10801,15 @@ namespace SpeakRect
                     try
                     {
                         using var synth = new SapiSpeech.SpeechSynthesizer();
-                        return $"SAPI · {synth.Voice.Name} [default]";
+                        // Fresh synthesizer = engine default (blank SapiVoiceName path).
+                        return $"SAPI · system default · {synth.Voice.Name}";
                     }
                     catch
                     {
-                        return "SAPI · (system default)";
+                        return "SAPI · system default";
                     }
                 }
 
-                WinSpeech.VoiceInformation voice;
                 if (!string.IsNullOrWhiteSpace(s.VoiceId))
                 {
                     var match = WinSpeech.SpeechSynthesizer.AllVoices
@@ -10794,14 +10817,16 @@ namespace SpeakRect
                             string.Equals(v.Id, s.VoiceId, StringComparison.OrdinalIgnoreCase));
                     if (match != null)
                         return $"{match.DisplayName} ({match.Language})";
+                    return $"{s.VoiceId} (missing?)";
                 }
 
-                voice = WinSpeech.SpeechSynthesizer.DefaultVoice;
-                return $"{voice.DisplayName} ({voice.Language}) [default]";
+                // Blank VoiceId → same as ApplyVoiceSettings: OS DefaultVoice.
+                var voice = WinSpeech.SpeechSynthesizer.DefaultVoice;
+                return $"System default · {voice.DisplayName} ({voice.Language})";
             }
             catch
             {
-                return "(system default)";
+                return "System default";
             }
         }
 

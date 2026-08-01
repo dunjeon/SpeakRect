@@ -240,7 +240,7 @@ namespace SpeakRect
             // Local-LLM send size (Default + Comic Book) — after prep / island stack.
             AddFull(MakeSection("LOCAL-LLM SEND SIZE"), 20);
             _chkLlmSendDownscale = MakeCheck("Downscale for Local-LLM send");
-            _chkLlmSendDownscale.Checked = true;
+            _chkLlmSendDownscale.Checked = false;
             _chkLlmSendDownscale.CheckedChanged += (_, _) =>
             {
                 OnFieldChanged();
@@ -255,10 +255,11 @@ namespace SpeakRect
                 WrapTrack(_trkLlmSendMaxEdge, _lblLlmSendMaxEdgeVal, valueWidth: 90),
                 42);
             AddFull(MakeHint(
-                "On (default for Default and Comic Book): after prep (and island stack when " +
-                "Comic Book uses it), cap the Local-LLM payload long edge here (stock 640). " +
-                "Detect, green boxes, and Analytics prep stages stay at the Scale long edge."),
-                56);
+                "Off (default for all modes): send prep/stack size as-is (island stacks still " +
+                "compose-cap long edge at 2560). On: after prep (and island stack when used), " +
+                "cap the Local-LLM payload long edge here (stock 640). Detect, green boxes, and " +
+                "Analytics prep stages stay at the Scale long edge either way."),
+                64);
 
             // Gray
             AddFull(MakeSection("INK GRAYSCALE"), 20);

@@ -36,10 +36,7 @@ namespace SpeakRect
         private bool _dirty;
         private bool _showPoiMarkers;
         private bool _showPoiOutsideFog;
-        private bool _showPoiAutoStack;
         private int _poiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
-        private Bitmap? _poiStackCache;
-        private string _poiStackSig = "";
         /// <summary>Same bitmap compose as live/analytics: DrawRegionGuides.</summary>
         private Bitmap? _poiGuideCache;
         private string _poiGuideSig = "";
@@ -110,46 +107,31 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// When true (and gap threshold says so), preview shows the vertical island
-        /// stack that Local-LLM receives — same as live POI auto-stack.
+        /// Kept for Balloons API compat. Preview always edits full-page islands;
+        /// live Speak uses stack VL when AutoStack is on (not shown in this control).
         /// </summary>
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool ShowPoiAutoStack
         {
-            get => _showPoiAutoStack;
-            set
-            {
-                if (_showPoiAutoStack == value)
-                    return;
-                _showPoiAutoStack = value;
-                InvalidatePoiStackCache();
-                Invalidate();
-            }
+            get => false;
+            set { /* preview never swaps to stack canvas */ }
         }
 
-        /// <summary>Gap threshold (px) for auto-stack preview. 0 = always when 2+.</summary>
+        /// <summary>Kept for Balloons API compat (live stack uses settings gap).</summary>
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int PoiAutoStackGapPx
         {
             get => _poiAutoStackGapPx;
-            set
-            {
-                int v = Math.Clamp(value, 0, 256);
-                if (_poiAutoStackGapPx == v)
-                    return;
-                _poiAutoStackGapPx = v;
-                InvalidatePoiStackCache();
-                Invalidate();
-            }
+            set => _poiAutoStackGapPx = Math.Clamp(value, 0, 256);
         }
 
         /// <summary>True when preview is showing the full-page POI guide (tone compose).</summary>
         public bool IsShowingPoiGuidePreview =>
             TryGetPoiGuidePreview(out _);
 
-        /// <summary>Deprecated: stack is no longer shown as VL input.</summary>
+        /// <summary>Always false — preview is full-page edit map, never stack canvas.</summary>
         public bool IsShowingPoiStackPreview => false;
 
         public event EventHandler? RegionsChanged;
@@ -482,60 +464,18 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Build/cache the POI vertical stack when auto-stack would fire for live OCR.
+        /// Stack canvas is never shown in Balloons preview (edit full page only).
+        /// Live Speak still builds the stack when AutoStack is on.
         /// </summary>
         private bool TryGetPoiStackPreview(out Bitmap? stack)
         {
             stack = null;
-            if (!_showPoiMarkers || !_showPoiAutoStack || _baseImage == null ||
-                _regions.Count < 2)
-                return false;
-
-            if (!ComicPoiGuide.ShouldAutoStack(_regions, _poiAutoStackGapPx, out _))
-                return false;
-
-            string sig = BuildPoiStackSig();
-            if (_poiStackCache != null &&
-                string.Equals(sig, _poiStackSig, StringComparison.Ordinal))
-            {
-                stack = _poiStackCache;
-                return true;
-            }
-
-            InvalidatePoiStackCache();
-            try
-            {
-                _poiStackCache = ComicPoiGuide.BuildVerticalStack(
-                    _baseImage, _regions, detail: null, paintBullseyes: true);
-                _poiStackSig = sig;
-                stack = _poiStackCache;
-                return stack != null;
-            }
-            catch
-            {
-                InvalidatePoiStackCache();
-                return false;
-            }
-        }
-
-        private string BuildPoiStackSig()
-        {
-            var sb = new System.Text.StringBuilder(128);
-            sb.Append(_baseImage?.Width ?? 0).Append('x').Append(_baseImage?.Height ?? 0);
-            sb.Append('|').Append(_poiAutoStackGapPx).Append('|').Append(_regions.Count);
-            foreach (var r in _regions)
-            {
-                sb.Append('|').Append(r.X).Append(',').Append(r.Y).Append(',')
-                    .Append(r.Width).Append('x').Append(r.Height);
-            }
-            return sb.ToString();
+            return false;
         }
 
         private void InvalidatePoiStackCache()
         {
-            try { _poiStackCache?.Dispose(); } catch { /* ignore */ }
-            _poiStackCache = null;
-            _poiStackSig = "";
+            // Stack canvas is never cached for preview — only guide map.
             InvalidatePoiGuideCache();
         }
 

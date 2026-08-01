@@ -310,18 +310,20 @@ namespace SpeakRect
         public int ComicMinIslandAlnum { get; set; } = DefaultComicMinIslandAlnum;
 
         /// <summary>
-        /// When true (default): OCR each balloon alone, speak it, wait for TTS,
-        /// then the next region. Isolates balloons so cross-region word reuse
-        /// never hits global speak-dedupe (e.g. "Really?" after "it's really…").
-        /// When false: vertical crop-stack (one OCR image) + global unit plan.
+        /// When true: OCR each balloon alone, speak it, wait for TTS, then the
+        /// next region. Isolates balloons so cross-region word reuse never hits
+        /// global speak-dedupe (e.g. "Really?" after "it's really…").
+        /// When false (default): vertical crop-stack (one OCR image) + global unit plan.
+        /// Balloons §9 · SPEAK PATH — off by default for all modes.
         /// </summary>
-        public bool ComicSequentialRegions { get; set; } = true;
+        public bool ComicSequentialRegions { get; set; } = false;
 
         /// <summary>
         /// Comic Book alternate: tone + green region boxes (± outside fog).
         /// 1 island → full-page VL guide; 2+ → sequential per-island OCR.
         /// Forces Comic Book mode on. Preview base is tone when this is on.
-        /// Default off so Default mode stays the product default.
+        /// Product Default mode / fresh ini: off. Comic Book starting defaults
+        /// (first MODE enter, Balloons reset while in Comic Book): on.
         /// </summary>
         public bool ComicPoiMarkers { get; set; } = false;
 
@@ -340,7 +342,7 @@ namespace SpeakRect
         public bool ComicPoiAutoStack { get; set; } = true;
 
         /// <summary>
-        /// White gap (px) between stacked island strips for Local-LLM send. Default 8.
+        /// Gap (px) between stacked island strips for Local-LLM send (orange canvas). Default 8.
         /// </summary>
         public int ComicPoiAutoStackGapPx { get; set; } =
             ComicPoiGuide.DefaultAutoStackGapPx;
@@ -351,6 +353,20 @@ namespace SpeakRect
         /// </summary>
         public int ComicPoiAutoStackMarginPx { get; set; } =
             ComicPoiGuide.LlmSendStackMarginPx;
+
+        /// <summary>
+        /// Extra canvas size vs stacked content (0.33 = ⅓ larger, 0.67 = ⅔).
+        /// Pads only — lettering not scaled. A/B for Local-LLM vision headroom.
+        /// </summary>
+        public double ComicPoiStackBeefExtra { get; set; } =
+            ComicPoiGuide.DefaultStackBeefExtra;
+
+        /// <summary>
+        /// Share of vertical canvas beef placed below the content (0.5 = centered,
+        /// 0.85 = bottom-heavy). Horizontal pad stays centered.
+        /// </summary>
+        public double ComicPoiStackBottomPadShare { get; set; } =
+            ComicPoiGuide.DefaultStackBottomPadShare;
 
         /// <summary>Clamp comic-region detect options to safe ranges.</summary>
         public void NormalizeComicRegionSettings()
@@ -367,10 +383,23 @@ namespace SpeakRect
             ComicMinIslandAlnum = Math.Clamp(ComicMinIslandAlnum, 0, 40);
             ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 64);
             ComicPoiAutoStackMarginPx = Math.Clamp(ComicPoiAutoStackMarginPx, 0, 64);
+            ComicPoiStackBeefExtra = Math.Clamp(ComicPoiStackBeefExtra, 0.0, 1.5);
+            ComicPoiStackBottomPadShare =
+                Math.Clamp(ComicPoiStackBottomPadShare, 0.0, 1.0);
         }
 
-        /// <summary>Restore built-in comic balloon detect defaults.</summary>
-        public void ResetComicRegionSettingsToDefaults()
+        /// <summary>
+        /// Restore built-in comic balloon detect defaults.
+        /// <list type="bullet">
+        /// <item><paramref name="asComicBookMode"/> false (default): product Default mode —
+        /// ComicBook off, POI off. Used for fresh SpeakRect.ini and full built-in reset.</item>
+        /// <item><paramref name="asComicBookMode"/> true: Comic Book mode stock —
+        /// ComicBook on + POI on (same feature set as
+        /// <see cref="ApplyComicBookModeStartingDefaults"/>). Used by Balloons
+        /// "Reset defaults" while already in Comic Book mode.</item>
+        /// </list>
+        /// </summary>
+        public void ResetComicRegionSettingsToDefaults(bool asComicBookMode = false)
         {
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
@@ -385,14 +414,28 @@ namespace SpeakRect
             ComicMergeOverlappingIslands = true;
             ComicOrphanRecoverPasses = DefaultComicOrphanRecoverPasses;
             ComicMinIslandAlnum = DefaultComicMinIslandAlnum;
-            ComicSequentialRegions = true;
-            // POI requires Comic Book — off by default so Default mode stays default.
-            ComicPoiMarkers = false;
-            ComicPoiFogOutside = true;  // ready when user enables POI
+            ComicSequentialRegions = false;
+            ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
             ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
-            ComicBook = false;
+            ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
+            ComicPoiStackBottomPadShare = ComicPoiGuide.DefaultStackBottomPadShare;
+            if (asComicBookMode)
+            {
+                // Comic Book stock (fresh Comic Book path / Balloons reset in-mode).
+                ComicBook = true;
+                ComicPoiMarkers = true;
+                // Send long-edge cap stays available on Image tab; default off.
+                ImageLlmSendDownscale = false;
+                ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
+            }
+            else
+            {
+                // Product Default mode — POI off so Default stays the shipped default.
+                ComicBook = false;
+                ComicPoiMarkers = false;
+            }
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
@@ -440,9 +483,10 @@ namespace SpeakRect
         /// <summary>
         /// After all prep (and optional island stack), downscale the Local-LLM
         /// payload so its long edge is at most <see cref="ImageLlmSendMaxLongEdge"/>.
-        /// Default on for Default and Comic Book. Detect/boxes stay at prep size.
+        /// Default <b>off</b> for all modes (toggle remains on Image tab). Detect/boxes
+        /// stay at prep size either way.
         /// </summary>
-        public bool ImageLlmSendDownscale { get; set; } = true;
+        public bool ImageLlmSendDownscale { get; set; } = false;
 
         /// <summary>
         /// Max long edge (px) for Local-LLM send when
@@ -515,7 +559,7 @@ namespace SpeakRect
             ImageLetterboxBlack = DefaultImageLetterboxBlack;
             ImageLetterboxWhite = DefaultImageLetterboxWhite;
             ImageUpscaleLongSide = DefaultImageUpscaleLongSide;
-            ImageLlmSendDownscale = true;
+            ImageLlmSendDownscale = false;
             ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
             ImageGrayscale = true;
             ImageInkGrayWeight = DefaultImageInkGrayWeight;
@@ -1277,24 +1321,31 @@ namespace SpeakRect
         /// Comic Book mode's own starting feature set when the user first enables
         /// Comic Book via MODE (no session stash). Profile/ini load does not call
         /// this — saved profiles keep the user's values.
+        /// Same POI/Comic Book stock as
+        /// <see cref="ResetComicRegionSettingsToDefaults"/>(asComicBookMode: true)
+        /// for feature flags (POI on); does not force every detect numeric knob so
+        /// a MODE toggle does not wipe user-tuned cluster/pad values.
         /// </summary>
         public void ApplyComicBookModeStartingDefaults()
         {
-            // Comic Book attack path — on by default for a fresh MODE enter.
+            // Comic Book attack path — POI on by default for a fresh MODE enter.
+            ComicBook = true;
             ComicPoiMarkers = true;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
             ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
-            ImageLlmSendDownscale = true;
+            ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
+            ComicPoiStackBottomPadShare = ComicPoiGuide.DefaultStackBottomPadShare;
+            ImageLlmSendDownscale = false;
             ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
-            // Detect / island pipeline stock on-state.
+            // Detect / island pipeline stock on-state (booleans only).
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
             ComicDynamicFog = true;
             ComicMergeOverlappingIslands = true;
             ComicSplitLargeRegions = true;
-            ComicSequentialRegions = true;
+            ComicSequentialRegions = false;
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
@@ -1693,6 +1744,14 @@ namespace SpeakRect
             if (map.TryGetValue("ComicPoiAutoStackMarginPx", out string? poiMarRaw) &&
                 int.TryParse(poiMarRaw, System.Globalization.NumberStyles.Integer, inv, out int poiMar))
                 ComicPoiAutoStackMarginPx = poiMar;
+
+            if (map.TryGetValue("ComicPoiStackBeefExtra", out string? beefRaw) &&
+                double.TryParse(beefRaw, System.Globalization.NumberStyles.Float, inv, out double beef))
+                ComicPoiStackBeefExtra = beef;
+
+            if (map.TryGetValue("ComicPoiStackBottomPadShare", out string? botRaw) &&
+                double.TryParse(botRaw, System.Globalization.NumberStyles.Float, inv, out double botShare))
+                ComicPoiStackBottomPadShare = botShare;
 
             NormalizeComicRegionSettings();
             // After POI keys load: if file has Default mode + POI on, suspend POI
@@ -2537,14 +2596,16 @@ namespace SpeakRect
                 sb.AppendLine(";   false = nudge grow-overlaps apart instead.");
                 sb.AppendLine("; OrphanRecoverPasses = max missed balloon re-OCR attempts.");
                 sb.AppendLine("; MinIslandAlnum = drop scrap islands below this letter count (0 = off).");
-                sb.AppendLine("; SequentialRegions=true (default): OCR+speak each balloon alone, wait for TTS,");
-                sb.AppendLine(";   then next — isolates balloons from global speak-dedupe across the page.");
-                sb.AppendLine("; SequentialRegions=false: vertical crop-stack (one OCR) + global unit plan.");
+                sb.AppendLine("; SequentialRegions=false (default, Balloons §9): vertical crop-stack + global plan.");
+                sb.AppendLine("; SequentialRegions=true: OCR+speak each balloon alone (isolates from global dedupe).");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine(";   1 island: full-page VL with boxes (± outside fog). 2+: sequential per-island OCR.");
                 sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone canvas.");
                 sb.AppendLine("; PoiAutoStack=true: for Local-LLM send, crop islands and vertical-stack");
-                sb.AppendLine(";   (preview stays on full page for editing). Gap=between strips; Margin=outer pad.");
+                sb.AppendLine(";   on orange canvas (preview stays on full page for editing).");
+                sb.AppendLine(";   Gap=between strips; Margin=outer pad.");
+                sb.AppendLine("; StackBeefExtra=0.667 (⅔ larger canvas, stock). Pad only — both POI + crop stacks.");
+                sb.AppendLine("; StackBottomPadShare=0.5 center vertical pad; 0.85 = bottom-heavy (less top).");
                 sb.AppendLine("; PoiAutoStackGapPx=8 (default between islands). PoiAutoStackMarginPx=12 (outer).");
                 sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
                 sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
@@ -2567,14 +2628,19 @@ namespace SpeakRect
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStackGapPx={ComicPoiAutoStackGapPx}");
                 sb.AppendLine($"ComicPoiAutoStackMarginPx={ComicPoiAutoStackMarginPx}");
+                sb.AppendLine(
+                    $"ComicPoiStackBeefExtra={ComicPoiStackBeefExtra.ToString("0.###", inv)}");
+                sb.AppendLine(
+                    $"ComicPoiStackBottomPadShare={ComicPoiStackBottomPadShare.ToString("0.###", inv)}");
                 sb.AppendLine();
                 NormalizeImagePrepSettings();
                 sb.AppendLine("[IMAGE_PREP]");
                 sb.AppendLine("; Capture image pipeline: letterbox → scale long-edge → gray → tone (denoise+levels+sharpen).");
                 sb.AppendLine("; ImagePrepEnabled=false → raw snap (no prep). Comic Book uses full tone when on;");
                 sb.AppendLine("; Default and ComicBook share letterbox+scale+gray+tone. Detect fog is under [COMIC_REGIONS].");
-                sb.AppendLine("; LlmSendDownscale=true: after prep (+ optional island stack), cap Local-LLM payload");
-                sb.AppendLine(";   long edge at LlmSendMaxLongEdge (default 640). Detect/boxes stay at prep size.");
+                sb.AppendLine("; LlmSendDownscale=false (default): send prep/stack size as-is.");
+                sb.AppendLine("; LlmSendDownscale=true: cap Local-LLM payload long edge at LlmSendMaxLongEdge (640).");
+                sb.AppendLine(";   Detect/boxes stay at prep size either way.");
                 sb.AppendLine($"ImagePrepEnabled={ImagePrepEnabled.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ImageLetterbox={ImageLetterbox.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ImageLetterboxPad={ImageLetterboxPad}");
@@ -2800,6 +2866,7 @@ namespace SpeakRect
                 or "ComicMinIslandAlnum" or "ComicSequentialRegions"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
                 or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
+                or "ComicPoiStackBeefExtra" or "ComicPoiStackBottomPadShare"
                 or "ImagePrepEnabled"
                 or "ImageLlmSendDownscale" or "ImageLlmSendMaxLongEdge"
                 or "ImageLetterbox" or "ImageLetterboxPad"

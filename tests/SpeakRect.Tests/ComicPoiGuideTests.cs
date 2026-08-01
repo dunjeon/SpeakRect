@@ -156,4 +156,96 @@ public class ComicPoiGuideTests
         Assert.Equal(ComicPoiGuide.DefaultAutoStackGapPx,
             AppSettings.Current.ComicPoiAutoStackGapPx);
     }
+
+    [Fact]
+    public void BuildVerticalStack_uses_orange_canvas()
+    {
+        using var src = new Bitmap(80, 80);
+        using (var g = Graphics.FromImage(src))
+        {
+            g.Clear(Color.White);
+            using var ink = new SolidBrush(Color.Black);
+            g.FillRectangle(ink, 8, 8, 28, 16);
+            g.FillRectangle(ink, 8, 48, 28, 16);
+        }
+
+        var boxes = new List<Rectangle>
+        {
+            new(5, 5, 34, 22),
+            new(5, 45, 34, 22),
+        };
+        using var stack = ComicPoiGuide.BuildVerticalStack(
+            src, boxes, stripGapPx: 8, marginPx: 12);
+        Assert.NotNull(stack);
+        // Corner is margin fill — orange canvas, not white balloon paper.
+        Color corner = stack!.GetPixel(0, 0);
+        Assert.Equal(ComicPoiGuide.StackCanvasColor.R, corner.R);
+        Assert.Equal(ComicPoiGuide.StackCanvasColor.G, corner.G);
+        Assert.Equal(ComicPoiGuide.StackCanvasColor.B, corner.B);
+    }
+
+    [Fact]
+    public void ComputeBeefyStackCanvas_default_beef_centered()
+    {
+        // Content 300×120 → canvas ×(1+⅔), content centered.
+        double factor = 1.0 + ComicPoiGuide.DefaultStackBeefExtra;
+        ComicPoiGuide.ComputeBeefyStackCanvas(
+            300, 120,
+            out int cw, out int ch,
+            out float ox, out float oy,
+            ComicPoiGuide.DefaultStackBeefExtra,
+            bottomPadShare: 0.5);
+        Assert.Equal((int)Math.Ceiling(300 * factor), cw);
+        Assert.Equal((int)Math.Ceiling(120 * factor), ch);
+        Assert.True(cw > 300 && ch > 120);
+        Assert.InRange(ox, (cw - 300) / 2f - 1f, (cw - 300) / 2f + 1f);
+        Assert.InRange(oy, (ch - 120) / 2f - 1f, (ch - 120) / 2f + 1f);
+    }
+
+    [Fact]
+    public void ComputeBeefyStackCanvas_bottom_heavy_puts_pad_below()
+    {
+        ComicPoiGuide.ComputeBeefyStackCanvas(
+            300, 120,
+            out int cw, out int ch,
+            out float ox, out float oy,
+            beefExtra: 1.0 / 3.0,
+            bottomPadShare: 0.85);
+        int padY = ch - 120;
+        // Most of the vertical pad should sit below content (small offsetY).
+        Assert.True(oy < padY * 0.25f);
+        Assert.InRange(ox, 49f, 51f); // sides still centered
+    }
+
+    [Fact]
+    public void Default_stack_beef_is_two_thirds()
+    {
+        Assert.Equal(2.0 / 3.0, ComicPoiGuide.DefaultStackBeefExtra, 3);
+        ComicPoiGuide.ComputeBeefyStackCanvas(
+            300, 120, out int w, out int h, out _, out _,
+            ComicPoiGuide.DefaultStackBeefExtra, 0.5);
+        Assert.Equal((int)Math.Ceiling(300 * (1.0 + 2.0 / 3.0)), w);
+        Assert.Equal((int)Math.Ceiling(120 * (1.0 + 2.0 / 3.0)), h);
+    }
+
+    [Fact]
+    public void BuildVerticalStack_canvas_has_beef_around_content()
+    {
+        using var src = new Bitmap(200, 100);
+        using (var g = Graphics.FromImage(src))
+        {
+            g.Clear(Color.White);
+            using var ink = new SolidBrush(Color.Black);
+            g.FillRectangle(ink, 10, 10, 80, 30);
+        }
+
+        var boxes = new List<Rectangle> { new(5, 5, 100, 50) };
+        using var stack = ComicPoiGuide.BuildVerticalStack(
+            src, boxes, stripGapPx: 8, marginPx: 12);
+        Assert.NotNull(stack);
+        Assert.True(stack!.Width > 100);
+        Assert.True(stack.Height > 50);
+        Assert.True(stack.Width >= (int)(100 * 1.25));
+        Assert.True(stack.Height >= (int)(50 * 1.25));
+    }
 }
