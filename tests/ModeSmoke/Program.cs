@@ -103,8 +103,8 @@ Console.WriteLine("--- UI engine name sanitizer ---");
 // Speech cleaner chain:
 //   expand abbrevs → strip non-pause punct → ellipsis→. → collapse runs →
 //   keep .!? + insert sentence pause after; , → comma pause mark
-//   defaults (human speech): comma=250ms (0.25s), sentence=750ms (0.75s),
-//   other=250ms (0.25s), bubble=1000ms (1.00s)
+//   defaults (stock ini): comma=102ms, sentence=502ms,
+//   other=52ms, bubble=752ms
 //   (Voice tab / [VOICE] CommaPauseMs … — AppSettings.Current)
 //   UseCustomPauseEncodings=false skips typed marks / delays entirely.
 Console.WriteLine();
@@ -773,14 +773,14 @@ Console.WriteLine("--- Speech cleaner ---");
 
     string commaClean = OcrProcessor.SmokeCleanForSpeech("hello, world now.", true);
     var commaPauses = OcrProcessor.SmokePauseAfterMsList(commaClean);
-    Check("Comma pause is default (250ms)",
+    Check("Comma pause is default (DefaultCommaPauseMs)",
         commaPauses.Count >= 1 && commaPauses[0] == AppSettings.DefaultCommaPauseMs,
         $"pauses=[{string.Join(",", commaPauses)}] units={OcrProcessor.SmokeSpeakUnitCount(commaClean)}");
 
     string sentClean = OcrProcessor.SmokeCleanForSpeech("hello world. next line", true);
     var sentPauses = OcrProcessor.SmokePauseAfterMsList(sentClean);
     var sentUnits = OcrProcessor.SmokeSpeakUnits(sentClean);
-    Check("Sentence pause is default (750ms)",
+    Check("Sentence pause is default (DefaultSentencePauseMs)",
         sentPauses.Count >= 1 && sentPauses[0] == AppSettings.DefaultSentencePauseMs,
         $"pauses=[{string.Join(",", sentPauses)}]");
     Check("Sentence unit keeps the period",

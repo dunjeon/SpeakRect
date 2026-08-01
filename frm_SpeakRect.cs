@@ -644,6 +644,9 @@ namespace SpeakRect
             else
                 s.ToggleFlag(flagIndex);
 
+            // POI suspended/restored with mode — refresh Balloons only (not whole Settings).
+            try { _settingsForm?.ReloadBalloonsFromModeChange(); } catch { /* ignore */ }
+
             if (Visible)
             {
                 Invalidate();
@@ -708,6 +711,7 @@ namespace SpeakRect
                     onAfterProfileLoad: ApplyFullProfileFromSettings,
                     onFollowChanged: OnFollowSettingsChanged,
                     onRegionsChanged: OnRegionsSettingsChanged,
+                    onModeChanged: OnModeSettingsChanged,
                     captureActiveRegion: CaptureActiveRegionForPreviewAsync,
                     initialTab: tab);
                 _settingsForm.HotkeyCaptureStateChanged += (_, _) =>
@@ -769,6 +773,17 @@ namespace SpeakRect
         private void OnRegionsSettingsChanged()
         {
             ApplyRegionsFromSettings();
+            if (Visible)
+                Invalidate();
+        }
+
+        /// <summary>
+        /// Balloons → POI (or other settings) changed mode — refresh MODE stack + Balloons UI.
+        /// </summary>
+        private void OnModeSettingsChanged()
+        {
+            AppSettings.Current.NormalizeModeFlags();
+            try { _settingsForm?.ReloadBalloonsFromModeChange(); } catch { /* ignore */ }
             if (Visible)
                 Invalidate();
         }
@@ -1862,6 +1877,8 @@ namespace SpeakRect
                             if (IsFlagButtonHit(currentPos, out int flagIndex))
                             {
                                 AppSettings.Current.ToggleFlag(flagIndex);
+                                // POI etc. suspended/restored with MODE — Balloons only.
+                                try { _settingsForm?.ReloadBalloonsFromModeChange(); } catch { /* ignore */ }
                                 Invalidate();
                                 return;
                             }

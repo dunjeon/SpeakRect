@@ -30,6 +30,7 @@ namespace SpeakRect
         private readonly Action? _onAfterProfileLoad;
         private readonly Action? _onFollowChanged;
         private readonly Action? _onRegionsChanged;
+        private readonly Action? _onModeChanged;
         /// <summary>
         /// Host snaps the active F1–F8 region (no OCR/TTS). Caller owns the bitmap.
         /// </summary>
@@ -72,6 +73,7 @@ namespace SpeakRect
             Action? onAfterProfileLoad = null,
             Action? onFollowChanged = null,
             Action? onRegionsChanged = null,
+            Action? onModeChanged = null,
             Func<System.Threading.Tasks.Task<(Bitmap? Bitmap, string Error)>>? captureActiveRegion = null,
             SettingsTab initialTab = SettingsTab.KeyMap)
         {
@@ -80,6 +82,7 @@ namespace SpeakRect
             _onAfterProfileLoad = onAfterProfileLoad;
             _onFollowChanged = onFollowChanged;
             _onRegionsChanged = onRegionsChanged;
+            _onModeChanged = onModeChanged;
             _captureActiveRegion = captureActiveRegion;
 
             AutoScaleMode = AutoScaleMode.Font;
@@ -215,7 +218,8 @@ namespace SpeakRect
             _balloons = new frm_ComicRegions(
                 embedded: true,
                 onRequestClose: () => Close(),
-                onCaptureActiveRegion: _captureActiveRegion);
+                onCaptureActiveRegion: _captureActiveRegion,
+                onModeChanged: () => _onModeChanged?.Invoke());
             EmbedChild(_balloons, tabBalloons);
 
             _analytics = new frm_Analytics(
@@ -538,6 +542,16 @@ namespace SpeakRect
             _help.ReloadFromSettings();
             RefreshProfileCombo();
             SetStatusReady();
+        }
+
+        /// <summary>
+        /// MODE toggle only touches Comic Book / POI coherence — refresh Balloons
+        /// checkboxes without wiping in-progress edits on Voice / Key Map / etc.
+        /// </summary>
+        public void ReloadBalloonsFromModeChange()
+        {
+            try { _balloons.ReloadFromSettings(); }
+            catch { /* ignore */ }
         }
 
         private void LayoutBottom()

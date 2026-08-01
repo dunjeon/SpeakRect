@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -33,6 +34,15 @@ namespace SpeakRect
         private readonly List<Rectangle> _regions = new();
         private int _selected = -1;
         private bool _dirty;
+        private bool _showPoiMarkers;
+        private bool _showPoiOutsideFog;
+        private bool _showPoiAutoStack;
+        private int _poiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+        private Bitmap? _poiStackCache;
+        private string _poiStackSig = "";
+        /// <summary>Same bitmap compose as live/analytics: DrawRegionGuides.</summary>
+        private Bitmap? _poiGuideCache;
+        private string _poiGuideSig = "";
 
         private DragMode _drag;
         private Point _dragStartClient;
@@ -61,6 +71,86 @@ namespace SpeakRect
         public int RegionCount => _regions.Count;
 
         public IReadOnlyList<Rectangle> Regions => _regions;
+
+        /// <summary>
+        /// When true, preview composes the same POI guide image as live/analytics
+        /// via <see cref="ComicPoiGuide.DrawRegionGuides"/> (green boxes ± outside fog).
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool ShowPoiMarkers
+        {
+            get => _showPoiMarkers;
+            set
+            {
+                if (_showPoiMarkers == value)
+                    return;
+                _showPoiMarkers = value;
+                InvalidatePoiGuideCache();
+                Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// Thick fog outside islands — fed into the same DrawRegionGuides compose as live.
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool ShowPoiOutsideFog
+        {
+            get => _showPoiOutsideFog;
+            set
+            {
+                if (_showPoiOutsideFog == value)
+                    return;
+                _showPoiOutsideFog = value;
+                InvalidatePoiGuideCache();
+                Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// When true (and gap threshold says so), preview shows the vertical island
+        /// stack that Local-LLM receives — same as live POI auto-stack.
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool ShowPoiAutoStack
+        {
+            get => _showPoiAutoStack;
+            set
+            {
+                if (_showPoiAutoStack == value)
+                    return;
+                _showPoiAutoStack = value;
+                InvalidatePoiStackCache();
+                Invalidate();
+            }
+        }
+
+        /// <summary>Gap threshold (px) for auto-stack preview. 0 = always when 2+.</summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int PoiAutoStackGapPx
+        {
+            get => _poiAutoStackGapPx;
+            set
+            {
+                int v = Math.Clamp(value, 0, 256);
+                if (_poiAutoStackGapPx == v)
+                    return;
+                _poiAutoStackGapPx = v;
+                InvalidatePoiStackCache();
+                Invalidate();
+            }
+        }
+
+        /// <summary>True when preview is showing the full-page POI guide (tone compose).</summary>
+        public bool IsShowingPoiGuidePreview =>
+            TryGetPoiGuidePreview(out _);
+
+        /// <summary>Deprecated: stack is no longer shown as VL input.</summary>
+        public bool IsShowingPoiStackPreview => false;
 
         public event EventHandler? RegionsChanged;
         public event EventHandler? SelectionChanged;
@@ -99,6 +189,7 @@ namespace SpeakRect
             _selected = _regions.Count > 0 ? 0 : -1;
             _dirty = false;
             _drag = DragMode.None;
+            InvalidatePoiStackCache();
             Invalidate();
             // Do NOT RaiseChanged — SetSeed is auto-detect, not a user edit.
             RaiseSelection();
@@ -112,6 +203,7 @@ namespace SpeakRect
         {
             DisposeBase();
             _baseImage = baseImage;
+            InvalidatePoiStackCache();
             for (int i = 0; i < _regions.Count; i++)
                 _regions[i] = ClampToImage(_regions[i]);
             if (_selected >= _regions.Count)
@@ -184,6 +276,7 @@ namespace SpeakRect
             _regions.Insert(dest, r);
             _selected = dest;
             _dirty = true;
+            InvalidatePoiStackCache();
             Invalidate();
             RaiseChanged();
             RaiseSelection();
@@ -200,6 +293,7 @@ namespace SpeakRect
             else
                 _selected = Math.Min(_selected, _regions.Count - 1);
             _dirty = true;
+            InvalidatePoiStackCache();
             Invalidate();
             RaiseChanged();
             RaiseSelection();
@@ -214,6 +308,59 @@ namespace SpeakRect
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            // Full-page POI guide on tone: same DrawRegionGuides as live/analytics.
+            // Multi-island: still this map (speak is sequential per island — no stack cosplay).
+            if (TryGetPoiGuidePreview(out var guideBmp) && guideBmp != null)
+            {
+                var guideDisp = GetDisplayRectFor(guideBmp.Width, guideBmp.Height);
+                if (guideDisp.Width > 0 && guideDisp.Height > 0)
+                    g.DrawImage(guideBmp, guideDisp);
+
+                var dispPipe = GetDisplayRectFor(guideBmp.Width, guideBmp.Height);
+                for (int i = 0; i < _regions.Count; i++)
+                {
+                    bool sel = i == _selected;
+                    var coreClient = PipeToClientOnDisplay(
+                        _regions[i], dispPipe, guideBmp.Width, guideBmp.Height);
+
+                    string label = (i + 1).ToString();
+                    using var badgeFont = new Font("Segoe UI", 8f, FontStyle.Bold);
+                    var badgeSize = g.MeasureString(label, badgeFont);
+                    var badge = new RectangleF(
+                        coreClient.X + 2,
+                        coreClient.Y + 2,
+                        badgeSize.Width + 6,
+                        badgeSize.Height + 2);
+                    using (var bg = new SolidBrush(Color.FromArgb(200, 0, 0, 0)))
+                        g.FillRectangle(bg, badge);
+                    using (var fg = new SolidBrush(sel ? UiTheme.AccentHot : Color.Lime))
+                        g.DrawString(label, badgeFont, fg, badge.X + 3, badge.Y + 1);
+
+                    if (sel)
+                    {
+                        using var pen = new Pen(UiTheme.AccentHot, 2.5f);
+                        g.DrawRectangle(pen, coreClient);
+                        DrawHandles(g, coreClient);
+                    }
+                }
+
+                if (_regions.Count >= 2)
+                {
+                    using var badgeFont = new Font("Segoe UI", 8f, FontStyle.Bold);
+                    using var bg = new SolidBrush(Color.FromArgb(200, 20, 20, 20));
+                    using var fg = new SolidBrush(UiTheme.Warn);
+                    string banner =
+                        $"POI map · {_regions.Count} islands · speak = sequential per island";
+                    var sz = g.MeasureString(banner, badgeFont);
+                    g.FillRectangle(bg, 6, 6, sz.Width + 10, sz.Height + 4);
+                    g.DrawString(banner, badgeFont, fg, 11, 8);
+                }
+
+                using (var border = new Pen(UiTheme.Border, 1f))
+                    g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+                return;
+            }
 
             var disp = GetImageDisplayRect();
             if (_baseImage != null && disp.Width > 0 && disp.Height > 0)
@@ -233,8 +380,7 @@ namespace SpeakRect
                 return;
             }
 
-            // Stored regions already include grow + crop pad (baked at Preview seed).
-            // Solid green = exact Speak crop; Speak uses ForcedCropPadPx=0 with overrides.
+            // Non-POI: solid green boxes (Speak crop preview).
             for (int i = 0; i < _regions.Count; i++)
             {
                 bool sel = i == _selected;
@@ -245,7 +391,6 @@ namespace SpeakRect
                 using (var pen = new Pen(box, sel ? 2.5f : 1.8f))
                     g.DrawRectangle(pen, coreClient);
 
-                // Index badge
                 string label = (i + 1).ToString();
                 using var badgeFont = new Font("Segoe UI", 8f, FontStyle.Bold);
                 var badgeSize = g.MeasureString(label, badgeFont);
@@ -265,6 +410,147 @@ namespace SpeakRect
 
             using (var border = new Pen(UiTheme.Border, 1f))
                 g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        }
+
+        /// <summary>
+        /// Full-page POI guide — <b>same</b> <see cref="ComicPoiGuide.DrawRegionGuides"/>
+        /// as live OCR and Analytics (no separate bullseye paint path).
+        /// </summary>
+        private bool TryGetPoiGuidePreview(out Bitmap? guide)
+        {
+            guide = null;
+            if (!_showPoiMarkers || _baseImage == null || _regions.Count == 0)
+                return false;
+
+            string sig = BuildPoiGuideSig();
+            if (_poiGuideCache != null &&
+                string.Equals(sig, _poiGuideSig, StringComparison.Ordinal))
+            {
+                guide = _poiGuideCache;
+                return true;
+            }
+
+            InvalidatePoiGuideCache();
+            try
+            {
+                _poiGuideCache = ComicPoiGuide.DrawRegionGuides(
+                    _baseImage, _regions, detail: null, fogOutside: _showPoiOutsideFog);
+                _poiGuideSig = sig;
+                guide = _poiGuideCache;
+                return guide != null;
+            }
+            catch
+            {
+                InvalidatePoiGuideCache();
+                return false;
+            }
+        }
+
+        private string BuildPoiGuideSig()
+        {
+            var sb = new System.Text.StringBuilder(128);
+            sb.Append(_baseImage?.Width ?? 0).Append('x').Append(_baseImage?.Height ?? 0);
+            sb.Append("|fog=").Append(_showPoiOutsideFog ? '1' : '0');
+            sb.Append('|').Append(_regions.Count);
+            foreach (var r in _regions)
+            {
+                sb.Append('|').Append(r.X).Append(',').Append(r.Y).Append(',')
+                    .Append(r.Width).Append('x').Append(r.Height);
+            }
+            return sb.ToString();
+        }
+
+        private void InvalidatePoiGuideCache()
+        {
+            try { _poiGuideCache?.Dispose(); } catch { /* ignore */ }
+            _poiGuideCache = null;
+            _poiGuideSig = "";
+        }
+
+        private static Rectangle PipeToClientOnDisplay(
+            Rectangle pipe, Rectangle disp, int imgW, int imgH)
+        {
+            if (imgW < 1 || imgH < 1 || disp.Width < 1)
+                return Rectangle.Empty;
+            float sx = (float)disp.Width / imgW;
+            float sy = (float)disp.Height / imgH;
+            int x = disp.X + (int)Math.Round(pipe.X * sx);
+            int y = disp.Y + (int)Math.Round(pipe.Y * sy);
+            int w = Math.Max(1, (int)Math.Round(pipe.Width * sx));
+            int h = Math.Max(1, (int)Math.Round(pipe.Height * sy));
+            return new Rectangle(x, y, w, h);
+        }
+
+        /// <summary>
+        /// Build/cache the POI vertical stack when auto-stack would fire for live OCR.
+        /// </summary>
+        private bool TryGetPoiStackPreview(out Bitmap? stack)
+        {
+            stack = null;
+            if (!_showPoiMarkers || !_showPoiAutoStack || _baseImage == null ||
+                _regions.Count < 2)
+                return false;
+
+            if (!ComicPoiGuide.ShouldAutoStack(_regions, _poiAutoStackGapPx, out _))
+                return false;
+
+            string sig = BuildPoiStackSig();
+            if (_poiStackCache != null &&
+                string.Equals(sig, _poiStackSig, StringComparison.Ordinal))
+            {
+                stack = _poiStackCache;
+                return true;
+            }
+
+            InvalidatePoiStackCache();
+            try
+            {
+                _poiStackCache = ComicPoiGuide.BuildVerticalStack(
+                    _baseImage, _regions, detail: null, paintBullseyes: true);
+                _poiStackSig = sig;
+                stack = _poiStackCache;
+                return stack != null;
+            }
+            catch
+            {
+                InvalidatePoiStackCache();
+                return false;
+            }
+        }
+
+        private string BuildPoiStackSig()
+        {
+            var sb = new System.Text.StringBuilder(128);
+            sb.Append(_baseImage?.Width ?? 0).Append('x').Append(_baseImage?.Height ?? 0);
+            sb.Append('|').Append(_poiAutoStackGapPx).Append('|').Append(_regions.Count);
+            foreach (var r in _regions)
+            {
+                sb.Append('|').Append(r.X).Append(',').Append(r.Y).Append(',')
+                    .Append(r.Width).Append('x').Append(r.Height);
+            }
+            return sb.ToString();
+        }
+
+        private void InvalidatePoiStackCache()
+        {
+            try { _poiStackCache?.Dispose(); } catch { /* ignore */ }
+            _poiStackCache = null;
+            _poiStackSig = "";
+            InvalidatePoiGuideCache();
+        }
+
+        private Rectangle GetDisplayRectFor(int imgW, int imgH)
+        {
+            if (imgW < 1 || imgH < 1 || ClientSize.Width < 2 || ClientSize.Height < 2)
+                return Rectangle.Empty;
+            float ratio = Math.Min(
+                (float)ClientSize.Width / imgW,
+                (float)ClientSize.Height / imgH);
+            int w = Math.Max(1, (int)Math.Round(imgW * ratio));
+            int h = Math.Max(1, (int)Math.Round(imgH * ratio));
+            int x = (ClientSize.Width - w) / 2;
+            int y = (ClientSize.Height - h) / 2;
+            return new Rectangle(x, y, w, h);
         }
 
         private static void DrawHandles(Graphics g, Rectangle r)
@@ -296,6 +582,11 @@ namespace SpeakRect
             base.OnMouseDown(e);
             Focus();
             if (_baseImage == null || e.Button != MouseButtons.Left)
+                return;
+
+            // Stack preview is display-only (pipe coords ≠ stack coords).
+            // Turn auto-stack off to edit green boxes on the full page.
+            if (IsShowingPoiStackPreview)
                 return;
 
             var disp = GetImageDisplayRect();
@@ -466,6 +757,7 @@ namespace SpeakRect
 
             _drag = DragMode.None;
             Capture = false;
+            InvalidatePoiStackCache();
             Invalidate();
         }
 
@@ -656,6 +948,7 @@ namespace SpeakRect
 
         private void DisposeBase()
         {
+            InvalidatePoiStackCache();
             if (_baseImage != null)
             {
                 try { _baseImage.Dispose(); } catch { /* ignore */ }

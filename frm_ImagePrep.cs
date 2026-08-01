@@ -221,7 +221,7 @@ namespace SpeakRect
 
             // Scale — not free-form resolution. Long edge only; aspect always kept.
             AddFull(MakeSection("SCALE (LONG EDGE)"), 20);
-            _trkUpscale = MakeTrack(640, 4096, 640);
+            _trkUpscale = MakeTrack(640, 4096, AppSettings.DefaultImageUpscaleLongSide);
             _trkUpscale.TickFrequency = 128;
             _lblUpscaleVal = MakeValueLabel();
             // Wider value column for "1920 → ~1920×1080"

@@ -70,6 +70,7 @@ namespace SpeakRect
             ("FullPrompt", "Comic full panel"),
             ("CropPrompt", "Comic balloon crop"),
             ("SimplePrompt", "Default mode (simple)"),
+            ("PoiPrompt", "Comic Book + POI region boxes"),
             ("RecoveryPrompt", "Recovery (fallback)"),
         };
 

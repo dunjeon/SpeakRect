@@ -93,6 +93,18 @@ namespace SpeakRect
         /// <summary>How many reading islands after improve / coalesce / mega-split.</summary>
         public int RegionCount { get; init; }
 
+        /// <summary>
+        /// Fog amount actually used for detect (after dynamic search when enabled).
+        /// 0 when fog is off.
+        /// </summary>
+        public float FogAmountUsed { get; init; }
+
+        /// <summary>True when dynamic fog search ran (not fixed amount / fog off).</summary>
+        public bool DynamicFogSearched { get; init; }
+
+        /// <summary>Start strength when <see cref="DynamicFogSearched"/>; else same as used.</summary>
+        public float FogAmountStart { get; init; }
+
         /// <summary>Pipeline log (prep + detect summary).</summary>
         public string Detail { get; init; } = "";
 
@@ -529,7 +541,7 @@ namespace SpeakRect
         private const double MaxCropUpscale = 8.0;
 
         /// <summary>White gap between stacked balloon strips (px at crop scale).</summary>
-        private const int CropStackGapPx = 48;
+        private const int CropStackGapPx = 8;
 
         /// <summary>Hard cap on stack height after composition (then scale down).</summary>
         private const int CropStackMaxHeight = 4096;
@@ -635,8 +647,7 @@ namespace SpeakRect
         private const int ConsensusStrongMinQuality = 36;
 
         // Speak-unit pause ms come from AppSettings (Voice tab / [VOICE] ini).
-        // Defaults (human speech): comma 500 (0.50s), sentence 1000 (1.00s),
-        // other 250 (0.25s), bubble 1000 (1.00s).
+        // Stock defaults: comma 102, sentence 502, other 52, bubble 752.
         // When VoiceUseCustomPauseEncodings is false, encoding and delays are off.
         private static bool UseCustomPauseEncodings =>
             AppSettings.Current.VoiceUseCustomPauseEncodings;
@@ -673,20 +684,24 @@ namespace SpeakRect
         private const int SentenceBreakMs = 450;
 
         /// <summary>
-        /// When set, overrides <see cref="AppSettings.ComicRegionPadding"/> for crops.
-        /// Balloons seeds solid boxes with crop pad already baked in; Speak then uses
-        /// <c>0</c> on that override so pad is not applied a second time.
-        /// Live Comic Book (no override) leaves this null and uses settings pad.
+        /// Per-host override for <see cref="AppSettings.ComicRegionPadding"/> (not static —
+        /// concurrent live speak must not see Balloons override pad=0).
+        /// Balloons override boxes already bake pad; set to 0 so pad is not applied twice.
+        /// Live leaves this null and uses settings pad.
         /// </summary>
-        private static int? ForcedCropPadPx { get; set; }
+        private int? _forcedCropPadPx;
 
         /// <summary>
-        /// Base padding around each island before cropping. Further clamped so
-        /// padding does not expand into neighboring islands.
-        /// From <see cref="AppSettings.ComicRegionPadding"/> unless forced.
+        /// Settings crop pad (no per-run override). Static helpers / merge tests use this.
         /// </summary>
         private static int TextRegionPadding =>
-            ForcedCropPadPx ?? AppSettings.Current.ComicRegionPadding;
+            AppSettings.Current.ComicRegionPadding;
+
+        /// <summary>
+        /// Crop pad for this host run (settings unless Balloons override forced 0).
+        /// </summary>
+        private int ActiveCropPadPx =>
+            _forcedCropPadPx ?? TextRegionPadding;
 
         /// <summary>
         /// Hard cap on regions/crops per snap (sanity bound only).
@@ -835,8 +850,12 @@ namespace SpeakRect
         /// <summary>
         /// Row/col needs at least this fraction of dark-content <b>and</b>
         /// light-content pixels to count as real content (not a uniform bar).
+        /// Was 0.02 — too low: a few title-bar / taskbar chrome pixels (~20–30)
+        /// made pure-black Kindle/ebook pillars look like content, so left trim
+        /// stopped ~20px in and left a huge black side bar. 0.05 ignores that
+        /// sparse UI noise while real panel columns still pass easily.
         /// </summary>
-        private const double LetterboxMinContentFraction = 0.02;
+        private const double LetterboxMinContentFraction = 0.05;
 
         /// <summary>Soft pass dark bar floor (hard + 20, residual mid-dark rims).</summary>
         private static int LetterboxSoftBlackThreshold =>
@@ -846,8 +865,8 @@ namespace SpeakRect
         private static int LetterboxSoftWhiteThreshold =>
             Math.Max(0, LetterboxWhiteThreshold - 20);
 
-        /// <summary>Min content fraction for the soft pass.</summary>
-        private const double LetterboxSoftMinContentFraction = 0.025;
+        /// <summary>Min content fraction for the soft pass (slightly above hard).</summary>
+        private const double LetterboxSoftMinContentFraction = 0.06;
 
         /// <summary>Pad kept around detected content. From settings.</summary>
         private static int LetterboxContentPad =>
@@ -1207,6 +1226,7 @@ namespace SpeakRect
                 $" gray={(EnablePipelineGrayscale ? "on" : "off")}" +
                 $" fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
+                $" dynFog={(AppSettings.Current.ComicDynamicFog ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
@@ -1228,58 +1248,55 @@ namespace SpeakRect
                     rawSnap, buildTone: true, detail);
                 Bitmap toneOwned = prepStages.ToneOrPre;
 
-                // Dual bitmaps: Local-LLM/tone never fogged; detect may use fog.
-                using var toneDetect = ComicDetectTonePair.Create(
-                    toneOwned,
-                    EnableWinOcrDetectGrayFog,
-                    WinOcrDetectGrayFogAmount,
-                    WinOcrDetectGrayFogLevel,
-                    ApplyGrayFog);
-                Bitmap detectImage = toneDetect.Detect;
-                if (toneDetect.DetectIsSeparateFog)
-                {
-                    detail.AppendLine(
-                        $"fog amount={WinOcrDetectGrayFogAmount:0.###} (detect only)");
-                }
-                else
-                {
-                    detail.AppendLine("fog off (detect on tone)");
-                }
-
                 token.ThrowIfCancellationRequested();
 
-                // Same region pipeline as live ComicBook / Balloons Speak-test.
+                // Same detect entry as live (optional dynamic fog search).
                 using var host = new OcrProcessor(new Rectangle(0, 0, 2, 2));
+                var (regions, _, _, detectImage, ownsDetect, fogUsed, dynSearched, fogStart) =
+                    await host.BuildComicRegionsSharedDetectAsync(
+                        toneOwned, detail, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (ownsDetect)
+                    fogOwned = detectImage;
+
                 int pipeW = toneOwned.Width;
                 int pipeH = toneOwned.Height;
-                var (regions, _, _) = await host.BuildComicReadingRegionsAsync(
-                    detectImage, pipeW, pipeH, detail, token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
 
+                // Display boxes = grow cores + crop pad (what user sees / what speak crops).
+                var previewBoxes = ExpandRegionsByCropPad(
+                    regions, pipeW, pipeH, TextRegionPadding);
+                var displayRects = previewBoxes.Select(r => r.Bounds).ToList();
+
+                // POI: preview canvas = TONE (VL canvas). Non-POI: detect image so fog is visible
+                // at the *chosen* dyn-fog amount (not the start slider alone).
+                bool poiMode = AppSettings.Current.ComicPoiMarkers;
                 detail.AppendLine(
                     $"grow X/Y={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##} " +
                     $"cropPad={TextRegionPadding}px " +
-                    $"(green boxes = grow + neighbor-clamped crop pad; " +
-                    "preview base = detect view (fog when on — same pixels WinOCR sees))");
+                    $"(display boxes = grow + pad; " +
+                    $"preview base={(poiMode ? "TONE (POI=live VL canvas)" : "detect @ fog")}; " +
+                    $"fogUsed={fogUsed:0.###}" +
+                    (dynSearched ? $" dynStart={fogStart:0.###}" : "") +
+                    ")");
 
-                // Green boxes on the detect image (fog when on) so Balloons preview
-                // shows fog strength changes. Live OCR crops still use clear tone.
-                var previewBoxes = ExpandRegionsByCropPad(
-                    regions, pipeW, pipeH, TextRegionPadding);
-                overlay = BuildRegionsOverlayBitmap(detectImage, previewBoxes);
+                Bitmap detectForOverlay = detectImage;
+                overlay = BuildRegionsOverlayBitmap(
+                    poiMode ? toneOwned : detectForOverlay, previewBoxes);
 
-                // Clean detect-view base for interactive refine (caller owns).
-                Bitmap baseImage = new Bitmap(detectImage);
-                var coreRects = regions.Select(r => r.Bounds).ToList();
+                Bitmap baseImage = new Bitmap(poiMode ? toneOwned : detectForOverlay);
 
                 return new ComicRegionPreviewResult
                 {
                     Overlay = overlay,
                     BaseImage = baseImage,
-                    Regions = coreRects,
+                    // Padded display rects — Speak override uses pad=0 (boxes already final).
+                    Regions = displayRects,
                     PipelineWidth = pipeW,
                     PipelineHeight = pipeH,
                     RegionCount = regions.Count,
+                    FogAmountUsed = fogUsed,
+                    DynamicFogSearched = dynSearched,
+                    FogAmountStart = fogStart,
                     Detail = detail.ToString(),
                 };
             }
@@ -1305,7 +1322,6 @@ namespace SpeakRect
             finally
             {
                 prepStages?.Dispose();
-                // fog disposed by ComicDetectTonePair; fogOwned unused on this path
                 try { fogOwned?.Dispose(); } catch { /* ignore */ }
                 // overlay / BaseImage ownership transferred to result (or disposed on failure)
             }
@@ -1313,8 +1329,9 @@ namespace SpeakRect
 
         /// <summary>
         /// Settings → Balloons: run Comic Book detect + crop-stack/full OCR + TTS on
-        /// a still image (same knobs as live Comic Book). Forces comic path for the
-        /// duration of the call even if the mode flag is currently Default.
+        /// a still image (same knobs as live Comic Book). Always uses the comic
+        /// pipeline — does <b>not</b> mutate <see cref="AppSettings.ComicBook"/> so a
+        /// mid-speak mode toggle is not clobbered on finally.
         /// </summary>
         /// <param name="regionOverride">
         /// When non-null and non-empty: skip WinOCR detect and use these pipeline-space
@@ -1342,10 +1359,9 @@ namespace SpeakRect
                 _bgComicSpeakHost = host;
             }
 
-            bool savedComic = AppSettings.Current.ComicBook;
-            AppSettings.Current.ComicBook = true;
             try
             {
+                // Core is the Comic Book path regardless of MODE (no AppSettings flip).
                 return await host.RunComicSpeakFromBitmapCoreAsync(
                         rawSnap, linked.Token, regionOverride)
                     .ConfigureAwait(false);
@@ -1363,7 +1379,6 @@ namespace SpeakRect
             }
             finally
             {
-                AppSettings.Current.ComicBook = savedComic;
                 lock (BgComicSpeakLock)
                 {
                     if (_bgComicSpeakHost == host)
@@ -1394,6 +1409,7 @@ namespace SpeakRect
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
+                $" dynFog={(AppSettings.Current.ComicDynamicFog ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
@@ -1415,9 +1431,13 @@ namespace SpeakRect
             var totalSw = Stopwatch.StartNew();
             bool ducked = false;
 
-            // Balloons solid boxes already include crop pad — do not pad again.
+            // Balloons solid boxes already include crop pad — do not pad again
+            // (per-host; does not affect concurrent live CaptureAndRecognizeAsync).
             if (useOverride)
-                ForcedCropPadPx = 0;
+                _forcedCropPadPx = 0;
+
+            // Analytics: same publish path as live (was a silent no-op before).
+            _runImages = new List<OcrResultImage>(16);
 
             try
             {
@@ -1450,29 +1470,8 @@ namespace SpeakRect
                     rawSnap, buildTone: true, detail);
                 Bitmap toneOwned = prepStages.ToneOrPre;
                 pipeTimer.Mark("image-prep", sw);
-
-                // Dual bitmaps: Local-LLM reads tone; OCR detect may use fog.
-                using (var toneDetect = ComicDetectTonePair.Create(
-                    toneOwned,
-                    EnableWinOcrDetectGrayFog,
-                    WinOcrDetectGrayFogAmount,
-                    WinOcrDetectGrayFogLevel,
-                    ApplyGrayFog))
-                {
-                    if (toneDetect.DetectIsSeparateFog)
-                    {
-                        sw.Restart();
-                        fogOwned = toneDetect.ReleaseDetect();
-                        pipeTimer.Mark("fog", sw);
-                        detail.AppendLine(
-                            $"fog amount={WinOcrDetectGrayFogAmount:0.###} (detect only)");
-                    }
-                    else
-                    {
-                        detail.AppendLine("fog off (detect on tone)");
-                    }
-                }
-                Bitmap detectImage = fogOwned ?? toneOwned;
+                CaptureAnalyticsImage("capture", "Capture / source", rawSnap);
+                CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", toneOwned);
 
                 token.ThrowIfCancellationRequested();
 
@@ -1482,9 +1481,33 @@ namespace SpeakRect
                 bool fragmented;
                 bool solidIslands;
                 bool scrapDetect;
+                Bitmap detectImage;
+                float fogUsed = 0f;
 
                 if (useOverride)
                 {
+                    // Override skips WinOCR; still build detect view for overlay/analytics.
+                    using (var toneDetect = ComicDetectTonePair.Create(
+                        toneOwned,
+                        EnableWinOcrDetectGrayFog,
+                        WinOcrDetectGrayFogAmount,
+                        WinOcrDetectGrayFogLevel,
+                        ApplyGrayFog))
+                    {
+                        if (toneDetect.DetectIsSeparateFog)
+                        {
+                            fogOwned = toneDetect.ReleaseDetect();
+                            fogUsed = WinOcrDetectGrayFogAmount;
+                            detail.AppendLine(
+                                $"fog amount={fogUsed:0.###} (detect view only; region-override)");
+                        }
+                        else
+                        {
+                            detail.AppendLine("fog off (detect on tone; region-override)");
+                        }
+                    }
+                    detectImage = fogOwned ?? toneOwned;
+
                     sw.Restart();
                     regions = RegionsFromOverride(regionOverride!, pipeW, pipeH);
                     pipeTimer.Mark("region-override", sw);
@@ -1497,25 +1520,36 @@ namespace SpeakRect
                 }
                 else
                 {
-                    // Same region pipeline as Balloons preview + live ComicBook speak.
+                    // Same shared detect as live + Balloons preview (dynamic fog when on).
                     sw.Restart();
                     DetectionResult detection;
-                    (regions, detection, fragmented) =
-                        await BuildComicReadingRegionsAsync(
-                            detectImage, pipeW, pipeH, detail, token)
-                            .ConfigureAwait(false);
-                    pipeTimer.Mark("winocr-detect+regions", sw);
+                    Bitmap detImg;
+                    bool ownsDet;
+                    bool dynSearched;
+                    float fogStart;
+                    (regions, detection, fragmented, detImg, ownsDet, fogUsed, dynSearched, fogStart) =
+                        await BuildComicRegionsSharedDetectAsync(
+                            toneOwned, detail, token).ConfigureAwait(false);
+                    if (ownsDet)
+                        fogOwned = detImg;
+                    detectImage = detImg;
+                    pipeTimer.Mark(
+                        $"winocr-detect+regions (dyn={dynSearched} fog={fogUsed:0.00})",
+                        sw);
                     solidIslands = HasWellSeparatedSolidIslands(
                         regions, pipeW, pipeH);
                     scrapDetect = LooksLikeScrapDetect(
                         regions, pipeW, pipeH, fragmented);
                     detail.AppendLine(
                         $"(lowConf={detection.LowConfidence} frag={fragmented} " +
-                        $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
+                        $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count} " +
+                        $"fogUsed={fogUsed:0.###}" +
+                        (dynSearched ? $" dynStart={fogStart:0.###}" : "") +
+                        ")");
                 }
 
                 // Same green boxes as Settings → Balloons: grow cores + settings crop pad
-                // on detect view (fog when on). Use settings pad even when ForcedCropPadPx=0
+                // on detect view (fog when on). Use settings pad even when override pad=0
                 // so the returned overlay / Analytics match what the user tuned.
                 int overlayPad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
                 // Override boxes from Balloons already include pad — do not expand again.
@@ -1533,13 +1567,30 @@ namespace SpeakRect
                 var spokenParts = new List<string>();
                 string chosenTag;
 
-                // Sequential: OCR+TTS each balloon alone (default). Isolates
-                // cross-balloon word reuse from global speak-dedupe.
+                // Same strategy switch as live CaptureAndRecognizeAsync (POI / sequential / stack).
+                bool usePoi =
+                    AppSettings.Current.ComicPoiMarkers &&
+                    regions.Count > 0;
                 bool useSequential =
+                    !usePoi &&
                     AppSettings.Current.ComicSequentialRegions &&
                     regions.Count > 0;
 
-                if (useSequential)
+                if (usePoi)
+                {
+                    var (poiParts, poiTag, poiDucked) =
+                        await RunComicPoiGuideAsync(
+                            toneOwned, regions, pipeW, pipeH,
+                            detail, pipeTimer, token,
+                            speakNow: true, alreadyDucked: ducked)
+                        .ConfigureAwait(false);
+                    spokenParts = poiParts;
+                    chosenTag = poiTag;
+                    ducked = poiDucked;
+                    detail.AppendLine(
+                        $"speak-plan units={spokenParts.Count} tag={chosenTag}");
+                }
+                else if (useSequential)
                 {
                     var (seqParts, seqTag, seqDucked) =
                         await RunSequentialRegionsSpeakAsync(
@@ -1664,6 +1715,12 @@ namespace SpeakRect
                     await SpeakWithSystemAsync("unreadable", token).ConfigureAwait(false);
                 }
 
+                // Publish to Analytics without clearing Balloons refine session.
+                WriteLastOcrDebug(
+                    unreadable ? "(unreadable)" : finalJoined,
+                    detail,
+                    notifyNewCapture: false);
+
                 return new ComicRegionSpeakResult
                 {
                     Overlay = overlay,
@@ -1695,7 +1752,7 @@ namespace SpeakRect
             }
             finally
             {
-                ForcedCropPadPx = null;
+                _forcedCropPadPx = null;
                 if (ducked)
                     RestoreAudio();
                 prepStages?.Dispose();
@@ -2039,6 +2096,8 @@ namespace SpeakRect
                 // -------------------------------------------------------------
                 // ComicBook OFF (Default): letterbox → upscale → ink-gray → tone →
                 //     one full-frame Local-LLM call (no fog / detect / crops).
+                // ComicBook ON + POI: tone + green boxes (± outside fog); 1 island → VL guide;
+                //     2+ islands → sequential crops (guide published for analytics/preview).
                 // ComicBook ON:
                 //  0) Same Image prep → tone (Local-LLM) + optional fog (OCR detect only)
                 //  1) Always run balloon OCR detect + region improve (when no override)
@@ -2147,31 +2206,37 @@ namespace SpeakRect
                         $"upscale {upscaleOwned.Width}x{upscaleOwned.Height} " +
                         $"ocr {ocrImage.Width}x{ocrImage.Height}");
 
-                    // Dual bitmaps: Local-LLM always ocrImage/tone; detect may fog.
-                    using (var toneDetect = ComicDetectTonePair.Create(
-                        ocrImage,
-                        EnableWinOcrDetectGrayFog,
-                        WinOcrDetectGrayFogAmount,
-                        WinOcrDetectGrayFogLevel,
-                        ApplyGrayFog))
+                    // Shared detect (optional dynamic fog) — same entry as Balloons.
+                    // Local-LLM always reads ocrImage/tone; WinOCR detect may use fog.
+                    sw.Restart();
+                    var detectLog = new StringBuilder();
+                    List<DetectedTextRegion> regions;
+                    DetectionResult detection;
+                    bool fragmented;
+                    float fogUsedLive;
+                    bool dynFogLive;
+                    float fogStartLive;
                     {
-                        if (toneDetect.DetectIsSeparateFog)
-                        {
-                            sw.Restart();
-                            fogOwned = toneDetect.ReleaseDetect();
-                            pipeTimer.Mark("fog (detect only)", sw);
-                            detectImage = fogOwned;
-                        }
-                        else
-                        {
-                            detectImage = ocrImage;
-                        }
+                        var (regs, det, frag, detImg, ownsDet, fogAmt, dyn, fogStart) =
+                            await BuildComicRegionsSharedDetectAsync(
+                                ocrImage, detectLog, token).ConfigureAwait(false);
+                        if (ownsDet)
+                            fogOwned = detImg;
+                        detectImage = detImg;
+                        regions = regs;
+                        detection = det;
+                        fragmented = frag;
+                        fogUsedLive = fogAmt;
+                        dynFogLive = dyn;
+                        fogStartLive = fogStart;
                     }
+                    pipeTimer.Mark(
+                        $"detect-fog+regions (dyn={dynFogLive} fog={fogUsedLive:0.00}" +
+                        (dynFogLive ? $" start={fogStartLive:0.00}" : "") + ")",
+                        sw);
 
                     sw.Restart();
                     // Analytics: one slot per real stage (no clones of the same pixels).
-                    // Capture → letterbox? → upscale → gray → tone (Kobold) → fog? (detect)
-                    // Full-frame Kobold will not re-add "Full-frame prep" when it is a clone.
                     CaptureAnalyticsImage("capture", "Capture", rawSnap);
                     if (letterboxOwned.Width != rawSnap.Width ||
                         letterboxOwned.Height != rawSnap.Height)
@@ -2182,7 +2247,6 @@ namespace SpeakRect
                         CaptureAnalyticsImage("upscale", "Upscale", upscaleOwned);
                     if (grayOwned != null)
                         CaptureAnalyticsImage("gray", "Ink gray", grayOwned);
-                    // Tone = what Kobold full-frame + crops read (pre-fog).
                     CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", ocrImage);
                     if (!ReferenceEquals(detectImage, ocrImage))
                         CaptureAnalyticsImage("detect", "Detect (fog)", detectImage);
@@ -2192,12 +2256,9 @@ namespace SpeakRect
                         try
                         {
                             EnsureDebugFolder();
-                            // Drop stale crops / half-frames / winocr leftovers so the
-                            // folder only reflects this run.
                             ClearStaleDebugArtifacts();
                             if (ActiveHeavyDebugImages)
                             {
-                                // Full strength: every prep stage for diagnosis
                                 rawSnap.Save(
                                     Path.Combine(DebugFolder, "last_capture.png"), ImageFormat.Png);
                                 if (letterboxOwned.Width != rawSnap.Width ||
@@ -2219,18 +2280,15 @@ namespace SpeakRect
                                         Path.Combine(DebugFolder, "last_gray.png"),
                                         ImageFormat.Png);
                                 }
-                                // Pre-fog tone - what full-frame + crop Kobold use
                                 ocrImage.Save(
                                     Path.Combine(DebugFolder, "last_ocr_prep.png"),
                                     ImageFormat.Png);
-                                // Detect source (fog when enabled; else same as ocr prep)
                                 detectImage.Save(
                                     Path.Combine(DebugFolder, "last_detect_fog.png"),
                                     ImageFormat.Png);
                             }
                             else
                             {
-                                // Release-style minimal: one prep PNG when any artifacts on
                                 ocrImage.Save(
                                     Path.Combine(DebugFolder, "last_ocr_prep.png"),
                                     ImageFormat.Png);
@@ -2243,80 +2301,59 @@ namespace SpeakRect
                     }
                     pipeTimer.Mark("debug-image-save", sw);
 
-                var spokenParts = new List<string>();
-                var detail = new StringBuilder();
-                {
-                    // Build + full pipe profile first so every last_ocr.txt is attributable
-                    detail.Append(FormatRunHeader(comicBookOn: true, detectUsesFog: fogOwned != null));
-                    detail.AppendLine(
-                        $"letterbox-trim → {letterboxOwned!.Width}x{letterboxOwned.Height}");
-                    detail.AppendLine(
-                        $"upscale-comic → {upscaleOwned!.Width}x{upscaleOwned.Height} " +
-                        $"(long-edge {ActivePipelineUpscaleLongSide})");
-                    var tags = new List<string> { "letterbox", "upscale-comic" };
-                    if (grayOwned != null) tags.Add("gray");
-                    tags.Add("tone");
-                    if (fogOwned != null) tags.Add("fog(detect)");
-                    detail.AppendLine(
-                        $"pipeline={string.Join("+", tags)} " +
-                        $"{ocrImage.Width}x{ocrImage.Height} " +
-                        $"(from snap {rawSnap.Width}x{rawSnap.Height}; " +
-                        "ComicBook ON - WinOCR detect on " +
-                        (fogOwned != null ? "fog" : "tone") +
-                        ", OCR full+crops on tone; full path; " +
-                        "prep=Image tab shared pipeline)");
-                }
-
-                bool ducked = false;
-                try
-                {
-                    List<string> chosen = new();
-                    string chosenTag = "none";
-                    // User's ComicBook setting for this capture (restored after any temp OFF).
-                    bool userComicBook = AppSettings.Current.ComicBook;
-                    // ComicBook ON: regions already ran WinOCR (reuse for TTS fallback).
-                    List<DetectedTextRegion>? winOcrRegions = null;
-
-                    // ComicBook ON pipeline (always detect + crop-stack; no short path):
-                    //   1) prep already done (tone = Kobold; optional fog = WinOCR detect)
-                    //   2) cheap OCR wordcount (diagnostic only — never gates detect)
-                    //   3) multi-pass boxes on detectImage + crop-stack / crops on ocrImage
-                    //      Full-frame runs inside best-of as fallback, never instead of crops.
+                    var spokenParts = new List<string>();
+                    var detail = new StringBuilder();
                     {
-                        sw.Restart();
-                        var (winOcrWords, quickDetail) =
-                            await QuickWinOcrWordCountAsync(detectImage, token);
-                        pipeTimer.Mark("winocr-wordcount (quick)", sw);
-                        token.ThrowIfCancellationRequested();
-                        detail.Append(quickDetail);
+                        detail.Append(FormatRunHeader(
+                            comicBookOn: true, detectUsesFog: fogOwned != null));
                         detail.AppendLine(
-                            $"winocr-wordcount={winOcrWords} " +
-                            "(diagnostic only; ComicBook always detect+crop-stack)");
+                            $"letterbox-trim → {letterboxOwned!.Width}x{letterboxOwned.Height}");
+                        detail.AppendLine(
+                            $"upscale-comic → {upscaleOwned!.Width}x{upscaleOwned.Height} " +
+                            $"(long-edge {ActivePipelineUpscaleLongSide})");
+                        var tags = new List<string> { "letterbox", "upscale-comic" };
+                        if (grayOwned != null) tags.Add("gray");
+                        tags.Add("tone");
+                        if (fogOwned != null) tags.Add("fog(detect)");
+                        detail.AppendLine(
+                            $"pipeline={string.Join("+", tags)} " +
+                            $"{ocrImage.Width}x{ocrImage.Height} " +
+                            $"(from snap {rawSnap.Width}x{rawSnap.Height}; " +
+                            "ComicBook ON - WinOCR detect on " +
+                            (fogOwned != null ? "fog" : "tone") +
+                            $", OCR full+crops on tone; fogUsed={fogUsedLive:0.###}; " +
+                            "prep=Image tab shared pipeline)");
+                        detail.Append(detectLog);
+                    }
 
+                    bool ducked = false;
+                    try
+                    {
+                        List<string> chosen = new();
+                        string chosenTag = "none";
+                        // User's ComicBook setting for this capture (restored after any temp OFF).
+                        bool userComicBook = AppSettings.Current.ComicBook;
+                        // ComicBook ON: regions already ran WinOCR (reuse for TTS fallback).
+                        List<DetectedTextRegion>? winOcrRegions = null;
+
+                        // ComicBook ON pipeline (shared detect already ran above):
+                        //   1) prep already done (tone = Kobold; optional fog = WinOCR detect)
+                        //   2) regions from BuildComicRegionsSharedDetectAsync (dyn fog when on)
+                        //   3) POI / sequential / best-of on ocrImage (tone)
                         {
                             detail.AppendLine(
                                 $"strategy=detect+crop-stack " +
-                                $"(ComicBook always; winocrWords={winOcrWords})");
+                                $"(ComicBook always; regions={regions.Count} fogUsed={fogUsedLive:0.###})");
                             Debug.WriteLine(
                                 $"[OCR] ComicBook full path: detect+crop-stack " +
-                                $"(winocrWords={winOcrWords})");
+                                $"(regions={regions.Count} fog={fogUsedLive:0.###})");
 
-                            // Geometry matches detectImage and ocrImage (same size).
-                            // Same region pipeline as Balloons preview / speak-test.
                             int pipeW = ocrImage.Width;
                             int pipeH = ocrImage.Height;
-
-                            sw.Restart();
-                            var (regions, detection, fragmented) =
-                                await BuildComicReadingRegionsAsync(
-                                    detectImage, pipeW, pipeH, detail, token)
-                                    .ConfigureAwait(false);
-                            token.ThrowIfCancellationRequested();
 
                             // Same boxes as Balloons preview: post-grow cores + crop pad
                             // on the detect view (fog when on). Crops still use clear tone.
                             SaveRegionDebugOverlay(detectImage, regions);
-                            pipeTimer.Mark("winocr-detect+regions+overlay", sw);
                             winOcrRegions = regions;
 
                             bool solidIslands = HasWellSeparatedSolidIslands(
@@ -2327,17 +2364,51 @@ namespace SpeakRect
                                 $"(lowConf={detection.LowConfidence} frag={fragmented} " +
                                 $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
 
-                            // Sequential (default): OCR+TTS each balloon alone — no
-                            // crop-stack and no global speak-dedupe bag across balloons.
+                            // POI guide: Comic Book alternate (shared with Balloons Speak).
+                            bool usePoi =
+                                AppSettings.Current.ComicPoiMarkers &&
+                                regions.Count > 0;
+
+                            // Sequential (default when not POI): OCR+TTS each balloon alone.
+                            // Multi-island POI also uses sequential (see RunComicPoiGuideAsync).
                             bool useSequential =
+                                !usePoi &&
                                 AppSettings.Current.ComicSequentialRegions &&
                                 regions.Count > 0;
 
-                            if (useSequential)
+                            if (usePoi)
+                            {
+                                var (poiParts, poiTag, poiDucked) =
+                                    await RunComicPoiGuideAsync(
+                                        ocrImage, regions, pipeW, pipeH,
+                                        detail, pipeTimer, token,
+                                        speakNow: true, alreadyDucked: ducked)
+                                    .ConfigureAwait(false);
+                                spokenParts = poiParts;
+                                chosen = poiParts;
+                                chosenTag = poiTag;
+                                ducked = poiDucked;
+
+                                // POI always speaks inside RunComicPoiGuideAsync when
+                                // speakNow:true (1-island full-page OR multi sequential).
+                                // Must publish + skip the second TTS block below.
+                                if (spokenParts.Count > 0 &&
+                                    chosenTag.StartsWith("comic-poi", StringComparison.Ordinal))
+                                {
+                                    detail.AppendLine(
+                                        $"speak-plan units={spokenParts.Count} tag={chosenTag} " +
+                                        "(already spoke in RunComicPoiGuideAsync)");
+                                    string poiJoined = string.Join(
+                                        Environment.NewLine + Environment.NewLine,
+                                        spokenParts);
+                                    WriteLastOcrDebug(poiJoined, detail);
+                                }
+                            }
+                            else if (useSequential)
                             {
                                 detail.AppendLine(
                                     $"strategy=sequential-regions " +
-                                    $"(ComicBook; winocrWords={winOcrWords})");
+                                    $"(ComicBook; regions={regions.Count})");
                                 Debug.WriteLine(
                                     $"[OCR] ComicBook sequential regions " +
                                     $"(count={regions.Count})");
@@ -2369,16 +2440,17 @@ namespace SpeakRect
                                 chosenTag = fbTag;
                             }
                         }
-                    }
 
                     // Crop-stack path: full global speak plan.
-                    // Sequential already OCR+TTS'd (or tried full-frame inside); if
-                    // it still produced nothing, share the empty-ladder below.
-                    bool alreadySpokeSequential =
-                        chosenTag.StartsWith("sequential-regions", StringComparison.Ordinal) &&
-                        spokenParts.Count > 0;
+                    // Sequential and ALL comic-poi* paths already OCR+TTS'd when
+                    // speakNow was true — do not speak again (was double-reading
+                    // 1-island POI: tag "comic-poi" missed the old check).
+                    bool alreadySpoke =
+                        spokenParts.Count > 0 &&
+                        (chosenTag.StartsWith("sequential-regions", StringComparison.Ordinal) ||
+                         chosenTag.StartsWith("comic-poi", StringComparison.Ordinal));
 
-                    if (!alreadySpokeSequential)
+                    if (!alreadySpoke)
                     {
                         // Fallback ladder when primary path has nothing to speak:
                         // 1) ComicBook was ON ? one more full-frame with simple OFF prompt
@@ -2602,6 +2674,7 @@ namespace SpeakRect
                         string.Equals(name, "last_winocr_detect.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_regions.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_detect_fog.png", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "last_poi_guide.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_ocr_prep.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_letterbox.png", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(name, "last_upscale.png", StringComparison.OrdinalIgnoreCase) ||
@@ -2745,14 +2818,47 @@ namespace SpeakRect
                 return sb.ToString();
             }
 
-            sb.AppendLine("profile=full (ComicBook ON)");
+            bool poi = AppSettings.Current.ComicPoiMarkers;
+            sb.AppendLine(
+                poi
+                    ? "profile=full+poi (ComicBook: detect → POI guide; " +
+                      "1 island full-page / 2+ sequential per-island — live=Balloons)"
+                    : "profile=full (ComicBook ON)");
             sb.AppendLine("pipe detail:");
             sb.AppendLine($"  upscale long-edge={ActivePipelineUpscaleLongSide}");
             sb.AppendLine("  tone=denoise+levels+sharpen");
             sb.AppendLine(
                 $"  winocr detect=pass1+pass2" +
                 $", orphans={ActiveMaxOrphanWinOcrPasses}" +
-                $", fog={(detectUsesFog ? "on" : "off")}");
+                $", fog={(detectUsesFog ? "on" : "off")}" +
+                (detectUsesFog && AppSettings.Current.ComicDynamicFog
+                    ? $", dynFog=on floor={DynamicFogSearchFloor:0.###} (climb to peak)"
+                    : detectUsesFog
+                        ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
+                        : ""));
+            if (poi)
+            {
+                sb.AppendLine(
+                    "  poi guide=bright green region boxes (same as Balloons preview)");
+                sb.AppendLine(
+                    AppSettings.Current.ComicPoiFogOutside
+                        ? "  poi outside-fog=thick (hide art/UI outside islands)"
+                        : "  poi outside-fog=off");
+                if (AppSettings.Current.ComicPoiAutoStack)
+                {
+                    int thr = AppSettings.Current.ComicPoiAutoStackGapPx;
+                    sb.AppendLine(
+                        thr <= 0
+                            ? "  poi auto-stack=always (2+ islands; analytics/preview)"
+                            : $"  poi auto-stack=when gap>{thr}px (analytics/preview)");
+                }
+                else
+                {
+                    sb.AppendLine("  poi auto-stack=off");
+                }
+                sb.AppendLine(
+                    "  poi multi-island=sequential per-island (same as Balloons Speak)");
+            }
             sb.AppendLine(
                 ActiveDecodeConsensus
                     ? "  OCR decode=consensus 2-of-3 (T=0 / T=0.25 / recovery)"
@@ -2763,10 +2869,17 @@ namespace SpeakRect
             sb.AppendLine(
                 $"  winocr detect png={(ActiveWinOcrDetectDebugPng ? "on" : "off")}");
             sb.AppendLine("  dual-balloon dash promote (TTS pauses)=on");
-            sb.AppendLine(
-                AppSettings.Current.ComicSequentialRegions
-                    ? "  sequential-regions=on (OCR+TTS per balloon; no global dedupe bag)"
-                    : "  crop-stack=on when detect finds islands (global speak plan)");
+            if (poi)
+            {
+                sb.AppendLine("  crop-stack=off (POI uses full-page or sequential)");
+            }
+            else
+            {
+                sb.AppendLine(
+                    AppSettings.Current.ComicSequentialRegions
+                        ? "  sequential-regions=on (OCR+TTS per balloon; no global dedupe bag)"
+                        : "  crop-stack=on when detect finds islands (global speak plan)");
+            }
             sb.AppendLine();
             return sb.ToString();
         }
@@ -3297,7 +3410,7 @@ namespace SpeakRect
                     $"(native prep crops, gap={CropStackGapPx})");
                 sw.Restart();
                 using var stackBmp = BuildVerticalCropStack(
-                    pipelineImage, regions, detail);
+                    pipelineImage, regions, detail, ActiveCropPadPx);
                 pipeTimer.Mark("crop-stack-compose", sw);
 
                 if (stackBmp != null)
@@ -3426,6 +3539,218 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Shared Comic Book POI path for live overlay and Balloons Speak.
+        /// <list type="bullet">
+        /// <item>Compose base is always <b>tone</b> (never detect fog).</item>
+        /// <item>Display boxes: if override pad is 0 (Balloons refine boxes),
+        /// region bounds are already final; else expand cores with crop pad once.</item>
+        /// <item>1 island: full-page <see cref="ComicPoiGuide.DrawRegionGuides"/> → one VL call
+        /// (that bitmap is the VL input + analytics <c>poi_guide</c>).</item>
+        /// <item>2+ islands: same full-page guide published for analytics/preview parity;
+        /// speak is sequential per-island OCR on tone crops (reliable). Stack is optional
+        /// debug only — never claimed as VL input.</item>
+        /// </list>
+        /// </summary>
+        private async Task<(List<string> Parts, string Tag, bool Ducked)> RunComicPoiGuideAsync(
+            Bitmap toneImage,
+            List<DetectedTextRegion> regions,
+            int pipeW,
+            int pipeH,
+            StringBuilder detail,
+            PipelineTimer pipeTimer,
+            CancellationToken token,
+            bool speakNow,
+            bool alreadyDucked)
+        {
+            var sPoi = AppSettings.Current;
+            var sw = Stopwatch.StartNew();
+
+            // Pad once: live uses cores (_forcedCropPadPx null); Balloons override already final.
+            bool displayBoxesFinal = _forcedCropPadPx == 0;
+            List<Rectangle> boxes;
+            if (displayBoxesFinal)
+            {
+                boxes = regions.ConvertAll(r => r.Bounds);
+                detail.AppendLine(
+                    $"poi-boxes: display-final={boxes.Count} (override; pad not re-applied)");
+            }
+            else
+            {
+                boxes = ExpandRegionsByCropPad(
+                        regions, pipeW, pipeH, ActiveCropPadPx)
+                    .ConvertAll(r => r.Bounds);
+                detail.AppendLine(
+                    $"poi-boxes: cropPad={ActiveCropPadPx}px → {boxes.Count} (expanded once)");
+            }
+
+            detail.AppendLine(
+                $"strategy=comic-poi (tone base; islands={boxes.Count}; " +
+                $"outsideFog={sPoi.ComicPoiFogOutside}; " +
+                $"autoStackDbg={sPoi.ComicPoiAutoStack} gapThr={sPoi.ComicPoiAutoStackGapPx})");
+
+            // Full-page guide on TONE — same DrawRegionGuides as Balloons POI preview.
+            // Published for every island count so Analytics matches Preview.
+            Bitmap? guideBmp = null;
+            try
+            {
+                sw.Restart();
+                bool fogOutside = sPoi.ComicPoiFogOutside;
+                guideBmp = ComicPoiGuide.DrawRegionGuides(
+                    toneImage, boxes, detail, fogOutside: fogOutside);
+                pipeTimer.Mark(
+                    fogOutside ? "poi-outside-fog+boxes" : "poi-green-boxes", sw);
+                CaptureAnalyticsImage(
+                    "poi_guide",
+                    fogOutside ? "POI boxes + outside fog (tone)" : "POI green boxes (tone)",
+                    guideBmp);
+                SavePoiVlDebug(guideBmp, isVlInput: boxes.Count == 1);
+
+                // Optional stack for debug/order only — never the multi-island VL input.
+                int maxGap = ComicPoiGuide.MaxConsecutiveSeparation(boxes);
+                bool wouldStack = sPoi.ComicPoiAutoStack &&
+                    ComicPoiGuide.ShouldAutoStack(boxes, sPoi.ComicPoiAutoStackGapPx, out _);
+                detail.AppendLine(
+                    $"poi-auto-stack: on={sPoi.ComicPoiAutoStack} " +
+                    $"maxConsecutiveGap={maxGap}px thr={sPoi.ComicPoiAutoStackGapPx}px " +
+                    $"→ {(wouldStack ? "debug stack only (speak is sequential)" : "off")}");
+                if (boxes.Count >= 2 && wouldStack)
+                {
+                    try
+                    {
+                        using var stackBmp = ComicPoiGuide.BuildVerticalStack(
+                            toneImage, boxes, detail, paintBullseyes: false);
+                        if (stackBmp != null)
+                        {
+                            CaptureAnalyticsImage(
+                                "poi_stack_debug",
+                                "POI stack (debug/order only — not VL input)",
+                                stackBmp);
+                            if (ActiveAnyDebugArtifacts)
+                            {
+                                try
+                                {
+                                    EnsureDebugFolder();
+                                    stackBmp.Save(
+                                        Path.Combine(DebugFolder, "last_poi_stack_debug.png"),
+                                        ImageFormat.Png);
+                                }
+                                catch { /* debug only */ }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        detail.AppendLine($"poi-stack debug compose: {ex.Message}");
+                    }
+                }
+
+                // Multi-island: sequential OCR on tone crops (same geometry as green boxes).
+                if (boxes.Count >= 2)
+                {
+                    detail.AppendLine(
+                        "poi-speak: sequential per-island on tone " +
+                        "(VL does NOT receive full-page guide or stack)");
+                    Debug.WriteLine(
+                        $"[OCR] ComicBook POI multi → sequential islands={boxes.Count}");
+                    var (seqParts, seqTag, seqDucked) =
+                        await RunSequentialRegionsSpeakAsync(
+                            toneImage, regions, detail, pipeTimer, token,
+                            speakNow: speakNow, alreadyDucked: alreadyDucked)
+                        .ConfigureAwait(false);
+                    string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
+                        ? "comic-poi-seq"
+                        : $"comic-poi-seq/{seqTag}";
+                    detail.AppendLine(
+                        $"winner={tag} parts={seqParts.Count} " +
+                        $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
+                    return (seqParts, tag, seqDucked);
+                }
+
+                // Single island: VL input = guideBmp (same pixels as preview/analytics).
+                sw.Restart();
+                string? poiClean = await RunFullFrameKoboldOnBitmapAsync(
+                    guideBmp,
+                    detail,
+                    token,
+                    savePrep: false,
+                    promptOverride: AppSettings.Current.ResolvePoiPrompt())
+                    .ConfigureAwait(false);
+                pipeTimer.Mark("full-frame-ocr (poi)", sw);
+
+                var parts = new List<string>();
+                if (!SpeechCleaner.IsUnusableOcrText(poiClean))
+                {
+                    parts.Add(poiClean!);
+                    detail.AppendLine(
+                        $"winner=comic-poi words={ComicRegionGeometry.CountWords(poiClean!)}");
+                }
+                else
+                {
+                    detail.AppendLine("comic-poi full-frame empty/unusable");
+                }
+
+                bool ducked = alreadyDucked;
+                if (speakNow && parts.Count > 0)
+                {
+                    var speakPieces = SpeechCleaner.ExpandToSpeakPieces(parts);
+                    if (speakPieces.Count > 0)
+                    {
+                        if (!ducked)
+                        {
+                            DuckOtherAudio();
+                            ducked = true;
+                        }
+                        var spoken = new List<string>();
+                        for (int pi = 0; pi < speakPieces.Count; pi++)
+                        {
+                            token.ThrowIfCancellationRequested();
+                            string unit = speakPieces[pi].Text;
+                            spoken.Add(unit);
+                            detail.AppendLine(
+                                $"speak[comic-poi {pi + 1}/{speakPieces.Count}]: {unit}");
+                            sw.Restart();
+                            await SpeakWithSystemAsync(unit, token).ConfigureAwait(false);
+                            pipeTimer.Mark($"tts comic-poi[{pi + 1}]", sw);
+                            int pauseMs = speakPieces[pi].PauseAfterMs;
+                            if (pauseMs > 0)
+                                await Task.Delay(pauseMs, token).ConfigureAwait(false);
+                        }
+                        return (spoken, "comic-poi", ducked);
+                    }
+                }
+
+                return (parts, parts.Count > 0 ? "comic-poi" : "comic-poi-empty", ducked);
+            }
+            finally
+            {
+                try { guideBmp?.Dispose(); } catch { /* ignore */ }
+            }
+        }
+
+        /// <summary>
+        /// Write the POI guide bitmap for debug. Only mark as VL input when that
+        /// exact image is what Local-LLM receives (single-island full-page).
+        /// </summary>
+        private static void SavePoiVlDebug(Bitmap? guide, bool isVlInput)
+        {
+            if (guide == null || !ActiveAnyDebugArtifacts)
+                return;
+            try
+            {
+                EnsureDebugFolder();
+                guide.Save(Path.Combine(DebugFolder, "last_poi_guide.png"), ImageFormat.Png);
+                if (isVlInput)
+                {
+                    guide.Save(
+                        Path.Combine(DebugFolder, "last_poi_vl_input.png"), ImageFormat.Png);
+                    guide.Save(
+                        Path.Combine(DebugFolder, "last_full_prep.png"), ImageFormat.Png);
+                }
+            }
+            catch { /* debug only */ }
+        }
+
+        /// <summary>
         /// Crop each reading-order region from the prepped pipeline image and stack
         /// top→bottom with a gap. Strips keep native prep pixels (no second-pass
         /// upscale/tone). Composition may scale down only to honor height/edge caps.
@@ -3433,7 +3758,8 @@ namespace SpeakRect
         private static Bitmap? BuildVerticalCropStack(
             Bitmap pipelineImage,
             List<DetectedTextRegion> regions,
-            StringBuilder detail)
+            StringBuilder detail,
+            int cropPadPx)
         {
             if (pipelineImage == null || regions == null || regions.Count == 0)
                 return null;
@@ -3450,7 +3776,7 @@ namespace SpeakRect
                     using var crop = CropRegionClamped(
                         pipelineImage,
                         regions[i].Bounds,
-                        TextRegionPadding,
+                        cropPadPx,
                         neighbors);
                     if (crop == null || crop.Width < 4 || crop.Height < 4)
                     {
@@ -3606,6 +3932,7 @@ namespace SpeakRect
         /// ComicBook OFF (Default mode): same Image prep as ComicBook
         /// (letterbox → upscale → gray → tone), then one full-frame Kobold call.
         /// No fog / WinOCR detect / balloon crops — strategy differs, prep does not.
+        /// POI guide is Comic Book only (see main ComicBook path).
         /// </summary>
         private async Task RunComicBookOffPreparedSnapAsync(
             Bitmap rawSnap,
@@ -3709,18 +4036,41 @@ namespace SpeakRect
                     koboldSource, detail, token, savePrep: false);
                 pipeTimer.Mark("full-frame-ocr", sw);
 
-                // Split on typed pause marks → real TTS pauses (same as ComicBook).
+                // Same pause pipeline as Comic Book: typed marks → ExpandToSpeakPieces
+                // (comma/sentence/other/bubble ms from Voice tab) + dedupe/coalesce.
+                // Previously Default only SplitSpeakPieces and skipped SSML multi-sentence
+                // breaks in SpeakOneUnit — felt like Voice pauses were ignored.
+                detail.AppendLine(
+                    $"voice-pauses: encode={(UseCustomPauseEncodings ? "on" : "off")} " +
+                    $"comma={CommaPauseMs} sentence={SentencePauseMs} " +
+                    $"other={OtherPauseMs} bubble={BubblePauseMs}");
+
                 var speakPieces = new List<SpeechCleaner.SpeakPiece>();
                 string chosenTag = "full-frame";
                 if (!SpeechCleaner.IsUnusableOcrText(fullClean))
                 {
-                    foreach (var piece in SpeechCleaner.SplitSpeakPieces(fullClean!))
+                    speakPieces = SpeechCleaner.ExpandToSpeakPieces(new[] { fullClean! });
+                    if (speakPieces.Count >= 2)
                     {
-                        if (!SpeechCleaner.IsUnusableOcrText(piece.Text))
-                            speakPieces.Add(piece);
+                        int beforeDedup = speakPieces.Count;
+                        speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
+                        if (speakPieces.Count != beforeDedup)
+                        {
+                            detail.AppendLine(
+                                $"speak-dedupe {beforeDedup} → {speakPieces.Count}");
+                        }
                     }
-                    if (speakPieces.Count > 0)
-                        speakPieces[^1] = speakPieces[^1].WithPause(0);
+                    if (speakPieces.Count >= 2)
+                    {
+                        int beforeCoal = speakPieces.Count;
+                        speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(
+                            speakPieces, detail);
+                        if (speakPieces.Count != beforeCoal)
+                        {
+                            detail.AppendLine(
+                                $"speak-coalesce {beforeCoal} → {speakPieces.Count}");
+                        }
+                    }
                 }
 
                 // Short single balloons ("No!", "OK!") often fail full-frame VL on a
@@ -3827,7 +4177,7 @@ namespace SpeakRect
             }
             finally
             {
-                // prepStages owns letterbox/upscale/gray (aliases of *Owned).
+                // prepStages owns letterbox/upscale/gray/tone (aliases of *Owned).
                 prepStages?.Dispose();
             }
         }
@@ -4288,7 +4638,7 @@ namespace SpeakRect
             async Task<(string? Clean, string Raw)> TryKoboldOnBounds(Rectangle b, string tag)
             {
                 using var crop = CropRegionClamped(
-                    capture, b, TextRegionPadding, neighborBoxes);
+                    capture, b, ActiveCropPadPx, neighborBoxes);
                 if (crop == null)
                     return (null, "");
 
@@ -4750,6 +5100,216 @@ namespace SpeakRect
                 Debug.WriteLine($"[WinOCR] quick wordcount failed: {ex.Message}");
                 return (0, log.ToString());
             }
+        }
+
+        /// <summary>
+        /// Fixed low floor for <see cref="AppSettings.ComicDynamicFog"/> search.
+        /// User slider is ignored while dyn is on — always climb from here.
+        /// </summary>
+        public const float DynamicFogSearchFloor = 0.10f;
+
+        /// <summary>
+        /// Shared detect entry for live + Balloons preview/speak.
+        /// When detect fog + <see cref="AppSettings.ComicDynamicFog"/>:
+        /// <list type="number">
+        /// <item>Search with merge-overlap <b>off</b> (no AppSettings mutation).</item>
+        /// <item>Single-pass WinOCR + grow-only; score = total island area.</item>
+        /// <item>Always start at <see cref="DynamicFogSearchFloor"/> and climb
+        /// until area clearly shrinks vs peak (user fog slider not used).</item>
+        /// <item>Final full detect at best fog with user's merge setting.</item>
+        /// </list>
+        /// Preview base image is the final fog so you can see the chosen amount.
+        /// </summary>
+        private async Task<(
+            List<DetectedTextRegion> Regions,
+            DetectionResult Detection,
+            bool Fragmented,
+            Bitmap DetectImage,
+            bool OwnsDetectImage,
+            float FogAmountUsed,
+            bool DynamicFogSearched,
+            float FogAmountStart)> BuildComicRegionsSharedDetectAsync(
+            Bitmap toneImage,
+            StringBuilder detail,
+            CancellationToken token)
+        {
+            int pipeW = toneImage.Width;
+            int pipeH = toneImage.Height;
+            float fixedAmt = Math.Clamp(WinOcrDetectGrayFogAmount, 0f, 1f);
+
+            if (!EnableWinOcrDetectGrayFog)
+            {
+                detail.AppendLine("detect-fog=off (detect on tone)");
+                var (r0, d0, f0) = await BuildComicReadingRegionsAsync(
+                    toneImage, pipeW, pipeH, detail, token).ConfigureAwait(false);
+                return (r0, d0, f0, toneImage, OwnsDetectImage: false,
+                    FogAmountUsed: 0f, DynamicFogSearched: false, FogAmountStart: 0f);
+            }
+
+            if (!AppSettings.Current.ComicDynamicFog)
+            {
+                detail.AppendLine($"detect-fog=fixed amount={fixedAmt:0.###}");
+                Bitmap fog = ApplyGrayFog(toneImage, fixedAmt, WinOcrDetectGrayFogLevel);
+                try
+                {
+                    var (r1, d1, f1) = await BuildComicReadingRegionsAsync(
+                        fog, pipeW, pipeH, detail, token).ConfigureAwait(false);
+                    return (r1, d1, f1, fog, OwnsDetectImage: true,
+                        FogAmountUsed: fixedAmt, DynamicFogSearched: false,
+                        FogAmountStart: fixedAmt);
+                }
+                catch
+                {
+                    try { fog.Dispose(); } catch { /* ignore */ }
+                    throw;
+                }
+            }
+
+            // --- Dynamic fog: always start low, climb to peak (ignore user slider) ---
+            float start = DynamicFogSearchFloor;
+            const float step = 0.01f;
+            const float maxFog = 0.95f;
+            const int maxTrials = 90; // 0.10 → 0.95 @ 0.01
+            // Stop only when area falls clearly below the peak (OCR noise wobble).
+            const double shrinkVsPeak = 0.97;
+
+            bool userMerge = EnableMergeOverlappingIslands;
+            detail.AppendLine(
+                $"dyn-fog SEARCH: floor={start:0.00} step={step:0.00} max={maxFog:0.00} " +
+                $"(always climb from low; user slider ignored; " +
+                $"score=single-pass+grow-only area; merge OFF during search; " +
+                $"user merge will restore={userMerge})");
+
+            float bestFog = start;
+            long bestScore = -1;
+            int trialsRun = 0;
+            var trialScores = new List<long>(maxTrials);
+
+            for (int i = 0; i < maxTrials; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                float fogAmt = Math.Min(maxFog, start + i * step);
+                fogAmt = MathF.Round(fogAmt, 2);
+                if (fogAmt > maxFog + 1e-6f)
+                    break;
+
+                var (score, islands) = await ScoreDynamicFogTrialAsync(
+                    toneImage, fogAmt, pipeW, pipeH, token).ConfigureAwait(false);
+                trialsRun++;
+                trialScores.Add(score);
+
+                // Same pure pick as unit tests — recompute best each step for the log.
+                int bestIdx = SmokeSelectDynamicFogBestIndex(trialScores, shrinkVsPeak);
+                bestFog = Math.Min(maxFog, start + bestIdx * step);
+                bestFog = MathF.Round(bestFog, 2);
+                bestScore = trialScores[bestIdx];
+
+                detail.AppendLine(
+                    $"  dyn-fog try[{i}] amount={fogAmt:0.00} islands={islands} areaSum={score}" +
+                    (bestIdx == i ? " *peak*" : ""));
+
+                // Stop when this trial fell clearly below the peak (same rule as pick).
+                if (bestScore > 0 && score < bestScore * shrinkVsPeak && bestIdx < i)
+                {
+                    detail.AppendLine(
+                        $"  dyn-fog STOP: area {score} < peak {bestScore}×{shrinkVsPeak:0.00} " +
+                        $"(boxes shrunk). best amount={bestFog:0.00} areaSum={bestScore}");
+                    break;
+                }
+
+                if (fogAmt >= maxFog - 1e-6f)
+                    break;
+            }
+
+            detail.AppendLine(
+                $"dyn-fog CHOSEN: amount={bestFog:0.00} areaSum={bestScore} " +
+                $"trials={trialsRun} floor={start:0.00} (merge OFF during search only)");
+            detail.AppendLine(
+                $"dyn-fog FINAL detect @ {bestFog:0.00} with merge-overlap={userMerge}");
+
+            // Final full pipeline at best fog — merge follows user setting (not mutated).
+            Bitmap finalFog = ApplyGrayFog(toneImage, bestFog, WinOcrDetectGrayFogLevel);
+            try
+            {
+                var (regions, detection, fragmented) = await BuildComicReadingRegionsAsync(
+                    finalFog, pipeW, pipeH, detail, token).ConfigureAwait(false);
+                return (regions, detection, fragmented, finalFog, OwnsDetectImage: true,
+                    FogAmountUsed: bestFog, DynamicFogSearched: true, FogAmountStart: start);
+            }
+            catch
+            {
+                try { finalFog.Dispose(); } catch { /* ignore */ }
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// One cheap fog trial for dynamic search: single WinOCR pass + grow only.
+        /// Merge-overlap is NOT applied (and nudge-apart is skipped) so areaSum
+        /// measures raw island coverage as fog thickens — not merge topology.
+        /// </summary>
+        private async Task<(long AreaSum, int IslandCount)> ScoreDynamicFogTrialAsync(
+            Bitmap toneImage,
+            float fogAmount,
+            int pipeW,
+            int pipeH,
+            CancellationToken token)
+        {
+            var engine = GetWinOcrEngine();
+            if (engine == null || toneImage.Width < 2 || toneImage.Height < 2)
+                return (0, 0);
+
+            using var trialFog = ApplyGrayFog(
+                toneImage, fogAmount, WinOcrDetectGrayFogLevel);
+            // Quiet log — caller writes one summary line per try.
+            var quiet = new StringBuilder();
+            var raw = await RunWinOcrPassAsync(
+                engine, trialFog, WinOcrDetectScale, token, quiet)
+                .ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+
+            // Grow only — no merge, no nudge. Area = pure box coverage.
+            var grown = ImproveDetectedRegions(
+                raw, pipeW, pipeH, growOnlyNoMergeNoNudge: true);
+
+            long sum = 0;
+            foreach (var r in grown)
+            {
+                int w = Math.Max(0, r.Bounds.Width);
+                int h = Math.Max(0, r.Bounds.Height);
+                sum += (long)w * h;
+            }
+            return (sum, grown.Count);
+        }
+
+        /// <summary>
+        /// Pure hill-climb pick used by dynamic fog (and unit tests):
+        /// walk scores in order; track peak; stop when score falls below
+        /// <paramref name="shrinkVsPeak"/> of the peak. Returns index of best.
+        /// </summary>
+        public static int SmokeSelectDynamicFogBestIndex(
+            IReadOnlyList<long> areaScores,
+            double shrinkVsPeak = 0.97)
+        {
+            if (areaScores == null || areaScores.Count == 0)
+                return 0;
+
+            int bestIdx = 0;
+            long best = areaScores[0];
+            for (int i = 1; i < areaScores.Count; i++)
+            {
+                long s = areaScores[i];
+                if (s > best)
+                {
+                    best = s;
+                    bestIdx = i;
+                }
+                else if (best > 0 && s < best * shrinkVsPeak)
+                {
+                    break;
+                }
+            }
+            return bestIdx;
         }
 
         /// <summary>
@@ -6794,10 +7354,15 @@ namespace SpeakRect
         /// Merge also honors <see cref="TextRegionPadding"/> when testing overlap.
         /// </para>
         /// </summary>
+        /// <param name="growOnlyNoMergeNoNudge">
+        /// Dynamic-fog search: inflate only — do not merge or nudge. Area scores must
+        /// reflect OCR coverage under fog, not merge topology.
+        /// </param>
         private static List<DetectedTextRegion> ImproveDetectedRegions(
             List<DetectedTextRegion> regions,
             int capW,
-            int capH)
+            int capH,
+            bool growOnlyNoMergeNoNudge = false)
         {
             if (regions.Count == 0)
                 return regions;
@@ -6850,6 +7415,12 @@ namespace SpeakRect
                     Bounds = bounds,
                     WinOcrText = r.WinOcrText
                 });
+            }
+
+            if (growOnlyNoMergeNoNudge)
+            {
+                // Dyn-fog trial: leave grown boxes as-is (overlaps ok for area score).
+                return SortComicReadingOrderRegions(inflated);
             }
 
             if (EnableMergeOverlappingIslands)
@@ -8107,7 +8678,10 @@ namespace SpeakRect
         /// Publish analytics snapshot (always) and write last_ocr.txt (Debug builds only).
         /// Called for the speak plan (pre-TTS) and again after timings so Analytics stays current.
         /// </summary>
-        private void WriteLastOcrDebug(string body, StringBuilder detail)
+        private void WriteLastOcrDebug(
+            string body,
+            StringBuilder detail,
+            bool notifyNewCapture = true)
         {
             string spoken = body ?? "";
             bool unreadable =
@@ -8138,8 +8712,9 @@ namespace SpeakRect
             lock (LastResultLock)
                 LastResult = snapshot;
 
-            // Live OCR capture completed — Balloons refine overrides apply to prior page only.
-            ComicRegionOverrideSession.NotifyNewCapture();
+            // Live capture only — Balloons Speak must not wipe refine session.
+            if (notifyNewCapture)
+                ComicRegionOverrideSession.NotifyNewCapture();
 
 #if DEBUG
             try
@@ -8430,8 +9005,8 @@ namespace SpeakRect
                 if (capture == null || regions == null)
                     return;
 
-                // Always use settings pad (not ForcedCropPadPx) so Analytics shows the
-                // same solid crop boxes as Balloons even when Speak overrides pad to 0.
+                // Always use settings pad (not ActiveCropPadPx override) so Analytics shows
+                // the same solid crop boxes as Balloons even when Speak overrides pad to 0.
                 int pad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
                 var boxes = ExpandRegionsByCropPad(
                     regions, capture.Width, capture.Height, pad);
@@ -9548,9 +10123,10 @@ namespace SpeakRect
 
             // Always SSML with xml:lang=en-US so OneCore uses English pronunciation
             // rules even when the system default culture is not English.
-            // ComicBook: optional short breaks between sentences; balloon pauses
-            // stay on Task.Delay (BubblePauseMs).
-            int breakMs = !ComicBookOff && SentenceBreakMs > 0 && LooksMultiSentence(text)
+            // Multi-sentence units (Default + Comic): short SSML breaks when custom
+            // pause encoding did not already split the unit. Balloon/comma pauses
+            // stay on Task.Delay (Voice tab ms).
+            int breakMs = SentenceBreakMs > 0 && LooksMultiSentence(text)
                 ? SentenceBreakMs
                 : 0;
             string ssml = BuildSpeakSsml(text, breakMs, TtsForcedLanguage);
@@ -9631,8 +10207,9 @@ namespace SpeakRect
                 }))
                 {
                     // Always SSML with forced en-US so SAPI does not follow OS UI culture.
+                    // Same multi-sentence SSML break as WinRT (Default + Comic).
                     int breakMs =
-                        SentenceBreakMs > 0 && !ComicBookOff && LooksMultiSentence(text)
+                        SentenceBreakMs > 0 && LooksMultiSentence(text)
                             ? SentenceBreakMs
                             : 0;
                     string ssml = BuildSapiSpeakSsml(

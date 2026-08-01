@@ -40,21 +40,22 @@ namespace SpeakRect
         /// Last Settings UI tab (enum name: KeyMap, Regions, Follow, …).
         /// Restored when opening Settings without a specific destination.
         /// </summary>
-        public string LastSettingsTab { get; set; } = "KeyMap";
+        public string LastSettingsTab { get; set; } = "Help";
 
         /// <summary>Sanitize / default a LastSettingsTab string for ini persistence.</summary>
         public static string NormalizeLastSettingsTab(string? raw)
         {
+            // Empty / invalid → Help (matches stock ini LastSettingsTab default).
             if (string.IsNullOrWhiteSpace(raw))
-                return "KeyMap";
+                return "Help";
             string t = raw.Trim();
             // Allow only simple identifiers (enum-style names).
             foreach (char c in t)
             {
                 if (!(char.IsLetterOrDigit(c) || c == '_'))
-                    return "KeyMap";
+                    return "Help";
             }
-            return t.Length == 0 ? "KeyMap" : t;
+            return t.Length == 0 ? "Help" : t;
         }
 
         /// <summary>Remember the active Settings tab and write SpeakRect.ini.</summary>
@@ -98,9 +99,19 @@ namespace SpeakRect
             "Correct the spelling of common english words.";
 
         /// <summary>
-        /// <b>OFF</b> (default): raw selection snap → one OCR call (no prep).
-        /// <b>ON</b>: comic pipeline — letterbox, upscale, gray/tone,
-        /// OCR balloons, full-page + crop Local-LLM, best-of, TTS.
+        /// Comic Book + POI guide: full-frame after green region boxes on gray prep
+        /// (optional thick fog outside). Same stock as <see cref="ComicPoiGuide.DefaultPrompt"/>.
+        /// </summary>
+        public const string DefaultPoiPrompt =
+            "As an OCR, extract all English text inside each bright green rectangle. " +
+            "Green rectangles mark speech / text regions of interest. " +
+            "Read every word inside those rectangles. " +
+            "Ignore art and UI outside the green rectangles. " +
+            "Do not describe the rectangles themselves. " +
+            "Correct the spelling of common english words.";
+        /// <summary>
+        /// <b>OFF</b> (product default = Default mode): shared Image prep → one full-frame OCR.
+        /// <b>ON</b>: Comic Book pipeline — fog detect, balloons, crops / POI / sequential.
         /// </summary>
         public bool ComicBook { get; set; } = false;
 
@@ -118,6 +129,12 @@ namespace SpeakRect
 
         /// <summary>Last-ditch recovery when the primary prompt blanks. Blank → default.</summary>
         public string RecoveryPrompt { get; set; } = "";
+
+        /// <summary>
+        /// Comic Book + POI markers full-frame. Blank → <see cref="DefaultPoiPrompt"/>.
+        /// Edit under Speech → Prompts.
+        /// </summary>
+        public string PoiPrompt { get; set; } = "";
 
         // -----------------------------------------------------------------------
         // TTS voice — [VOICE] section
@@ -176,28 +193,28 @@ namespace SpeakRect
         // Speak-unit pause delays (Task.Delay between cleaned OCR pieces).
         // Applied after typed pause marks — engine-agnostic (Windows + SAPI).
 
-        // Defaults tuned for natural human speech pacing (clause / sentence / turn):
-        // comma breath ≈ 0.25 s, end-of-sentence ≈ 0.75 s, light mid-break ≈ 0.25 s,
-        // balloon / speaker turn ≈ 1 s.
-        public const int DefaultCommaPauseMs = 250;      // 0.25 s
-        public const int DefaultSentencePauseMs = 750;   // 0.75 s  (. ! ?)
-        public const int DefaultOtherPauseMs = 250;      // 0.25 s
-        public const int DefaultBubblePauseMs = 1000;    // 1.00 s
+        // Defaults match stock SpeakRect.ini [VOICE] (Settings → Voice):
+        // comma ≈ 0.10 s, end-of-sentence ≈ 0.50 s, light mid-break ≈ 0.05 s,
+        // balloon / speaker turn ≈ 0.75 s.
+        public const int DefaultCommaPauseMs = 102;
+        public const int DefaultSentencePauseMs = 502;   // . ! ?
+        public const int DefaultOtherPauseMs = 52;
+        public const int DefaultBubblePauseMs = 752;
         public const int MinSpeakPauseMs = 0;
         public const int MaxSpeakPauseMs = 3000;
 
-        /// <summary>Pause after a comma clause break (ms). Default 250 (0.25 s).</summary>
+        /// <summary>Pause after a comma clause break (ms). Default 102.</summary>
         public int VoiceCommaPauseMs { get; set; } = DefaultCommaPauseMs;
 
-        /// <summary>Pause after <c>.</c> <c>!</c> <c>?</c> (ms). Default 750 (0.75 s).</summary>
+        /// <summary>Pause after <c>.</c> <c>!</c> <c>?</c> (ms). Default 502.</summary>
         public int VoiceSentencePauseMs { get; set; } = DefaultSentencePauseMs;
 
-        /// <summary>Pause for other typed speak breaks (ms). Default 250 (0.25 s).</summary>
+        /// <summary>Pause for other typed speak breaks (ms). Default 52.</summary>
         public int VoiceOtherPauseMs { get; set; } = DefaultOtherPauseMs;
 
         /// <summary>
         /// Pause between comic balloons / blank-line / dash-balloon splits (ms).
-        /// Default 1000 (1.00 s).
+        /// Default 752.
         /// </summary>
         public int VoiceBubblePauseMs { get; set; } = DefaultBubblePauseMs;
 
@@ -227,8 +244,17 @@ namespace SpeakRect
         /// <summary>Gray fog on the image OCR uses for balloon detect (Local-LLM reads clear tone).</summary>
         public bool ComicDetectFog { get; set; } = true;
 
-        /// <summary>Fog blend 0..1 (default 0.35). Higher softens art so ink plates stand out.</summary>
+        /// <summary>Fog blend 0..1 (default 0.35). Higher softens art so ink plates stand out.
+        /// Used only when <see cref="ComicDynamicFog"/> is off (fixed fog). Dyn search ignores this.</summary>
         public float ComicDetectFogAmount { get; set; } = DefaultComicDetectFogAmount;
+
+        /// <summary>
+        /// Auto fog for OCR detect: start low (see OcrProcessor.DynamicFogSearchFloor),
+        /// climb until island total area shrinks; keep the peak. Merge-overlap is off
+        /// during the search, then restored for the final detect. Shared by live +
+        /// Balloons preview. User fog slider is not used while this is on.
+        /// </summary>
+        public bool ComicDynamicFog { get; set; } = true;
 
         /// <summary>
         /// Line-cluster horizontal gap factor (median line height × this).
@@ -291,6 +317,36 @@ namespace SpeakRect
         /// </summary>
         public bool ComicSequentialRegions { get; set; } = true;
 
+        /// <summary>
+        /// Comic Book alternate: tone + green region boxes (± outside fog).
+        /// 1 island → full-page VL guide; 2+ → sequential per-island OCR.
+        /// Forces Comic Book mode on. Preview base is tone when this is on.
+        /// Default off so Default mode stays the product default.
+        /// </summary>
+        public bool ComicPoiMarkers { get; set; } = false;
+
+        /// <summary>
+        /// When POI markers are on: thick gray fog over everything outside the
+        /// island boxes so Local-LLM / TTS stay on speech text, not art or chrome.
+        /// No effect unless <see cref="ComicPoiMarkers"/> is on.
+        /// </summary>
+        public bool ComicPoiFogOutside { get; set; } = true;
+
+        /// <summary>
+        /// When POI is on: if consecutive islands are farther apart than
+        /// <see cref="ComicPoiAutoStackGapPx"/>, crop them and vertical-stack
+        /// (like crop-stack) so distant balloons are not missed. 0 gap = always stack.
+        /// </summary>
+        public bool ComicPoiAutoStack { get; set; } = true;
+
+        /// <summary>
+        /// Gap threshold (px) for <see cref="ComicPoiAutoStack"/>. Stack when the
+        /// largest consecutive island separation exceeds this. <b>0 = always stack</b>
+        /// when 2+ islands. Default 8.
+        /// </summary>
+        public int ComicPoiAutoStackGapPx { get; set; } =
+            ComicPoiGuide.DefaultAutoStackGapPx;
+
         /// <summary>Clamp comic-region detect options to safe ranges.</summary>
         public void NormalizeComicRegionSettings()
         {
@@ -304,6 +360,7 @@ namespace SpeakRect
             ComicOrphanRecoverPasses = Math.Clamp(ComicOrphanRecoverPasses, 0, 16);
             // 0 = disabled (keep all non-junk islands regardless of alnum count)
             ComicMinIslandAlnum = Math.Clamp(ComicMinIslandAlnum, 0, 40);
+            ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 256);
         }
 
         /// <summary>Restore built-in comic balloon detect defaults.</summary>
@@ -311,6 +368,7 @@ namespace SpeakRect
         {
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
+            ComicDynamicFog = true;
             ComicClusterGapX = DefaultComicClusterGapX;
             ComicClusterGapY = DefaultComicClusterGapY;
             ComicInflateFracX = DefaultComicInflateFracX;
@@ -322,6 +380,13 @@ namespace SpeakRect
             ComicOrphanRecoverPasses = DefaultComicOrphanRecoverPasses;
             ComicMinIslandAlnum = DefaultComicMinIslandAlnum;
             ComicSequentialRegions = true;
+            // POI requires Comic Book — off by default so Default mode stays default.
+            ComicPoiMarkers = false;
+            ComicPoiFogOutside = true;  // ready when user enables POI
+            ComicPoiAutoStack = true;
+            ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            ComicBook = false;
+            ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
 
@@ -330,7 +395,7 @@ namespace SpeakRect
         // Shared by Default + Comic Book capture paths. Profile-backed.
         // -----------------------------------------------------------------------
 
-        public const int DefaultImageUpscaleLongSide = 640;
+        public const int DefaultImageUpscaleLongSide = 900;
         public const float DefaultImageInkGrayWeight = 0.55f;
         public const int DefaultImageDenoiseRadius = 1;
         public const float DefaultImageDenoiseSigma = 22f;
@@ -810,6 +875,7 @@ namespace SpeakRect
             CropPrompt = "";
             SimplePrompt = "";
             RecoveryPrompt = "";
+            PoiPrompt = "";
         }
 
         /// <summary>Set one prompt field by key name (blank → use built-in default at resolve time).</summary>
@@ -830,6 +896,9 @@ namespace SpeakRect
                 case "RecoveryPrompt":
                     RecoveryPrompt = PromptForIni(v, DefaultRecoveryPrompt);
                     break;
+                case "PoiPrompt":
+                    PoiPrompt = PromptForIni(v, DefaultPoiPrompt);
+                    break;
             }
         }
 
@@ -840,6 +909,7 @@ namespace SpeakRect
             "CropPrompt" => ResolveCropPrompt(),
             "SimplePrompt" => ResolveSimplePrompt(),
             "RecoveryPrompt" => ResolveRecoveryPrompt(),
+            "PoiPrompt" => ResolvePoiPrompt(),
             _ => "",
         };
 
@@ -850,6 +920,7 @@ namespace SpeakRect
             "CropPrompt" => string.IsNullOrWhiteSpace(CropPrompt),
             "SimplePrompt" => string.IsNullOrWhiteSpace(SimplePrompt),
             "RecoveryPrompt" => string.IsNullOrWhiteSpace(RecoveryPrompt),
+            "PoiPrompt" => string.IsNullOrWhiteSpace(PoiPrompt),
             _ => true,
         };
 
@@ -1056,6 +1127,9 @@ namespace SpeakRect
         public string ResolveRecoveryPrompt() =>
             NonEmpty(RecoveryPrompt) ?? DefaultRecoveryPrompt;
 
+        public string ResolvePoiPrompt() =>
+            NonEmpty(PoiPrompt) ?? DefaultPoiPrompt;
+
         /// <summary>
         /// Prompts that may appear in model output (active + hard-coded defaults)
         /// so echo stripping still works if the user customized the ini.
@@ -1066,11 +1140,13 @@ namespace SpeakRect
             yield return ResolveCropPrompt();
             yield return ResolveSimplePrompt();
             yield return ResolveRecoveryPrompt();
+            yield return ResolvePoiPrompt();
 
             yield return DefaultFullPrompt;
             yield return DefaultCropPrompt;
             yield return DefaultSimplePrompt;
             yield return DefaultRecoveryPrompt;
+            yield return DefaultPoiPrompt;
         }
 
         /// <summary>Overlay MODE rows: Default ↔ Comic Book.</summary>
@@ -1112,6 +1188,7 @@ namespace SpeakRect
                 return;
 
             string label = Flags[index].Label;
+            bool wasComic = ComicBook;
 
             if (label == "DEFAULT")
             {
@@ -1128,7 +1205,34 @@ namespace SpeakRect
                 Flags[index].Setter(this, value);
             }
 
-            NormalizeModeFlags();
+            // MODE change: leave → suspend comic-only features; enter → restore stash
+            // or apply Comic Book's own starting defaults (not product Default mode).
+            // Never force ComicBook back on just because POI was on.
+            bool enteredComic = ComicBook && !wasComic;
+            bool leftComic = !ComicBook && wasComic;
+
+            if (leftComic)
+            {
+                NormalizeModeFlags(); // stash + turn off POI etc.
+            }
+            else if (enteredComic)
+            {
+                if (_comicOnlyStashValid)
+                {
+                    // Re-enter after a leave this session — restore last comic prefs.
+                    NormalizeModeFlags();
+                }
+                else
+                {
+                    // Fresh enter (no session stash): Comic Book starting point.
+                    ApplyComicBookModeStartingDefaults();
+                }
+            }
+            else
+            {
+                NormalizeModeFlags();
+            }
+
             // Live config + active named profile (if any) so ComicBook sticks.
             Save();
             SyncActiveProfileFile();
@@ -1136,13 +1240,89 @@ namespace SpeakRect
 
         public void ToggleFlag(int index) => SetFlag(index, !GetFlag(index));
 
+        // -------------------------------------------------------------------
+        // Comic-only features suspended in Default mode, restored on re-entry.
+        // In-memory only (session); saved ini/profile reflects active values.
+        // -------------------------------------------------------------------
+        private bool _comicOnlyStashValid;
+        private bool _stashedPoiMarkers;
+        private bool _stashedPoiFogOutside;
+        private bool _stashedPoiAutoStack;
+
         /// <summary>
-        /// Mode flags are only ComicBook on/off (DEFAULT vs COMIC BOOK).
-        /// Kept as a hook for load/save paths; currently a no-op.
+        /// Comic Book mode's own starting feature set when the user first enables
+        /// Comic Book via MODE (no session stash). Profile/ini load does not call
+        /// this — saved profiles keep the user's values.
+        /// </summary>
+        public void ApplyComicBookModeStartingDefaults()
+        {
+            // Comic Book attack path — on by default for a fresh MODE enter.
+            ComicPoiMarkers = true;
+            ComicPoiFogOutside = true;
+            ComicPoiAutoStack = true;
+            ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            // Detect / island pipeline stock on-state.
+            ComicDetectFog = true;
+            ComicDetectFogAmount = DefaultComicDetectFogAmount;
+            ComicDynamicFog = true;
+            ComicMergeOverlappingIslands = true;
+            ComicSplitLargeRegions = true;
+            ComicSequentialRegions = true;
+            ClearComicOnlyModeStash();
+            NormalizeComicRegionSettings();
+        }
+
+        /// <summary>
+        /// Keep MODE coherent with features that only run in Comic Book.
+        /// <list type="bullet">
+        /// <item>Default (ComicBook off): stash + turn off comic-only features
+        /// (POI, …) so the user can leave Comic Book even when POI was on.</item>
+        /// <item>Comic Book on + session stash: restore what Default suspended.</item>
+        /// <item>Comic Book on + no stash: do not invent features here — use
+        /// <see cref="ApplyComicBookModeStartingDefaults"/> on user MODE enter
+        /// (SetFlag), or leave values as loaded from profile/ini.</item>
+        /// </list>
         /// </summary>
         public void NormalizeModeFlags()
         {
-            // No pipe flags to coerce — ComicBook alone drives the overlay MODE row.
+            if (!ComicBook)
+            {
+                // User chose Default — suspend anything that requires Comic Book.
+                if (ComicPoiMarkers)
+                {
+                    _stashedPoiMarkers = true;
+                    _stashedPoiFogOutside = ComicPoiFogOutside;
+                    _stashedPoiAutoStack = ComicPoiAutoStack;
+                    _comicOnlyStashValid = true;
+                    ComicPoiMarkers = false;
+                }
+                // If POI was already off but a prior leave stashed it, keep stash;
+                // stay off until Comic Book is selected again.
+                return;
+            }
+
+            // Comic Book on — re-enable what Default suspended (if any).
+            if (_comicOnlyStashValid)
+            {
+                // If the user already turned POI on (Balloons checkbox → force Comic),
+                // keep their choice; only restore when POI is still off.
+                if (!ComicPoiMarkers)
+                {
+                    ComicPoiMarkers = _stashedPoiMarkers;
+                    ComicPoiFogOutside = _stashedPoiFogOutside;
+                    ComicPoiAutoStack = _stashedPoiAutoStack;
+                }
+                _comicOnlyStashValid = false;
+            }
+        }
+
+        /// <summary>Clear session stash (defaults / explicit resets).</summary>
+        private void ClearComicOnlyModeStash()
+        {
+            _comicOnlyStashValid = false;
+            _stashedPoiMarkers = false;
+            _stashedPoiFogOutside = false;
+            _stashedPoiAutoStack = false;
         }
 
         /// <summary>
@@ -1195,11 +1375,11 @@ namespace SpeakRect
 
         private void ResetToBuiltInDefaults()
         {
-            ComicBook = false;
             FullPrompt = "";
             CropPrompt = "";
             SimplePrompt = "";
             RecoveryPrompt = "";
+            PoiPrompt = "";
             TtsEngine = "Windows";
             VoiceId = "";
             SapiVoiceName = "";
@@ -1213,6 +1393,7 @@ namespace SpeakRect
             VoiceOtherPauseMs = DefaultOtherPauseMs;
             VoiceBubblePauseMs = DefaultBubblePauseMs;
             VoiceUseCustomPauseEncodings = true;
+            // Comic knobs + MODE: Default mode (ComicBook off, POI off).
             ResetComicRegionSettingsToDefaults();
             ResetImagePrepSettingsToDefaults();
             FollowWidth = DefaultFollowWidth;
@@ -1221,7 +1402,7 @@ namespace SpeakRect
             FollowOffsetX = DefaultFollowOffsetX;
             FollowOffsetY = DefaultFollowOffsetY;
             ActiveProfileName = "Default";
-            LastSettingsTab = "KeyMap";
+            LastSettingsTab = "Help";
             ActiveRegionSlot = 0;
             ShapeMode = "Rectangle";
             ClearRegionSlots();
@@ -1243,6 +1424,9 @@ namespace SpeakRect
 
         private void ApplyFromMap(Dictionary<string, string> map)
         {
+            // Profile/ini load must not keep a session mode-stash from before the load.
+            ClearComicOnlyModeStash();
+
             if (map.TryGetValue("ActiveProfile", out string? profileRaw) &&
                 !string.IsNullOrWhiteSpace(profileRaw))
             {
@@ -1272,8 +1456,11 @@ namespace SpeakRect
                 ComicBook = !skip;
             }
             // Legacy FastComic / FasterComic keys are ignored (speed pipes removed).
-
-            NormalizeModeFlags();
+            //
+            // Do NOT NormalizeModeFlags here — POI keys load later in
+            // LoadComicRegionSettingsFromMap. Early normalize after Reset defaults
+            // (POI=true) + ComicBook=false would stash a fake "POI was on" and
+            // re-enable POI on next Comic Book entry even when the file said off.
 
             // Blank / missing / equal to hard-coded default → keep blank
             // (Resolve* uses built-ins). Known legacy defaults cleared too.
@@ -1301,6 +1488,8 @@ namespace SpeakRect
             recoveryStored = MigratePromptIfLegacy(
                 recoveryStored, LegacyRecoveryPromptNoSpell);
             RecoveryPrompt = PromptForIni(recoveryStored, DefaultRecoveryPrompt);
+            string poiStored = ReadPrompt(map, "PoiPrompt");
+            PoiPrompt = PromptForIni(poiStored, DefaultPoiPrompt);
 
             LoadHotkeysFromMap(map);
             LoadGamepadFromMap(map);
@@ -1410,6 +1599,10 @@ namespace SpeakRect
                 float.TryParse(fogAmtRaw, System.Globalization.NumberStyles.Float, inv, out float fogAmt))
                 ComicDetectFogAmount = fogAmt;
 
+            if (map.TryGetValue("ComicDynamicFog", out string? dynFogRaw) &&
+                TryParseBool(dynFogRaw, out bool dynFog))
+                ComicDynamicFog = dynFog;
+
             if (map.TryGetValue("ComicClusterGapX", out string? gapXRaw) &&
                 double.TryParse(gapXRaw, System.Globalization.NumberStyles.Float, inv, out double gapX))
                 ComicClusterGapX = gapX;
@@ -1454,7 +1647,26 @@ namespace SpeakRect
                 TryParseBool(seqRaw, out bool seq))
                 ComicSequentialRegions = seq;
 
+            if (map.TryGetValue("ComicPoiMarkers", out string? poiRaw) &&
+                TryParseBool(poiRaw, out bool poi))
+                ComicPoiMarkers = poi;
+
+            if (map.TryGetValue("ComicPoiFogOutside", out string? poiFogRaw) &&
+                TryParseBool(poiFogRaw, out bool poiFog))
+                ComicPoiFogOutside = poiFog;
+
+            if (map.TryGetValue("ComicPoiAutoStack", out string? poiStackRaw) &&
+                TryParseBool(poiStackRaw, out bool poiStack))
+                ComicPoiAutoStack = poiStack;
+
+            if (map.TryGetValue("ComicPoiAutoStackGapPx", out string? poiGapRaw) &&
+                int.TryParse(poiGapRaw, System.Globalization.NumberStyles.Integer, inv, out int poiGap))
+                ComicPoiAutoStackGapPx = poiGap;
+
             NormalizeComicRegionSettings();
+            // After POI keys load: if file has Default mode + POI on, suspend POI
+            // (same as a live mode switch — do not force Comic Book on).
+            NormalizeModeFlags();
         }
 
         private void LoadImagePrepSettingsFromMap(Dictionary<string, string> map)
@@ -2127,12 +2339,14 @@ namespace SpeakRect
                 string crop = PromptForIni(CropPrompt, DefaultCropPrompt);
                 string simple = PromptForIni(SimplePrompt, DefaultSimplePrompt);
                 string recovery = PromptForIni(RecoveryPrompt, DefaultRecoveryPrompt);
+                string poi = PromptForIni(PoiPrompt, DefaultPoiPrompt);
 
                 // Normalize in-memory fields to match what we persist (blank = default).
                 FullPrompt = full;
                 CropPrompt = crop;
                 SimplePrompt = simple;
                 RecoveryPrompt = recovery;
+                PoiPrompt = poi;
 
                 string profileLabel = string.IsNullOrWhiteSpace(ActiveProfileName)
                     ? "Default"
@@ -2140,8 +2354,8 @@ namespace SpeakRect
 
                 var sb = new StringBuilder();
                 sb.AppendLine("; SpeakRect settings");
-                sb.AppendLine("; ComicBook=false (default) → letterbox+upscale+gray → single OCR");
-                sb.AppendLine("; ComicBook=true  → full comic path (tone, OCR detect, consensus, crops)");
+                sb.AppendLine("; ComicBook=false (default) → Default mode: Image prep → single full-frame OCR");
+                sb.AppendLine("; ComicBook=true → Comic Book: tone, fog detect, balloons/crops/POI");
                 sb.AppendLine("; Named profiles (Profiles\\*.ini) store full snapshots:");
                 sb.AppendLine(";   modes, hotkeys, gamepad, custom, regions, prompts, voice,");
                 sb.AppendLine(";   speech rules, comic balloons, image prep, follow.");
@@ -2237,10 +2451,12 @@ namespace SpeakRect
                 sb.AppendLine("; CropPrompt = per-balloon crop (sequential regions + crop-stack base).");
                 sb.AppendLine("; SimplePrompt = Default mode (Comic Book off) + comic empty-retry.");
                 sb.AppendLine("; RecoveryPrompt = last-ditch ladder when the primary prompt blanks.");
+                sb.AppendLine("; PoiPrompt = Comic Book + POI green boxes (1-island full-page VL).");
                 sb.AppendLine($"FullPrompt={full}");
                 sb.AppendLine($"CropPrompt={crop}");
                 sb.AppendLine($"SimplePrompt={simple}");
                 sb.AppendLine($"RecoveryPrompt={recovery}");
+                sb.AppendLine($"PoiPrompt={poi}");
                 sb.AppendLine();
                 NormalizeVoiceSettings();
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
@@ -2285,8 +2501,16 @@ namespace SpeakRect
                 sb.AppendLine("; SequentialRegions=true (default): OCR+speak each balloon alone, wait for TTS,");
                 sb.AppendLine(";   then next — isolates balloons from global speak-dedupe across the page.");
                 sb.AppendLine("; SequentialRegions=false: vertical crop-stack (one OCR) + global unit plan.");
+                sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
+                sb.AppendLine(";   1 island: full-page VL with boxes (± outside fog). 2+: sequential per-island OCR.");
+                sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone canvas.");
+                sb.AppendLine("; PoiAutoStack: debug stack PNG only when islands far (NOT VL input; multi is sequential).");
+                sb.AppendLine("; PoiAutoStackGapPx=8 (default). 0 = always write debug stack when 2+ islands.");
+                sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
+                sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");
+                sb.AppendLine($"ComicDynamicFog={ComicDynamicFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicClusterGapX={ComicClusterGapX.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicClusterGapY={ComicClusterGapY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicInflateFracX={ComicInflateFracX.ToString("0.###", inv)}");
@@ -2298,6 +2522,10 @@ namespace SpeakRect
                 sb.AppendLine($"ComicOrphanRecoverPasses={ComicOrphanRecoverPasses}");
                 sb.AppendLine($"ComicMinIslandAlnum={ComicMinIslandAlnum}");
                 sb.AppendLine($"ComicSequentialRegions={ComicSequentialRegions.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicPoiMarkers={ComicPoiMarkers.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicPoiAutoStackGapPx={ComicPoiAutoStackGapPx}");
                 sb.AppendLine();
                 NormalizeImagePrepSettings();
                 sb.AppendLine("[IMAGE_PREP]");
@@ -2518,13 +2746,15 @@ namespace SpeakRect
                 or "AppendedSilence" or "PunctuationSilence"
                 or "UseCustomPauseEncodings"
                 or "CommaPauseMs" or "SentencePauseMs" or "OtherPauseMs" or "BubblePauseMs"
-                or "ComicDetectFog" or "ComicDetectFogAmount"
+                or "ComicDetectFog" or "ComicDetectFogAmount" or "ComicDynamicFog"
                 or "ComicClusterGapX" or "ComicClusterGapY"
                 or "ComicInflateFracX" or "ComicInflateFracY"
                 or "ComicRegionPadding" or "ComicDenseIslandCount"
                 or "ComicSplitLargeRegions" or "ComicMergeOverlappingIslands"
                 or "ComicOrphanRecoverPasses"
                 or "ComicMinIslandAlnum" or "ComicSequentialRegions"
+                or "ComicPoiMarkers" or "ComicPoiFogOutside"
+                or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx"
                 or "ImagePrepEnabled"
                 or "ImageLetterbox" or "ImageLetterboxPad"
                 or "ImageLetterboxBlack" or "ImageLetterboxWhite"

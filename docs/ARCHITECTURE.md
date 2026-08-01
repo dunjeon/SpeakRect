@@ -13,6 +13,7 @@ Users draw or save screen regions; SpeakRect captures those pixels, recognizes t
 |------|------|
 | **Default** (Comic Book off) | Image prep → one full-frame Local-LLM call → speech clean → TTS |
 | **Comic Book on** | Image prep → **OCR** balloon detect (optional gray fog on detect only) → crop / consensus / best-of → speech clean → TTS |
+| **Comic Book + POI** (Balloons → POI guide) | Same detect → red bullseye markers on gray prep (+ optional outside fog) → one full-frame Local-LLM call (no crops) → TTS |
 
 No cloud recognition or telemetry. Local-LLM HTTP is **loopback only** (`127.0.0.1`).
 

@@ -17,8 +17,16 @@ namespace SpeakRect
     /// </summary>
     public sealed class frm_ComicRegions : Form
     {
+        private readonly CheckBox _chkPoiMarkers;
+        private readonly CheckBox _chkPoiFogOutside;
+        private readonly CheckBox _chkPoiAutoStack;
+        private readonly TrackBar _trkPoiAutoStackGap;
+        private readonly Label _lblPoiAutoStackGapVal;
+
         private readonly CheckBox _chkFog;
+        private readonly CheckBox _chkDynamicFog;
         private readonly TrackBar _trkFogAmount;
+        private readonly Label _lblFogAmount;
         private readonly Label _lblFogAmountVal;
 
         private readonly TrackBar _trkClusterX;
@@ -48,6 +56,7 @@ namespace SpeakRect
         private readonly CheckBox _chkSequential;
 
         private readonly RegionRefineSurface _refine;
+        private readonly Label _lblPreviewHeader;
         private readonly Label _lblPreviewStatus;
         private readonly TextBox _txtDetail;
         private readonly Button _btnOpenImage;
@@ -65,6 +74,7 @@ namespace SpeakRect
         private readonly ThemeProgressBar _progress;
         private readonly Button? _btnClose;
         private readonly Action? _onRequestClose;
+        private readonly Action? _onModeChanged;
         private readonly Func<Task<(Bitmap? Bitmap, string Error)>>? _onCaptureActiveRegion;
         private readonly bool _embedded;
         private bool _snapBusy;
@@ -108,11 +118,13 @@ namespace SpeakRect
         public frm_ComicRegions(
             bool embedded = false,
             Action? onRequestClose = null,
-            Func<Task<(Bitmap? Bitmap, string Error)>>? onCaptureActiveRegion = null)
+            Func<Task<(Bitmap? Bitmap, string Error)>>? onCaptureActiveRegion = null,
+            Action? onModeChanged = null)
         {
             _embedded = embedded;
             _onRequestClose = onRequestClose;
             _onCaptureActiveRegion = onCaptureActiveRegion;
+            _onModeChanged = onModeChanged;
 
             AutoScaleMode = AutoScaleMode.Font;
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -216,11 +228,106 @@ namespace SpeakRect
                 row++;
             }
 
-            AddFull(MakeSection("COMIC BOOK — BALLOON DETECT"), 22);
+            AddFull(MakeSection("BALLOON DETECT"), 22);
             AddFull(MakeHint(
-                "Comic Book mode only. Tune how OCR finds speech balloons. " +
-                "Preview shows the detect image (gray fog when on) plus green boxes. Profile-backed."),
-                52);
+                "Tune how OCR finds speech balloons. Comic Book uses boxes for crops; " +
+                "POI is a Comic Book alternate: green region boxes on gray prep " +
+                "(same image as live/analytics). Preview is that pipe — not a separate paint path."),
+                48);
+
+            // 0) Comic Book POI alternate path
+            AddFull(MakeSection("0 · POI GUIDE (COMIC BOOK)"), 20);
+            _chkPoiMarkers = new CheckBox
+            {
+                Text = "POI region boxes (Comic Book)",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = false,
+            };
+            _chkPoiMarkers.CheckedChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                OnFieldChanged();
+                if (_chkPoiMarkers.Checked)
+                    ForceComicBookModeForPoi();
+                ApplyPoiPreviewUi();
+                ApplyControlsEnabled();
+            };
+            AddFull(_chkPoiMarkers, 28);
+            AddFull(MakeHint(
+                "On: switches to Comic Book mode (sidebar MODE updates). OCR finds text islands, " +
+                "draws bright green boxes on the gray prep (same as this preview), optional fog " +
+                "outside them. Multi-island Speak reads each island in order. " +
+                "Edit the POI prompt under Speech → Prompts. " +
+                "Grow / crop pad size the islands."),
+                72);
+
+            _chkPoiFogOutside = new CheckBox
+            {
+                Text = "    Fog outside islands (thick)",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkPoiFogOutside.CheckedChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                OnFieldChanged();
+                // Live toggle: fog veil on/off in the preview immediately (no re-detect).
+                ApplyPoiPreviewUi();
+            };
+            AddFull(_chkPoiFogOutside, 28);
+            AddFull(MakeHint(
+                "Sub-option of POI: heavy gray fog over everything outside the green boxes " +
+                "(clear holes for speech islands). Hides art/UI so OCR and speech stay on " +
+                "dialogue. Preview matches what the Local-LLM sees."),
+                48);
+
+            _chkPoiAutoStack = new CheckBox
+            {
+                Text = "    Auto-stack when islands are far apart",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkPoiAutoStack.CheckedChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                OnFieldChanged();
+                ApplyPoiPreviewUi();
+                ApplyControlsEnabled();
+            };
+            AddFull(_chkPoiAutoStack, 28);
+            _trkPoiAutoStackGap = MakeTrack(0, 64, ComicPoiGuide.DefaultAutoStackGapPx);
+            _lblPoiAutoStackGapVal = MakeValueLabel();
+            // Live gap threshold → refresh stack preview while dragging.
+            _trkPoiAutoStackGap.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+                ApplyPoiPreviewUi();
+            };
+            AddRow(
+                MakeLabel("    Stack if gap >"),
+                WrapTrack(_trkPoiAutoStackGap, _lblPoiAutoStackGapVal),
+                42);
+            AddFull(MakeHint(
+                "Debug only: when islands are farther than this gap, Speak may save a vertical " +
+                "stack PNG for order inspection (last_poi_stack_debug). Multi-island speak is " +
+                "always sequential — that stack is never the VL input. 0 = always write debug " +
+                "stack when 2+. Default 8."),
+                56);
 
             // 1) Detect fog
             AddFull(MakeSection("1 · DETECT FOG"), 20);
@@ -236,16 +343,40 @@ namespace SpeakRect
             _chkFog.CheckedChanged += (_, _) =>
             {
                 OnFieldChanged();
+                ApplyFogUiState();
                 ApplyKeyboardTabOrder();
             };
             AddFull(_chkFog, 28);
 
-            _trkFogAmount = MakeTrack(0, 100, 35);
-            _lblFogAmountVal = MakeValueLabel();
-            AddRow(MakeLabel("Fog strength"), WrapTrack(_trkFogAmount, _lblFogAmountVal), 42);
+            _chkDynamicFog = new CheckBox
+            {
+                Text = "Dynamic fog (auto — start low, climb to best)",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkDynamicFog.CheckedChanged += (_, _) =>
+            {
+                OnFieldChanged();
+                ApplyFogUiState();
+                ApplyKeyboardTabOrder();
+            };
+            AddFull(_chkDynamicFog, 28);
             AddFull(MakeHint(
-                "Softens art so ink plates stand out. Preview shows this fog; " +
-                "speech OCR still reads the clear tone image."),
+                "On (default): ignore Fog strength — start low (~0.10) and raise fog until " +
+                "island area shrinks; keep the peak. Merge-overlap is off during the search, " +
+                "then restored. Same pipe for live + preview."),
+                56);
+
+            _trkFogAmount = MakeTrack(0, 100, 35);
+            _lblFogAmount = MakeLabel("Fog strength");
+            _lblFogAmountVal = MakeValueLabel();
+            AddRow(_lblFogAmount, WrapTrack(_trkFogAmount, _lblFogAmountVal), 42);
+            AddFull(MakeHint(
+                "Fixed fog when Dynamic fog is off. Softens art so ink plates stand out. " +
+                "Preview shows the fog used; speech OCR still reads the clear tone image."),
                 40);
 
             // 2) Line merge
@@ -375,7 +506,7 @@ namespace SpeakRect
             previewPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
             previewPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 30f));
 
-            var previewHeader = new Label
+            _lblPreviewHeader = new Label
             {
                 Dock = DockStyle.Fill,
                 Text = "PREVIEW — detect view (fog when on)  ·  drag / resize / add  ·  Del = remove  ·  Ctrl+↑↓ = reorder",
@@ -383,7 +514,7 @@ namespace SpeakRect
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
             };
-            previewPanel.Controls.Add(previewHeader, 0, 0);
+            previewPanel.Controls.Add(_lblPreviewHeader, 0, 0);
 
             var previewHost = new Panel
             {
@@ -632,8 +763,14 @@ namespace SpeakRect
                 c.TabIndex = i++;
             }
 
+            // 0) POI guide (Comic Book)
+            Next(_chkPoiMarkers);
+            Next(_chkPoiFogOutside);
+            Next(_chkPoiAutoStack);
+            Next(_trkPoiAutoStackGap);
             // 1) Detect fog
             Next(_chkFog);
+            Next(_chkDynamicFog);
             Next(_trkFogAmount);
             // 2) Line merge
             Next(_trkClusterX);
@@ -768,9 +905,8 @@ namespace SpeakRect
         private List<Rectangle>? GetActiveOverrideRegions()
         {
             PersistRefineSession();
-            // Always speak the on-screen list when we have islands — Preview already
-            // ran detect with current knobs (or the user edited the boxes).
-            // Crop pad is applied later at crop time from live AppSettings.
+            // On-screen boxes are display-final (pad already baked at Preview seed,
+            // or user-edited). Speak override uses ForcedCropPadPx=0 — do not pad again.
             if (_refine.RegionCount > 0)
                 return _refine.Regions.ToList();
             // Only the override bound to this capture — never a stale other-page session.
@@ -791,6 +927,7 @@ namespace SpeakRect
             var inv = CultureInfo.InvariantCulture;
             return string.Join('|',
                 s.ComicDetectFog ? "1" : "0",
+                s.ComicDynamicFog ? "1" : "0",
                 s.ComicDetectFogAmount.ToString("0.###", inv),
                 s.ComicClusterGapX.ToString("0.###", inv),
                 s.ComicClusterGapY.ToString("0.###", inv),
@@ -909,7 +1046,15 @@ namespace SpeakRect
                 var s = AppSettings.Current;
                 s.NormalizeComicRegionSettings();
 
+                _chkPoiMarkers.Checked = s.ComicPoiMarkers;
+                _chkPoiFogOutside.Checked = s.ComicPoiFogOutside;
+                _chkPoiAutoStack.Checked = s.ComicPoiAutoStack;
+                _trkPoiAutoStackGap.Value = Math.Clamp(
+                    s.ComicPoiAutoStackGapPx,
+                    _trkPoiAutoStackGap.Minimum,
+                    _trkPoiAutoStackGap.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
+                _chkDynamicFog.Checked = s.ComicDynamicFog;
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
                 _trkClusterX.Value = GapToTick(s.ComicClusterGapX);
                 _trkClusterY.Value = GapToTick(s.ComicClusterGapY);
@@ -924,19 +1069,36 @@ namespace SpeakRect
                 _chkSequential.Checked = s.ComicSequentialRegions;
 
                 RefreshValueLabels();
+                ApplyFogUiState();
+                ApplyPoiPreviewUi();
 
                 // Cache → last capture → built-in sample so knobs are usable immediately.
                 EnsurePreviewImageLoaded();
 
                 if (HasSource)
                 {
-                    _lblStatus.Text = DevCaptureCache.IsSample
-                        ? "Sample panel loaded — Open image… for your own capture."
-                        : (s.ComicBook
-                            ? "Comic Book is ON — these settings apply to the next speak."
-                            : "Comic Book is OFF — enable Ctrl+B for live reads (preview still works).");
-                    _lblStatus.ForeColor = DevCaptureCache.IsSample ? UiTheme.Ok
-                        : (s.ComicBook ? UiTheme.Ok : UiTheme.Warn);
+                    if (DevCaptureCache.IsSample)
+                    {
+                        _lblStatus.Text = "Sample panel loaded — Open image… for your own capture.";
+                        _lblStatus.ForeColor = UiTheme.Ok;
+                    }
+                    else if (s.ComicPoiMarkers)
+                    {
+                        _lblStatus.Text =
+                            "Comic Book + POI — green region boxes (same as live speak).";
+                        _lblStatus.ForeColor = UiTheme.Ok;
+                    }
+                    else if (s.ComicBook)
+                    {
+                        _lblStatus.Text = "Comic Book is ON — these settings apply to the next speak.";
+                        _lblStatus.ForeColor = UiTheme.Ok;
+                    }
+                    else
+                    {
+                        _lblStatus.Text =
+                            "Comic Book is OFF — enable Ctrl+B for live reads (preview still works).";
+                        _lblStatus.ForeColor = UiTheme.Warn;
+                    }
                 }
                 else
                 {
@@ -1048,21 +1210,37 @@ namespace SpeakRect
         private void ApplyControlsEnabled()
         {
             bool ready = HasSource && !_speakBusy;
+            // Sequential = per-balloon crop speak path only (not used by POI full-frame).
+            bool sequentialOk = ready && !_chkPoiMarkers.Checked;
 
+            bool poiOn = ready && _chkPoiMarkers.Checked;
+            _chkPoiMarkers.Enabled = ready;
+            _chkPoiFogOutside.Enabled = poiOn;
+            _chkPoiAutoStack.Enabled = poiOn;
+            _trkPoiAutoStackGap.Enabled = poiOn && _chkPoiAutoStack.Checked;
+            _lblPoiAutoStackGapVal.Enabled = _trkPoiAutoStackGap.Enabled;
             _chkFog.Enabled = ready;
-            _trkFogAmount.Enabled = ready && _chkFog.Checked;
-            _lblFogAmountVal.Enabled = _trkFogAmount.Enabled;
+            _chkDynamicFog.Enabled = ready && _chkFog.Checked;
+            // Dyn auto-search ignores the slider — keep it off while dyn is on.
+            bool fogSliderOn = ready && _chkFog.Checked && !_chkDynamicFog.Checked;
+            _trkFogAmount.Enabled = fogSliderOn;
+            _lblFogAmount.Enabled = fogSliderOn;
+            _lblFogAmountVal.Enabled = fogSliderOn;
+            _lblFogAmount.Text = (ready && _chkFog.Checked && _chkDynamicFog.Checked)
+                ? "Fog strength (auto)"
+                : "Fog strength";
             _trkClusterX.Enabled = ready;
             _trkClusterY.Enabled = ready;
             _trkInflateX.Enabled = ready;
             _trkInflateY.Enabled = ready;
+            // Crop pad / dense pad still size islands for POI (bullseyes + outside fog).
             _trkPadding.Enabled = ready;
             _trkDenseCount.Enabled = ready;
             _chkMergeOverlap.Enabled = ready;
             _chkSplitLarge.Enabled = ready;
             _trkOrphan.Enabled = ready;
             _trkMinAlnum.Enabled = ready;
-            _chkSequential.Enabled = ready;
+            _chkSequential.Enabled = sequentialOk;
 
             _btnPreview.Enabled = ready && !_snapBusy;
             _btnSpeak.Enabled = ready && !_snapBusy;
@@ -1101,11 +1279,30 @@ namespace SpeakRect
             string dirty = HasLockedRefine ? "  ·  LOCKED override" : "  ·  auto seed";
             int sel = _refine.SelectedIndex;
             string selTxt = sel >= 0 ? $"  ·  selected #{sel + 1}" : "";
+            string poiNote;
+            if (!_chkPoiMarkers.Checked)
+            {
+                poiNote = "  ·  solid = Speak crop (grow + pad baked in)";
+            }
+            else if (_refine.IsShowingPoiGuidePreview)
+            {
+                poiNote = _refine.RegionCount >= 2
+                    ? "  ·  POI map on tone (speak = sequential)"
+                    : "  ·  POI guide on tone (= VL input)";
+            }
+            else if (_chkPoiFogOutside.Checked)
+            {
+                poiNote = "  ·  green POI boxes + thick fog outside islands";
+            }
+            else
+            {
+                poiNote = "  ·  green boxes = Local-LLM POI guide";
+            }
             _lblPreviewStatus.Text =
                 $"Source: {_sourceLabel}  ·  {n} region" +
                 (n == 1 ? "" : "s") +
                 dirty + selTxt +
-                "  ·  solid = Speak crop (grow + pad baked in)";
+                poiNote;
             _lblPreviewStatus.ForeColor = HasLockedRefine ? UiTheme.Warn
                 : (n > 0 ? UiTheme.Ok : UiTheme.FgMuted);
             UpdateRefineButtons();
@@ -1119,7 +1316,19 @@ namespace SpeakRect
         private void Persist(bool writeDiskNow = false)
         {
             var s = AppSettings.Current;
+            bool poiWas = s.ComicPoiMarkers;
+            bool comicWas = s.ComicBook;
+
+            s.ComicPoiMarkers = _chkPoiMarkers.Checked;
+            s.ComicPoiFogOutside = _chkPoiFogOutside.Checked;
+            s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
+            s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
+            // POI is a Comic Book attack — keep MODE row / sidebar in sync.
+            // Only force Comic on when the user actually enables POI (not every Persist).
+            if (s.ComicPoiMarkers && !comicWas)
+                s.ComicBook = true;
             s.ComicDetectFog = _chkFog.Checked;
+            s.ComicDynamicFog = _chkDynamicFog.Checked;
             s.ComicDetectFogAmount = TickToFog(_trkFogAmount.Value);
             s.ComicClusterGapX = TickToGap(_trkClusterX.Value);
             s.ComicClusterGapY = TickToGap(_trkClusterY.Value);
@@ -1133,11 +1342,92 @@ namespace SpeakRect
             s.ComicMinIslandAlnum = _trkMinAlnum.Value;
             s.ComicSequentialRegions = _chkSequential.Checked;
             s.NormalizeComicRegionSettings();
+            // If user left Comic Book (POI suspended), do not let a stale checkbox
+            // rewrite POI on via Persist before Reload — honor mode.
+            if (!s.ComicBook && s.ComicPoiMarkers)
+            {
+                s.ComicPoiMarkers = false;
+                if (!_loading && _chkPoiMarkers.Checked)
+                {
+                    _loading = true;
+                    try { _chkPoiMarkers.Checked = false; }
+                    finally { _loading = false; }
+                }
+            }
+            s.NormalizeModeFlags();
+
+            // MODE stack: only when comic/POI actually flipped.
+            if (poiWas != s.ComicPoiMarkers || comicWas != s.ComicBook)
+            {
+                try { _onModeChanged?.Invoke(); } catch { /* ignore */ }
+            }
 
             if (writeDiskNow)
                 FlushDiskSave(force: true);
             else
                 ScheduleDiskSave();
+        }
+
+        /// <summary>
+        /// POI runs on the Comic Book path — force Comic Book on and refresh overlay MODE.
+        /// </summary>
+        private void ForceComicBookModeForPoi()
+        {
+            var s = AppSettings.Current;
+            s.ComicPoiMarkers = true;
+            if (!s.ComicBook)
+            {
+                // Same path as sidebar COMIC BOOK: ComicBook=true + save + profile sync.
+                s.SetFlag(AppSettings.FlagIndexComicBook, true);
+            }
+            else
+            {
+                s.NormalizeModeFlags();
+                try { s.Save(); s.SyncActiveProfileFile(); } catch { /* ignore */ }
+            }
+            try { _onModeChanged?.Invoke(); } catch { /* host refresh */ }
+        }
+
+        /// <summary>POI guide on tone (same DrawRegionGuides as live) + honest multi-island banner.</summary>
+        private void ApplyPoiPreviewUi()
+        {
+            bool poi = _chkPoiMarkers.Checked;
+            bool outside = poi && _chkPoiFogOutside.Checked;
+            bool autoStack = poi && _chkPoiAutoStack.Checked;
+            int stackGap = _trkPoiAutoStackGap.Value;
+            try
+            {
+                _refine.ShowPoiMarkers = poi;
+                _refine.ShowPoiOutsideFog = outside;
+                _refine.ShowPoiAutoStack = autoStack;
+                _refine.PoiAutoStackGapPx = stackGap;
+                _refine.Invalidate();
+            }
+            catch { /* ignore */ }
+            if (_lblPreviewHeader != null)
+            {
+                if (poi && _refine.RegionCount >= 2)
+                {
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — POI island map on TONE (speak = sequential per island)  ·  drag / resize / add";
+                }
+                else if (poi && outside)
+                {
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island)";
+                }
+                else if (poi)
+                {
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — TONE + green boxes = VL input (1 island)  ·  drag / resize / add";
+                }
+                else
+                {
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — detect view (fog when on)  ·  drag / resize / add  ·  Del = remove  ·  Ctrl+↑↓ = reorder";
+                }
+            }
+            UpdateRefineStatus();
         }
 
         private void ScheduleDiskSave()
@@ -1248,6 +1538,7 @@ namespace SpeakRect
             {
                 work = new Bitmap(_sourceImage);
                 bool fogOn = AppSettings.Current.ComicDetectFog;
+                bool dynFog = AppSettings.Current.ComicDynamicFog;
                 float fogAmt = AppSettings.Current.ComicDetectFogAmount;
                 Bitmap detectView = await Task.Run(
                     () => OcrProcessor.BuildComicDetectViewBitmap(work),
@@ -1260,9 +1551,12 @@ namespace SpeakRect
                 }
 
                 _refine.UpdateBaseKeepRegions(detectView);
-                string fogHint = fogOn
-                    ? $"fog={fogAmt:0.00}"
-                    : "fog=off";
+                // Locked-box fog view: fixed slider amount only (dyn needs full re-detect).
+                string fogHint = !fogOn
+                    ? "fog=off"
+                    : dynFog
+                        ? "dyn=on (re-detect for auto fog)"
+                        : $"fog={fogAmt:0.00}";
                 _lblPreviewStatus.Text =
                     $"Source: {_sourceLabel}  ·  {_refine.RegionCount} region" +
                     (_refine.RegionCount == 1 ? "" : "s") +
@@ -1295,10 +1589,15 @@ namespace SpeakRect
         private void ApplyFogUiState()
         {
             bool ready = HasSource && !_speakBusy;
-            bool on = ready && _chkFog.Checked;
-            _trkFogAmount.Enabled = on;
-            _lblFogAmountVal.Enabled = on;
-            _trkFogAmount.TabStop = on;
+            bool fogOn = ready && _chkFog.Checked;
+            bool dynOn = fogOn && _chkDynamicFog.Checked;
+            // Dyn ignores the slider — disable so it is not a fake control.
+            _chkDynamicFog.Enabled = fogOn;
+            _trkFogAmount.Enabled = fogOn && !dynOn;
+            _lblFogAmount.Enabled = _trkFogAmount.Enabled;
+            _lblFogAmountVal.Enabled = _trkFogAmount.Enabled;
+            _trkFogAmount.TabStop = _trkFogAmount.Enabled;
+            _lblFogAmount.Text = dynOn ? "Fog strength (auto)" : "Fog strength";
         }
 
         private void ResetDefaults()
@@ -1640,40 +1939,69 @@ namespace SpeakRect
 
                 int regionCount = result.RegionCount;
                 string detailText = result.Detail ?? "";
+                float fogUsed = result.FogAmountUsed;
+                bool dynFog = result.DynamicFogSearched;
+                float fogStart = result.FogAmountStart;
 
                 Bitmap? baseImg = result.BaseImage;
                 result.BaseImage = null;
-                // Enforce Western reading order. Bake Grow (in detect) + Crop pad into
-                // solid green boxes so preview size == Speak crop. Speak uses pad=0
-                // with these overrides so pad is not applied twice.
-                var cores = OcrProcessor.SmokeSortComicReadingOrder(
+                // Regions from PreviewComicRegionsAsync are already display-final
+                // (grow + crop pad). Sort reading order only — do NOT pad again.
+                var displayBoxes = OcrProcessor.SmokeSortComicReadingOrder(
                     result.Regions ?? Array.Empty<Rectangle>());
-                int pipeW = result.PipelineWidth > 0
-                    ? result.PipelineWidth
-                    : (baseImg?.Width ?? _sourceImage?.Width ?? 1);
-                int pipeH = result.PipelineHeight > 0
-                    ? result.PipelineHeight
-                    : (baseImg?.Height ?? _sourceImage?.Height ?? 1);
-                var speakBoxes = OcrProcessor.ExpandRegionsWithCropPad(
-                    cores, pipeW, pipeH, AppSettings.Current.ComicRegionPadding);
                 try { result.Overlay?.Dispose(); } catch { /* ignore */ }
                 result.Overlay = null;
                 result.Dispose();
 
                 if (baseImg != null)
-                    _refine.SetSeed(baseImg, speakBoxes);
+                    _refine.SetSeed(baseImg, displayBoxes);
                 else if (_sourceImage != null)
-                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), speakBoxes);
+                    _refine.SetSeed((Bitmap)_sourceImage.Clone(), displayBoxes);
 
                 // Preview boxes now match live detect knobs (grow/cluster/pad/…)
                 MarkSeedMatchesLiveDetectSettings();
+                // Re-apply POI guide (same DrawRegionGuides as live).
+                ApplyPoiPreviewUi();
 
                 _txtDetail.Text = UiTheme.SanitizeUiEngineNames(detailText);
                 UpdateRefineStatus();
-                _lblStatus.Text = regionCount > 0
-                    ? $"OCR seeded {regionCount} island(s). Edit boxes to lock · Speak uses your list."
-                    : "No OCR islands — click+drag to add boxes, then Speak.";
-                _lblStatus.ForeColor = regionCount > 0 ? UiTheme.Ok : UiTheme.Warn;
+
+                string fogStatus;
+                if (!_chkFog.Checked)
+                    fogStatus = "fog=off";
+                else if (dynFog)
+                    fogStatus = $"dyn-fog auto {fogStart:0.00}→{fogUsed:0.00}";
+                else
+                    fogStatus = $"fog={fogUsed:0.00}";
+
+                _lblPreviewStatus.Text =
+                    $"Source: {_sourceLabel}  ·  {regionCount} region" +
+                    (regionCount == 1 ? "" : "s") +
+                    $"  ·  {fogStatus}";
+
+                if (regionCount > 0)
+                {
+                    if (_chkPoiMarkers.Checked)
+                    {
+                        _lblStatus.Text =
+                            $"OCR seeded {regionCount} island(s) · {fogStatus}. " +
+                            "POI guide = live pipe (green boxes" +
+                            (_chkPoiFogOutside.Checked ? " + outside fog" : "") + ").";
+                    }
+                    else
+                    {
+                        _lblStatus.Text =
+                            $"OCR seeded {regionCount} island(s) · {fogStatus}. " +
+                            "Edit boxes to lock · Speak uses your list.";
+                    }
+                    _lblStatus.ForeColor = UiTheme.Ok;
+                }
+                else
+                {
+                    _lblStatus.Text =
+                        $"No OCR islands · {fogStatus} — click+drag to add boxes, then Speak.";
+                    _lblStatus.ForeColor = UiTheme.Warn;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1878,6 +2206,9 @@ namespace SpeakRect
             _lblMinAlnumVal.Text = _trkMinAlnum.Value == 0
                 ? "off"
                 : _trkMinAlnum.Value.ToString(inv);
+            _lblPoiAutoStackGapVal.Text = _trkPoiAutoStackGap.Value == 0
+                ? "always"
+                : $"{_trkPoiAutoStackGap.Value}px";
         }
 
         private static int FogToTick(float v) =>
