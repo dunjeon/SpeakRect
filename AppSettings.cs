@@ -237,7 +237,8 @@ namespace SpeakRect
         public const double DefaultComicInflateFracX = 0.22;
         public const double DefaultComicInflateFracY = 0.28;
         public const int DefaultComicRegionPadding = 16;
-        public const int DefaultComicDenseIslandCount = 4;
+        /// <summary>0 = dense-page milder pad off for all modes (user can enable in Balloons).</summary>
+        public const int DefaultComicDenseIslandCount = 0;
         public const int DefaultComicOrphanRecoverPasses = 6;
         public const int DefaultComicMinIslandAlnum = 4;
 
@@ -2593,7 +2594,7 @@ namespace SpeakRect
                 sb.AppendLine("; DetectFog softens art for OCR detect; Local-LLM still reads the clear tone image.");
                 sb.AppendLine("; ClusterGap* = line-merge distance (lower = separate balloons).");
                 sb.AppendLine("; InflateFrac* / RegionPadding = box pad around islands.");
-                sb.AppendLine("; DenseIslandCount = use milder pad when this many islands (0 = off).");
+                sb.AppendLine("; DenseIslandCount = use milder pad when this many islands (0 = off, stock).");
                 sb.AppendLine("; SplitLargeRegions = re-detect inside mega caption/row globs.");
                 sb.AppendLine("; MergeOverlappingIslands=true (default): union any islands whose boxes");
                 sb.AppendLine(";   would overlap after Grow + Crop pad (covers all text).");

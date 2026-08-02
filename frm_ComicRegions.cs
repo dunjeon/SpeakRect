@@ -482,7 +482,7 @@ namespace SpeakRect
 
             // 5) Dense-page pad
             AddFull(MakeSection("5 · DENSE PAGE PAD"), 20);
-            _trkDenseCount = MakeTrack(0, 20, 4);
+            _trkDenseCount = MakeTrack(0, 20, AppSettings.DefaultComicDenseIslandCount);
             _lblDenseCountVal = MakeValueLabel();
             AddRow(MakeLabel("When ≥ N"), WrapTrack(_trkDenseCount, _lblDenseCountVal), 42);
             AddFull(MakeHint("Use milder pad when this many islands found. 0 = always use full pad."), 36);
