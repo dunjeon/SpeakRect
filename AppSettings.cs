@@ -335,20 +335,22 @@ namespace SpeakRect
         public bool ComicPoiFogOutside { get; set; } = true;
 
         /// <summary>
-        /// When POI is on: lift islands from tone, vertical-stack for Local-LLM send
-        /// (then optional long-edge cap). Preview stays on full page for editing.
+        /// When POI is on: lift each island onto its own orange canvas and send to
+        /// Local-LLM one at a time (not one multi-strip image). Preview stays full page.
         /// Default on for Comic Book starting defaults.
         /// </summary>
         public bool ComicPoiAutoStack { get; set; } = true;
 
         /// <summary>
-        /// Gap (px) between stacked island strips for Local-LLM send (orange canvas). Default 8.
+        /// Gap (px) between strips when composing a multi-strip canvas (non-POI
+        /// crop-stack / legacy multi-strip). Per-island AutoStack send ignores this
+        /// (one island per canvas). Default 8.
         /// </summary>
         public int ComicPoiAutoStackGapPx { get; set; } =
             ComicPoiGuide.DefaultAutoStackGapPx;
 
         /// <summary>
-        /// Outer margin (px) on top/left/right/bottom of the Local-LLM island stack.
+        /// Outer margin (px) on top/left/right/bottom of each Local-LLM island canvas.
         /// Default 12.
         /// </summary>
         public int ComicPoiAutoStackMarginPx { get; set; } =
@@ -2601,13 +2603,14 @@ namespace SpeakRect
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine(";   1 island: full-page VL with boxes (± outside fog). 2+: sequential per-island OCR.");
                 sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone canvas.");
-                sb.AppendLine("; PoiAutoStack=true: for Local-LLM send, crop islands and vertical-stack");
-                sb.AppendLine(";   on orange canvas (preview stays on full page for editing).");
-                sb.AppendLine(";   Gap=between strips; Margin=outer pad.");
+                sb.AppendLine("; PoiAutoStack=true: each island → own orange canvas → Local-LLM one at a time");
+                sb.AppendLine(";   (preview stays on full page for editing). Not one multi-strip image.");
+                sb.AppendLine(";   Margin=outer pad on each canvas. Gap used by multi-strip crop-stack only.");
                 sb.AppendLine("; StackBeefExtra=0.667 (⅔ larger canvas, stock). Pad only — both POI + crop stacks.");
                 sb.AppendLine("; StackBottomPadShare=0.5 center vertical pad; 0.85 = bottom-heavy (less top).");
-                sb.AppendLine("; PoiAutoStackGapPx=8 (default between islands). PoiAutoStackMarginPx=12 (outer).");
+                sb.AppendLine("; PoiAutoStackGapPx=8 (multi-strip crop-stack). PoiAutoStackMarginPx=12 (per canvas).");
                 sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
+                sb.AppendLine(";   then crop re-OCR each island; empty/junk → drop (fog ghost islands).");
                 sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");

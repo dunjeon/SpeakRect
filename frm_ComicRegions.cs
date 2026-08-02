@@ -266,8 +266,9 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "On: switches to Comic Book mode (sidebar MODE updates). OCR finds text islands, " +
                 "draws bright green boxes on the gray prep (same as this preview), optional fog " +
-                "outside them. Speak: with Stack on (stock) → orange island stack to Local-LLM; " +
-                "Stack off/fail multi → §9 Sequential or crop-stack; 1 island → full-page guide. " +
+                "outside them. Speak: with Stack on (stock) → each island on its own orange " +
+                "canvas to Local-LLM one at a time; Stack off/fail multi → §9 Sequential or " +
+                "crop-stack; 1 island → full-page guide. " +
                 "Edit the POI prompt under Speech → Prompts. Grow / crop pad size the islands."),
                 72);
 
@@ -297,7 +298,7 @@ namespace SpeakRect
 
             _chkPoiAutoStack = new CheckBox
             {
-                Text = "    Stack islands for Local-LLM send",
+                Text = "    Island canvases for Local-LLM (one at a time)",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -371,11 +372,12 @@ namespace SpeakRect
                 WrapTrack(_trkPoiStackBottomPad, _lblPoiStackBottomPadVal),
                 42);
             AddFull(MakeHint(
-                "On (default): Speak crops green islands, stacks on orange canvas (beef knobs), " +
-                "sends that image to Local-LLM (primary VL path). Preview stays full page for edit. " +
-                "Same canvas rules apply to non-POI crop-stack and to POI multi when Stack fails " +
-                "and §9 is off. Stock beef +67%, bottom pad 50%. Between=8px, Margin=12px. " +
-                "Compose hard-caps stack long edge at 2560; Image-tab downscale is separate (off)."),
+                "On (default): Speak crops each green island onto its own orange canvas " +
+                "(beef knobs + margin), sends to Local-LLM one island at a time. " +
+                "Preview stays full page for edit. Same canvas rules apply to non-POI " +
+                "crop-stack (multi-strip) and to POI multi when this is off and §9 is off. " +
+                "Stock beef +67%, bottom pad 50%. Margin=12px. " +
+                "Compose hard-caps canvas long edge at 2560; Image-tab downscale is separate (off)."),
                 72);
 
             // 1) Detect fog

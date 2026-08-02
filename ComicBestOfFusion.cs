@@ -2233,6 +2233,7 @@ namespace SpeakRect
         /// True for a short alnum token that looks like real English dialogue
         /// (letter-only, has a vowel). Includes punchy 2-3 letter balloons
         /// ("NO", "OK", "GO", "YES") and longer call-outs (WATCHDOG, ANGRY).
+        /// Rejects pure repeated-syllable OCR ghosts (jar "coocoo", etc.).
         /// </summary>
         public static bool LooksLikeRealDialogueToken(string? text)
         {
@@ -2241,6 +2242,8 @@ namespace SpeakRect
             string n = SpeechCleaner.NormalizeToken(text);
             // 2–18 letters: "no"/"ok" through multi-syllable SFX names
             if (n.Length < 2 || n.Length > 18)
+                return false;
+            if (LooksLikeRepeatedSyllableGibberish(n))
                 return false;
             foreach (char c in n)
             {
@@ -2251,6 +2254,43 @@ namespace SpeakRect
             {
                 char l = char.ToLowerInvariant(c);
                 if (l is 'a' or 'e' or 'i' or 'o' or 'u' or 'y')
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Pure repeated syllable blobs from art OCR (e.g. candy-jar rings → "coocoo").
+        /// Length ≥6 so short SFX like "haha" / "mama" stay allowed.
+        /// </summary>
+        public static bool LooksLikeRepeatedSyllableGibberish(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+            string n = SpeechCleaner.NormalizeToken(text);
+            if (n.Length < 6 || n.Length > 18)
+                return false;
+            for (int unit = 2; unit <= 4; unit++)
+            {
+                if (n.Length % unit != 0)
+                    continue;
+                int reps = n.Length / unit;
+                if (reps < 2)
+                    continue;
+                string u = n.Substring(0, unit);
+                bool all = true;
+                for (int i = 1; i < reps; i++)
+                {
+                    if (!string.Equals(
+                            n.Substring(i * unit, unit),
+                            u,
+                            StringComparison.Ordinal))
+                    {
+                        all = false;
+                        break;
+                    }
+                }
+                if (all)
                     return true;
             }
             return false;

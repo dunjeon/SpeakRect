@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using SpeakRect;
 using Xunit;
 
@@ -69,6 +70,42 @@ public class SpeechCleanerTests
         Assert.Contains("school", s, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("**", s, StringComparison.Ordinal);
         Assert.DoesNotContain("##", s, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CleanForSpeech_unwraps_loose_text_field_without_braces()
+    {
+        // Hattie panel (2026-08-01): VL mixed plain balloon + freestyle
+        // "text": "…" — not a JSON object, so brace unwrap missed it and TTS
+        // spoke the word "text".
+        string raw =
+            "...AND SHE WASN'T ANYTHIN' LIKE YOU.\n\n" +
+            "\"text\": \"HER NAME WAS HATTIE ST. ANGE, AND SHE WAS A..." +
+            "DIFFICULT WOMAN. YOU KNOW THE TYPE: TOO SMART FOR HER OWN GOOD..." +
+            "HYPERSENSITIVE... TORPEDOED EVERY RELATIONSHIP SHE EVER HAD...\"";
+
+        string cleaned = SpeechCleaner.CleanForSpeech(raw, comicBook: true);
+        Assert.Contains("hattie", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("anythin", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("text her name", cleaned, StringComparison.OrdinalIgnoreCase);
+        // No spoken JSON key as its own lead-in word.
+        Assert.False(
+            Regex.IsMatch(cleaned, @"(?i)(?:^|[\x1c-\x1f\s])text\s+her\s+name"),
+            $"cleaned={cleaned}");
+        // Double quotes are not useful for TTS — strip to spaces / gone.
+        Assert.DoesNotContain("\"", cleaned, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CleanForSpeech_keeps_dialogue_colon_phrases()
+    {
+        // Must not treat "TYPE: TOO SMART" as a JSON field (only known keys unwrap).
+        string cleaned = SpeechCleaner.CleanForSpeech(
+            "YOU KNOW THE TYPE: TOO SMART FOR HER OWN GOOD.",
+            comicBook: true);
+        Assert.Contains("type", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("too smart", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("own good", cleaned, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

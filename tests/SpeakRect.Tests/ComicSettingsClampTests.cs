@@ -81,6 +81,37 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Dyn_fog_island_crop_empty_nukes()
+    {
+        // Ghost island: crop re-OCR empty / junk → drop.
+        Assert.True(OcrProcessor.SmokeDynFogIslandCropIsEmpty(null));
+        Assert.True(OcrProcessor.SmokeDynFogIslandCropIsEmpty(""));
+        Assert.True(OcrProcessor.SmokeDynFogIslandCropIsEmpty("   "));
+        Assert.True(OcrProcessor.SmokeDynFogIslandCropIsEmpty("!"));
+        Assert.True(OcrProcessor.SmokeDynFogIslandCropIsEmpty("a")); // below min alnum floor
+        // Real balloon text from crop → keep.
+        Assert.False(OcrProcessor.SmokeDynFogIslandCropIsEmpty("Hello"));
+        Assert.False(OcrProcessor.SmokeDynFogIslandCropIsEmpty("OK"));
+        Assert.False(OcrProcessor.SmokeDynFogIslandCropIsEmpty("No!"));
+    }
+
+    [Fact]
+    public void Dyn_fog_rejects_candy_jar_coocoo_gibberish()
+    {
+        // last_regions island 3: jar rings OCR'd as "coocoo" (not empty — needs gibberish gate).
+        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("coocoo"));
+        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("CooCoo"));
+        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("lalala"));
+        // Short SFX / real dialogue must survive.
+        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("haha"));
+        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("NO"));
+        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("SORRY"));
+        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("WATCHDOG"));
+        Assert.False(ComicBestOfFusion.LooksLikeRealDialogueToken("coocoo"));
+        Assert.True(ComicBestOfFusion.LooksLikeRealDialogueToken("SORRY"));
+    }
+
+    [Fact]
     public void Default_mode_is_product_default_poi_off()
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();

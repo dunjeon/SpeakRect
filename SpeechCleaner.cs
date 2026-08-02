@@ -1199,12 +1199,22 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Known freestyle OCR field names models put in JSON / pseudo-JSON wrappers.
+        /// </summary>
+        private static readonly string ModelJsonTextKeyAlternation =
+            "text|content|ocr|result|output|transcription|message|caption|value";
+
+        /// <summary>
         /// Extract prose from model JSON wrappers. Handles:
         /// <list type="bullet">
         /// <item>Whole reply is <c>{"text":"…"}</c> (also content/ocr/result/…)</item>
         /// <item>Plain text + trailing object (log: Adrienne. then {"text":"Something?\\n…"})</item>
+        /// <item>Loose field without braces (log: Hattie panel <c>"text": "HER NAME…"</c>) —
+        /// punctuation strip would otherwise leave a spoken word <c>text</c>.</item>
         /// </list>
         /// Non-matching braces are left alone (dialogue with literal '{').
+        /// Double quotes are not kept for TTS — they only matter while unwrapping
+        /// string values; <see cref="NormalizeSpeechPunctuation"/> drops the rest.
         /// </summary>
         internal static string UnwrapModelJsonPayload(string input)
         {
@@ -1228,54 +1238,138 @@ namespace SpeakRect
                 return whole.Trim();
 
             // Mixed: prose + one or more {...} objects with a text-ish string field
-            if (s.IndexOf('{') < 0)
-                return s;
-
-            var sb = new StringBuilder(s.Length);
-            int i = 0;
-            bool anyUnwrapped = false;
-            while (i < s.Length)
+            if (s.IndexOf('{') >= 0)
             {
-                int brace = s.IndexOf('{', i);
-                if (brace < 0)
+                var sb = new StringBuilder(s.Length);
+                int i = 0;
+                bool anyUnwrapped = false;
+                while (i < s.Length)
                 {
-                    sb.Append(s, i, s.Length - i);
-                    break;
-                }
-
-                if (brace > i)
-                    sb.Append(s, i, brace - i);
-
-                int end = FindMatchingJsonBrace(s, brace);
-                if (end < 0)
-                {
-                    sb.Append(s, brace, s.Length - brace);
-                    break;
-                }
-
-                string candidate = s.Substring(brace, end - brace + 1);
-                if (TryExtractJsonTextField(candidate, out string extracted) &&
-                    !string.IsNullOrWhiteSpace(extracted))
-                {
-                    anyUnwrapped = true;
-                    // Keep a balloon-style blank line between plain prefix and extract
-                    if (sb.Length > 0)
+                    int brace = s.IndexOf('{', i);
+                    if (brace < 0)
                     {
-                        while (sb.Length > 0 && char.IsWhiteSpace(sb[^1]))
-                            sb.Length--;
-                        sb.Append("\n\n");
+                        sb.Append(s, i, s.Length - i);
+                        break;
                     }
-                    sb.Append(extracted.Trim());
-                }
-                else
-                {
-                    sb.Append(candidate);
+
+                    if (brace > i)
+                        sb.Append(s, i, brace - i);
+
+                    int end = FindMatchingJsonBrace(s, brace);
+                    if (end < 0)
+                    {
+                        sb.Append(s, brace, s.Length - brace);
+                        break;
+                    }
+
+                    string candidate = s.Substring(brace, end - brace + 1);
+                    if (TryExtractJsonTextField(candidate, out string extracted) &&
+                        !string.IsNullOrWhiteSpace(extracted))
+                    {
+                        anyUnwrapped = true;
+                        // Keep a balloon-style blank line between plain prefix and extract
+                        if (sb.Length > 0)
+                        {
+                            while (sb.Length > 0 && char.IsWhiteSpace(sb[^1]))
+                                sb.Length--;
+                            sb.Append("\n\n");
+                        }
+                        sb.Append(extracted.Trim());
+                    }
+                    else
+                    {
+                        sb.Append(candidate);
+                    }
+
+                    i = end + 1;
                 }
 
-                i = end + 1;
+                if (anyUnwrapped)
+                    s = sb.ToString().Trim();
             }
 
-            return anyUnwrapped ? sb.ToString().Trim() : s;
+            // Loose "text": "…" without outer braces (common VL freestyle).
+            // Must run even when no '{' was present — that is the Hattie failure mode.
+            s = UnwrapLooseJsonTextAssignments(s);
+            return s.Trim();
+        }
+
+        /// <summary>
+        /// Peel freestyle <c>"text": "dialogue…"</c> / <c>text: "…"</c> assignments
+        /// that are not valid JSON objects. Replaces the key+quotes with the string
+        /// value only so TTS never speaks the field name.
+        /// </summary>
+        internal static string UnwrapLooseJsonTextAssignments(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input ?? "";
+
+            string s = input;
+
+            // "text": "VALUE"  (key always quoted in the Hattie log form)
+            s = Regex.Replace(
+                s,
+                $@"(?is)""(?:{ModelJsonTextKeyAlternation})""\s*:\s*""((?:\\.|[^""\\])*)""",
+                m =>
+                {
+                    string val = UnescapeJsonStringContent(m.Groups[1].Value).Trim();
+                    return string.IsNullOrEmpty(val) ? " " : "\n\n" + val + "\n\n";
+                },
+                RegexOptions.CultureInvariant);
+
+            // text: "VALUE"  (unquoted key — avoid matching dialogue like "type: TOO")
+            // Require start / whitespace / brace / comma before the key name.
+            s = Regex.Replace(
+                s,
+                $@"(?is)(?<=^|[\s{{,])(?:{ModelJsonTextKeyAlternation})\s*:\s*""((?:\\.|[^""\\])*)""",
+                m =>
+                {
+                    string val = UnescapeJsonStringContent(m.Groups[1].Value).Trim();
+                    return string.IsNullOrEmpty(val) ? " " : "\n\n" + val + "\n\n";
+                },
+                RegexOptions.CultureInvariant);
+
+            // Residual bare label with no/broken value (e.g. "text": alone on a line)
+            s = Regex.Replace(
+                s,
+                $@"(?im)^[ \t]*[{{,]?[ \t]*""?(?:{ModelJsonTextKeyAlternation})""?[ \t]*:[ \t]*",
+                "",
+                RegexOptions.CultureInvariant);
+
+            s = Regex.Replace(s, @"\n{3,}", "\n\n");
+            return s.Trim();
+        }
+
+        /// <summary>
+        /// Decode a JSON string <b>body</b> (content between quotes, escapes intact).
+        /// </summary>
+        internal static string UnescapeJsonStringContent(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return "";
+
+            try
+            {
+                // Parse as a full JSON string literal.
+                string? decoded = JsonSerializer.Deserialize<string>("\"" + content + "\"");
+                if (decoded != null)
+                    return decoded;
+            }
+            catch (JsonException)
+            {
+                // fall through
+            }
+            catch (ArgumentException)
+            {
+                // fall through
+            }
+
+            return content
+                .Replace("\\n", "\n", StringComparison.Ordinal)
+                .Replace("\\r", "\r", StringComparison.Ordinal)
+                .Replace("\\t", "\t", StringComparison.Ordinal)
+                .Replace("\\\"", "\"", StringComparison.Ordinal)
+                .Replace("\\\\", "\\", StringComparison.Ordinal);
         }
 
 

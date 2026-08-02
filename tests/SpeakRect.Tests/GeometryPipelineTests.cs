@@ -93,4 +93,28 @@ public class GeometryPipelineTests
         Assert.DoesNotContain(kept, x =>
             x.Text.Equals("cream", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Dead_island_drops_coocoo_jar_gibberish()
+    {
+        // Shiny jar can pass balloon-fill; "coocoo" is repeated-syllable art OCR.
+        using var bmp = new Bitmap(400, 400);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.FromArgb(255, 50, 50, 50));
+            g.FillRectangle(Brushes.White, 20, 20, 120, 50);
+            // light metal plate that often passes balloon-fill
+            g.FillEllipse(Brushes.Silver, 150, 250, 160, 100);
+        }
+
+        var islands = new List<(Rectangle Bounds, string Text)>
+        {
+            (new Rectangle(25, 25, 100, 40), "Hello there friend"),
+            (new Rectangle(160, 260, 140, 80), "coocoo"),
+        };
+        var kept = OcrProcessor.SmokeFilterDeadDetectRegions(bmp, islands);
+        Assert.Contains(kept, x => x.Text.Contains("Hello", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(kept, x =>
+            x.Text.Equals("coocoo", StringComparison.OrdinalIgnoreCase));
+    }
 }

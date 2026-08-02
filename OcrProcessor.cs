@@ -2370,7 +2370,7 @@ namespace SpeakRect
 
                             string strategyHint = usePoi
                                 ? (AppSettings.Current.ComicPoiAutoStack
-                                    ? "detect+poi-stack (AutoStack; multi fail → §9 seq or crop-stack)"
+                                    ? "detect+poi-stack (per-island canvas VL; multi fail → §9)"
                                     : "detect+poi (no AutoStack; multi → §9 seq or crop-stack)")
                                 : useSequential
                                     ? "detect+sequential"
@@ -2847,7 +2847,7 @@ namespace SpeakRect
                 poi
                     ? "profile=full+poi (ComicBook: detect → POI guide; " +
                       (autoStack
-                          ? "AutoStack=VL island stack primary; " +
+                          ? "AutoStack=per-island orange canvas VL one-at-a-time; " +
                             "multi stack-fail → §9 seq or crop-stack"
                           : "AutoStack off; multi → §9 seq or crop-stack; " +
                             "1 island → full-page guide") +
@@ -2876,9 +2876,8 @@ namespace SpeakRect
                 if (autoStack)
                 {
                     sb.AppendLine(
-                        $"  poi Local-LLM stack=on (VL speak path) " +
-                        $"(between={AppSettings.Current.ComicPoiAutoStackGapPx}px " +
-                        $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px " +
+                        $"  poi Local-LLM stack=on (per-island canvas VL, one at a time) " +
+                        $"(margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px " +
                         $"beef+{AppSettings.Current.ComicPoiStackBeefExtra:0.###}; " +
                         "preview stays full page; compose long-edge cap 2560)");
                 }
@@ -2915,7 +2914,7 @@ namespace SpeakRect
             {
                 sb.AppendLine(
                     autoStack
-                        ? "  speak=poi-stack VL when AutoStack succeeds; " +
+                        ? "  speak=poi-stack per-island canvas VL (one island at a time); " +
                           "else multi uses §9 (seq on / crop-stack off)"
                         : sequential
                             ? "  sequential-regions=on under POI multi (stack off)"
@@ -3595,8 +3594,8 @@ namespace SpeakRect
         /// <item>Display boxes: if override pad is 0 (Balloons refine boxes),
         /// region bounds are already final; else expand cores with crop pad once.</item>
         /// <item>Full-page green guide always published for analytics/preview map.</item>
-        /// <item><see cref="AppSettings.ComicPoiAutoStack"/> on (stock): islands → orange
-        /// stack → one VL call is the primary speak path (<c>comic-poi-stack</c>).</item>
+        /// <item><see cref="AppSettings.ComicPoiAutoStack"/> on (stock): each island →
+        /// its own orange canvas → VL (+ TTS) one at a time (<c>comic-poi-stack</c>).</item>
         /// <item>Stack off/fail + multi-island: honor Balloons §9 —
         /// <see cref="AppSettings.ComicSequentialRegions"/> on → sequential per-island;
         /// off → crop-stack best-of on tone.</item>
@@ -3660,126 +3659,175 @@ namespace SpeakRect
                 // isVlInput only if we will NOT replace with stack (stack overwrites send files).
                 SavePoiVlDebug(guideBmp, isVlInput: !sPoi.ComicPoiAutoStack && boxes.Count == 1);
 
-                // Local-LLM send: when Stack islands is on, always lift islands and
-                // vertical-stack for VL (preview stays on full page for editing).
-                // Gap / margin from Balloons knobs; then optional Image-tab long-edge cap.
+                // Local-LLM send: when Stack islands is on, each island gets its own
+                // orange canvas (same beef/margin compose as before) and is sent to VL
+                // one at a time — not one multi-strip stack image. Preview stays full page.
                 if (sPoi.ComicPoiAutoStack && boxes.Count >= 1)
                 {
                     int margin = Math.Clamp(sPoi.ComicPoiAutoStackMarginPx, 0, 64);
-                    int stripGap = Math.Clamp(sPoi.ComicPoiAutoStackGapPx, 0, 64);
                     int sendCap = ActiveLlmSendMaxLongEdge;
                     detail.AppendLine(
-                        $"llm-send-stack: on strips={boxes.Count} gap={stripGap}px " +
-                        $"margin={margin}px" +
+                        $"llm-send-stack: per-island canvas ×{boxes.Count} " +
+                        $"margin={margin}px (one VL each; not multi-strip)" +
                         (sendCap > 0 ? $" then-long-edge≤{sendCap}" : " (no send downscale)"));
-                    Bitmap? stackBmp = null;
+
+                    var stackParts = new List<string>();
+                    var spoken = new List<string>();
+                    bool duckedStack = alreadyDucked;
+                    int islandsOk = 0;
+
                     try
                     {
-                        sw.Restart();
-                        // Tone crops (clear lettering) + green boxes on strips; orange canvas.
-                        stackBmp = ComicPoiGuide.BuildVerticalStack(
-                            toneImage,
-                            boxes,
-                            detail,
-                            paintBullseyes: false,
-                            stripGapPx: stripGap,
-                            marginPx: margin);
-                        pipeTimer.Mark("llm-island-stack compose", sw);
-                        if (stackBmp != null)
+                        for (int i = 0; i < boxes.Count; i++)
                         {
-                            CaptureAnalyticsImage(
-                                "llm_island_stack",
-                                $"Local-LLM island stack {stackBmp.Width}x{stackBmp.Height} " +
-                                $"(gap={stripGap} margin={margin}" +
-                                (sendCap > 0 ? $"; then ≤{sendCap}" : "") + ")",
-                                stackBmp);
-                            if (ActiveAnyDebugArtifacts)
+                            token.ThrowIfCancellationRequested();
+                            Bitmap? islandCanvas = null;
+                            try
                             {
-                                try
+                                sw.Restart();
+                                // One island → one orange canvas (green box + margin/beef).
+                                islandCanvas = ComicPoiGuide.BuildVerticalStack(
+                                    toneImage,
+                                    new[] { boxes[i] },
+                                    detail,
+                                    paintBullseyes: false,
+                                    stripGapPx: 0,
+                                    marginPx: margin);
+                                pipeTimer.Add(
+                                    $"llm-island-canvas[{i + 1}]",
+                                    sw.ElapsedMilliseconds);
+
+                                if (islandCanvas == null)
                                 {
-                                    EnsureDebugFolder();
-                                    stackBmp.Save(
-                                        Path.Combine(DebugFolder, "last_llm_island_stack.png"),
-                                        ImageFormat.Png);
+                                    detail.AppendLine(
+                                        $"  poi-island[{i + 1}/{boxes.Count}]: compose failed");
+                                    continue;
                                 }
-                                catch { /* debug only */ }
-                            }
 
-                            sw.Restart();
-                            string? stackClean = await RunFullFrameKoboldOnBitmapAsync(
-                                stackBmp,
-                                detail,
-                                token,
-                                savePrep: false,
-                                promptOverride: AppSettings.Current.ResolvePoiPrompt())
-                                .ConfigureAwait(false);
-                            pipeTimer.Mark("full-frame-ocr (llm-island-stack)", sw);
+                                string slotKey = i == 0
+                                    ? "llm_island_stack"
+                                    : $"llm_island_{i + 1}";
+                                CaptureAnalyticsImage(
+                                    slotKey,
+                                    $"Local-LLM island canvas {i + 1}/{boxes.Count} " +
+                                    $"{islandCanvas.Width}x{islandCanvas.Height} " +
+                                    $"(margin={margin}" +
+                                    (sendCap > 0 ? $"; then ≤{sendCap}" : "") + ")",
+                                    islandCanvas);
 
-                            var stackParts = new List<string>();
-                            if (!SpeechCleaner.IsUnusableOcrText(stackClean))
-                            {
-                                stackParts.Add(stackClean!);
-                                detail.AppendLine(
-                                    $"winner=comic-poi-stack words=" +
-                                    $"{ComicRegionGeometry.CountWords(stackClean!)}");
-                            }
-                            else
-                            {
-                                detail.AppendLine(
-                                    "comic-poi-stack empty/unusable → fall through");
-                            }
-
-                            if (stackParts.Count > 0)
-                            {
-                                bool duckedStack = alreadyDucked;
-                                if (speakNow)
+                                if (ActiveAnyDebugArtifacts)
                                 {
-                                    var speakPieces =
-                                        SpeechCleaner.ExpandToSpeakPieces(stackParts);
-                                    if (speakPieces.Count > 0)
+                                    try
                                     {
-                                        if (!duckedStack)
-                                        {
-                                            DuckOtherAudio();
-                                            duckedStack = true;
-                                        }
-                                        var spoken = new List<string>();
-                                        for (int pi = 0; pi < speakPieces.Count; pi++)
-                                        {
-                                            token.ThrowIfCancellationRequested();
-                                            string unit = speakPieces[pi].Text;
-                                            spoken.Add(unit);
-                                            detail.AppendLine(
-                                                $"speak[comic-poi-stack {pi + 1}/" +
-                                                $"{speakPieces.Count}]: {unit}");
-                                            sw.Restart();
-                                            await SpeakWithSystemAsync(unit, token)
-                                                .ConfigureAwait(false);
-                                            pipeTimer.Mark(
-                                                $"tts comic-poi-stack[{pi + 1}]", sw);
-                                            int pauseMs = speakPieces[pi].PauseAfterMs;
-                                            if (pauseMs > 0)
-                                            {
-                                                await Task.Delay(pauseMs, token)
-                                                    .ConfigureAwait(false);
-                                            }
-                                        }
-                                        return (spoken, "comic-poi-stack", duckedStack);
+                                        EnsureDebugFolder();
+                                        // Last canvas written wins (same as prior single-stack dump).
+                                        islandCanvas.Save(
+                                            Path.Combine(
+                                                DebugFolder, "last_llm_island_stack.png"),
+                                            ImageFormat.Png);
+                                    }
+                                    catch { /* debug only */ }
+                                }
+
+                                detail.AppendLine(
+                                    $"  poi-island[{i + 1}/{boxes.Count}]: " +
+                                    $"canvas {islandCanvas.Width}x{islandCanvas.Height} " +
+                                    $"box @{boxes[i].X},{boxes[i].Y} " +
+                                    $"{boxes[i].Width}x{boxes[i].Height}");
+
+                                sw.Restart();
+                                string? islandClean = await RunFullFrameKoboldOnBitmapAsync(
+                                    islandCanvas,
+                                    detail,
+                                    token,
+                                    savePrep: false,
+                                    promptOverride: AppSettings.Current.ResolvePoiPrompt())
+                                    .ConfigureAwait(false);
+                                pipeTimer.Add(
+                                    $"full-frame-ocr (llm-island[{i + 1}])",
+                                    sw.ElapsedMilliseconds);
+
+                                if (SpeechCleaner.IsUnusableOcrText(islandClean))
+                                {
+                                    detail.AppendLine(
+                                        $"  poi-island[{i + 1}]: empty/unusable VL");
+                                    continue;
+                                }
+
+                                islandsOk++;
+                                stackParts.Add(islandClean!);
+                                detail.AppendLine(
+                                    $"  poi-island[{i + 1}]: ok words=" +
+                                    $"{ComicRegionGeometry.CountWords(islandClean!)}");
+
+                                if (!speakNow)
+                                    continue;
+
+                                var speakPieces =
+                                    SpeechCleaner.ExpandToSpeakPieces(
+                                        new List<string> { islandClean! });
+                                if (speakPieces.Count == 0)
+                                    continue;
+
+                                // Balloon pause between islands (not after last).
+                                if (i < boxes.Count - 1)
+                                {
+                                    speakPieces[^1] =
+                                        speakPieces[^1].WithPause(BubblePauseMs);
+                                }
+
+                                if (!duckedStack)
+                                {
+                                    DuckOtherAudio();
+                                    duckedStack = true;
+                                }
+
+                                for (int pi = 0; pi < speakPieces.Count; pi++)
+                                {
+                                    token.ThrowIfCancellationRequested();
+                                    string unit = speakPieces[pi].Text;
+                                    spoken.Add(unit);
+                                    detail.AppendLine(
+                                        $"speak[comic-poi-stack i{i + 1} " +
+                                        $"{pi + 1}/{speakPieces.Count}]: {unit}");
+                                    sw.Restart();
+                                    await SpeakWithSystemAsync(unit, token)
+                                        .ConfigureAwait(false);
+                                    pipeTimer.Mark(
+                                        $"tts comic-poi-stack[{i + 1}.{pi + 1}]", sw);
+                                    int pauseMs = speakPieces[pi].PauseAfterMs;
+                                    if (pauseMs > 0)
+                                    {
+                                        await Task.Delay(pauseMs, token)
+                                            .ConfigureAwait(false);
                                     }
                                 }
-                                return (stackParts, "comic-poi-stack", duckedStack);
+                            }
+                            finally
+                            {
+                                try { islandCanvas?.Dispose(); } catch { /* ignore */ }
                             }
                         }
+
+                        if (stackParts.Count > 0)
+                        {
+                            detail.AppendLine(
+                                $"winner=comic-poi-stack islands={islandsOk}/{boxes.Count} " +
+                                $"words={stackParts.Sum(ComicRegionGeometry.CountWords)} " +
+                                $"(per-island canvas VL)");
+                            if (speakNow)
+                                return (spoken, "comic-poi-stack", duckedStack);
+                            return (stackParts, "comic-poi-stack", duckedStack);
+                        }
+
+                        detail.AppendLine(
+                            "comic-poi-stack empty/unusable (all islands) → fall through");
                     }
                     catch (Exception ex)
                     {
                         detail.AppendLine($"llm-send-stack failed: {ex.Message}");
                     }
-                    finally
-                    {
-                        try { stackBmp?.Dispose(); } catch { /* ignore */ }
-                    }
-                    // Fall through if stack empty/failed.
+                    // Fall through if every island empty/failed.
                 }
 
                 // Multi-island (stack off or stack failed): honor Balloons §9.
@@ -5280,6 +5328,7 @@ namespace SpeakRect
         /// <item>Always start at <see cref="DynamicFogSearchFloor"/> and climb
         /// until area clearly shrinks vs peak (user fog slider not used).</item>
         /// <item>Final full detect at best fog with user's merge setting.</item>
+        /// <item>Crop re-OCR each island; empty/junk text → nuke (fog ghosts).</item>
         /// </list>
         /// Preview base image is the final fog so you can see the chosen amount.
         /// </summary>
@@ -5396,6 +5445,10 @@ namespace SpeakRect
             {
                 var (regions, detection, fragmented) = await BuildComicReadingRegionsAsync(
                     finalFog, pipeW, pipeH, detail, token).ConfigureAwait(false);
+                // Dyn fog can invent ghost islands (art that looks like ink under gray).
+                // Crop re-OCR on the chosen fog view; empty/junk → drop before speak/POI.
+                regions = await VerifyDynFogIslandsWinOcrAsync(
+                    finalFog, regions, detail, token).ConfigureAwait(false);
                 return (regions, detection, fragmented, finalFog, OwnsDetectImage: true,
                     FogAmountUsed: bestFog, DynamicFogSearched: true, FogAmountStart: start);
             }
@@ -5404,6 +5457,175 @@ namespace SpeakRect
                 try { finalFog.Dispose(); } catch { /* ignore */ }
                 throw;
             }
+        }
+
+        /// <summary>
+        /// After dynamic-fog final detect: crop each island and re-run WinOCR.
+        /// Nuke when crop text is empty/junk, pure repeated-syllable gibberish
+        /// (jar rings → "coocoo"), or a single weak token that is not real dialogue.
+        /// Real multi-word balloons keep; short real call-outs ("NO", "SORRY") keep.
+        /// Comic Book + dyn fog only (caller gates). Skips when engine missing.
+        /// </summary>
+        private static async Task<List<DetectedTextRegion>> VerifyDynFogIslandsWinOcrAsync(
+            Bitmap detectImage,
+            List<DetectedTextRegion> regions,
+            StringBuilder detail,
+            CancellationToken token)
+        {
+            if (regions == null || regions.Count == 0 || detectImage == null)
+                return regions ?? new List<DetectedTextRegion>();
+
+            var engine = GetWinOcrEngine();
+            if (engine == null)
+            {
+                detail.AppendLine(
+                    "dyn-fog island-verify: skipped (no WinOCR engine)");
+                return regions;
+            }
+
+            int before = regions.Count;
+            var kept = new List<DetectedTextRegion>(regions.Count);
+            int nuked = 0;
+            int refreshed = 0;
+            var frame = new Rectangle(0, 0, detectImage.Width, detectImage.Height);
+
+            foreach (var r in regions)
+            {
+                token.ThrowIfCancellationRequested();
+
+                var cropRect = Rectangle.Inflate(r.Bounds, 6, 6);
+                cropRect.Intersect(frame);
+                if (cropRect.Width < BalloonOcrDetect.MinClusterSize ||
+                    cropRect.Height < BalloonOcrDetect.MinClusterSize)
+                {
+                    nuked++;
+                    detail.AppendLine(
+                        $"  dyn-fog nuke tiny-crop " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height}");
+                    continue;
+                }
+
+                using var crop = CropBitmap(detectImage, cropRect);
+                if (crop == null)
+                {
+                    nuked++;
+                    detail.AppendLine(
+                        $"  dyn-fog nuke crop-fail " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height}");
+                    continue;
+                }
+
+                // Quiet pass log — one summary line per island below.
+                var quiet = new StringBuilder();
+                List<DetectedTextRegion> inner;
+                try
+                {
+                    inner = await RunWinOcrPassAsync(
+                        engine, crop, OrphanWinOcrScale, token, quiet)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Keep original island if crop OCR fails hard (do not over-nuke).
+                    detail.AppendLine(
+                        $"  dyn-fog verify-error keep " +
+                        $"@{r.Bounds.X},{r.Bounds.Y}: {ex.Message}");
+                    kept.Add(r);
+                    continue;
+                }
+
+                var texts = new List<string>();
+                foreach (var ir in inner)
+                {
+                    if (!string.IsNullOrWhiteSpace(ir.WinOcrText) &&
+                        !IsJunkWinOcrText(ir.WinOcrText))
+                    {
+                        texts.Add(ir.WinOcrText.Trim());
+                    }
+                }
+
+                string joined = Regex.Replace(
+                    string.Join(" ", texts), @"\s+", " ").Trim();
+                int words = ComicRegionGeometry.CountWords(joined);
+                int alnum = SpeechCleaner.CountAlnum(joined);
+                string was = string.IsNullOrWhiteSpace(r.WinOcrText)
+                    ? "(empty)"
+                    : $"\"{Truncate(r.WinOcrText, 24)}\"";
+                string cropPreview = string.IsNullOrWhiteSpace(joined)
+                    ? "(empty)"
+                    : $"\"{Truncate(joined, 32)}\"";
+
+                // 1) Empty / below alnum floor
+                if (IsJunkWinOcrText(joined) || string.IsNullOrWhiteSpace(joined))
+                {
+                    nuked++;
+                    detail.AppendLine(
+                        $"  dyn-fog nuke empty-crop-ocr " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
+                        $"crop={cropPreview} was={was}");
+                    continue;
+                }
+
+                // 2) Art OCR ghosts: pure repeated syllables (candy-jar "coocoo")
+                if (ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish(joined))
+                {
+                    nuked++;
+                    detail.AppendLine(
+                        $"  dyn-fog nuke gibberish-crop " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
+                        $"crop={cropPreview} was={was}");
+                    continue;
+                }
+
+                // 3) Single weak token that is not a real dialogue call-out.
+                // Multi-word crop text is trusted as speech. One-word must look like
+                // "NO"/"SORRY"/"WATCHDOG" — not random art glyphs that balloon-fill.
+                if (words <= 1)
+                {
+                    bool realWord = LooksLikeRealDialogueToken(joined);
+                    bool belowMin =
+                        MinIslandAlnumChars > 0 && alnum < MinIslandAlnumChars;
+                    if (!realWord || belowMin)
+                    {
+                        nuked++;
+                        detail.AppendLine(
+                            $"  dyn-fog nuke weak-single-token " +
+                            $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
+                            $"crop={cropPreview} alnum={alnum} realWord={realWord} was={was}");
+                        continue;
+                    }
+                }
+
+                // Crop confirmed text — keep geometry; refresh detect text if better.
+                if (!string.Equals(r.WinOcrText, joined, StringComparison.Ordinal))
+                {
+                    refreshed++;
+                    kept.Add(new DetectedTextRegion
+                    {
+                        Bounds = r.Bounds,
+                        WinOcrText = joined
+                    });
+                    detail.AppendLine(
+                        $"  dyn-fog verify-ok text-refresh " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} crop={cropPreview}");
+                }
+                else
+                {
+                    kept.Add(r);
+                    detail.AppendLine(
+                        $"  dyn-fog verify-ok " +
+                        $"@{r.Bounds.X},{r.Bounds.Y} crop={cropPreview}");
+                }
+            }
+
+            detail.AppendLine(
+                $"dyn-fog island-verify: {before} → {kept.Count} " +
+                $"(nuked={nuked} refreshed={refreshed})");
+            return kept;
         }
 
         /// <summary>
@@ -5550,6 +5772,17 @@ namespace SpeakRect
 
             regions = ApplyMergeOverlappingIslandsIfEnabled(
                 regions, pipeW, pipeH, detail);
+
+            // Late scrap (mega-split pieces / merge leftovers) can reappear after the
+            // early dead-island pass — filter again so art OCR like "coocoo" dies.
+            int beforeDead2 = regions.Count;
+            regions = FilterDeadDetectRegions(regions, detectImage, detail);
+            if (regions.Count != beforeDead2)
+            {
+                detail.AppendLine(
+                    $"dead-island filter (post-split): {beforeDead2} → {regions.Count}");
+            }
+
             regions = SortComicReadingOrderRegions(regions);
 
             detail.AppendLine($"reading-blocks={regions.Count}");
@@ -8746,31 +8979,12 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// True for a short alnum token that looks like real English dialogue
-        /// (letter-only, has a vowel). Includes punchy 2–3 letter balloons
-        /// ("NO", "OK", "GO", "YES") and longer call-outs (WATCHDOG, ANGRY).
+        /// True for a short alnum token that looks like real English dialogue.
+        /// Delegates to <see cref="ComicBestOfFusion.LooksLikeRealDialogueToken"/>
+        /// (rejects repeated-syllable OCR ghosts like "coocoo").
         /// </summary>
         private static bool LooksLikeRealDialogueToken(string? text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return false;
-            string n = SpeechCleaner.NormalizeToken(text);
-            // 2–18 letters: "no"/"ok" through multi-syllable SFX names
-            if (n.Length < 2 || n.Length > 18)
-                return false;
-            foreach (char c in n)
-            {
-                if (!char.IsLetter(c))
-                    return false;
-            }
-            foreach (char c in n)
-            {
-                char l = char.ToLowerInvariant(c);
-                if (l is 'a' or 'e' or 'i' or 'o' or 'u' or 'y')
-                    return true;
-            }
-            return false;
-        }
+            => ComicBestOfFusion.LooksLikeRealDialogueToken(text);
 
         /// <summary>
         /// Encode a live pipeline bitmap for Analytics at the size that stage used.
@@ -10141,6 +10355,12 @@ namespace SpeakRect
                 if (disposeB) try { b32.Dispose(); } catch { /* ignore */ }
             }
         }
+
+        /// <summary>
+        /// Smoke helper: dyn-fog crop re-OCR empty/junk → nuke island (same gate as live).
+        /// </summary>
+        public static bool SmokeDynFogIslandCropIsEmpty(string? cropOcrText)
+            => IsJunkWinOcrText(cropOcrText);
 
         /// <summary>
         /// Smoke helper: dead-island filter used after WinOCR detect (drops logos
