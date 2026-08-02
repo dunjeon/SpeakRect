@@ -238,11 +238,12 @@ namespace SpeakRect
                  .Replace('\u2018', '\'')
                  .Replace('\u2032', '\'')
                  .Replace('\u02BC', '\'');
-            // Keep letters, digits, whitespace, apostrophe — mirrors
-            // NormalizeSpeechPunctuation (hyphen/other marks become spaces).
-            s = Regex.Replace(s, @"[^\p{L}\p{N}\s']+", " ");
-            // Drop orphan apostrophes (not letter'letter).
+            // Keep letters, digits, whitespace, apostrophe, hyphen — mirrors
+            // NormalizeSpeechPunctuation (other marks become spaces).
+            s = Regex.Replace(s, @"[^\p{L}\p{N}\s'\-]+", " ");
+            // Drop orphan apostrophes / hyphens (not letter'letter / letter-letter).
             s = Regex.Replace(s, @"(?<!\p{L})'|'(?!\p{L})", " ");
+            s = Regex.Replace(s, @"(?<!\p{L})-|-(?!\p{L})", " ");
             s = Regex.Replace(s, @"\s+", " ").Trim();
             return s;
         }

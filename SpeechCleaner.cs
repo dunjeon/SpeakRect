@@ -688,9 +688,10 @@ namespace SpeakRect
         /// Final pre-TTS punctuation chain. Order is intentional and must not be
         /// collapsed into one regex:
         /// <list type="number">
-        /// <item><b>Strip</b> non-pause punctuation (quotes, colons, dashes,
+        /// <item><b>Strip</b> non-pause punctuation (quotes, colons, symbols,
         /// semicolons, … → space). Keep <c>.</c> <c>!</c> <c>?</c> <c>,</c>,
-        /// typed pause marks, and mid-word apostrophes.</item>
+        /// ASCII hyphen (English compounds), typed pause marks, and mid-word
+        /// apostrophes. Orphan hyphens / apostrophes (not letter-bounded) → space.</item>
         /// <item><b>Collapse</b> adjacent pause marks to the first one only
         /// (<c>!!!</c> → <c>!</c>, <c>!?</c> → <c>!</c>, <c>,,</c> → <c>,</c>).</item>
         /// <item><b>Pause encode</b> <c>,</c> → comma pause mark;
@@ -710,12 +711,14 @@ namespace SpeakRect
             string s = input;
 
             // ---- 1) Strip non-pause punctuation ----
-            // Keep letters, digits, whitespace, . ! ? , ' and typed pause marks.
+            // Keep letters, digits, whitespace, . ! ? , ' - and typed pause marks.
+            // Hyphen stays for English compounds (well-known, X-Men); orphan - dropped below.
             s = Regex.Replace(s,
-                $@"[^\p{{L}}\p{{N}}\s.!?',{PauseMarkComma}{PauseMarkSentence}{PauseMarkOther}{PauseMarkBubble}]+",
+                $@"[^\p{{L}}\p{{N}}\s.!?',\-{PauseMarkComma}{PauseMarkSentence}{PauseMarkOther}{PauseMarkBubble}]+",
                 " ");
-            // Drop orphan apostrophes that are not mid-word (not letter'letter).
+            // Drop orphan apostrophes / hyphens that are not mid-word (not letter'letter / letter-letter).
             s = Regex.Replace(s, @"(?<!\p{L})'|'(?!\p{L})", " ");
+            s = Regex.Replace(s, @"(?<!\p{L})-|-(?!\p{L})", " ");
 
             // ---- 2) Collapse multi pause-marks to the first ----
             s = Regex.Replace(s, @"([.!?,])(?:\s*[.!?,])+", "$1");
@@ -1136,14 +1139,10 @@ namespace SpeakRect
                 " ",
                 RegexOptions.CultureInvariant);
 
-            // HTML tags + common entities (before * strip loses structure).
-            s = Regex.Replace(s, @"</?[a-zA-Z][^>]*>", " ", RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&nbsp;", " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&amp;", "&", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&lt;", "<", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&gt;", ">", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&quot;", "\"", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            s = Regex.Replace(s, @"&#39;", "'", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            // Do NOT strip HTML-like tags. Comic lettering often wraps dialogue in
+            // angle brackets (<WHERE ARE YOU, COUSIN?>) — </?[a-zA-Z][^>]*> would
+            // eat whole sentences. Local-LLM should not emit real HTML; residual
+            // < > are removed later as symbols (deco-strip-symbols / punct strip).
 
             // Images / links — keep visible label only.
             s = Regex.Replace(s, @"!\[([^\]]*)\]\([^)]+\)", " $1 ", RegexOptions.CultureInvariant);

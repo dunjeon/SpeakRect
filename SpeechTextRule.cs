@@ -376,23 +376,9 @@ namespace SpeakRect
                 @"<(https?://[^>]+|mailto:[^>]+|[^@\s>]+@[^@\s>]+\.[^@\s>]+)>",
                 "$1", ignoreCase: false);
 
-            Add(list, "noise-md-html", "HTML tags",
-                SpeechTextRuleStage.Noise,
-                @"</?[a-zA-Z][^>]*>",
-                " ", ignoreCase: false);
-
-            Add(list, "noise-entity-nbsp", "Entity &nbsp;",
-                SpeechTextRuleStage.Noise, @"&nbsp;", " ", ignoreCase: true);
-            Add(list, "noise-entity-amp", "Entity &amp;",
-                SpeechTextRuleStage.Noise, @"&amp;", "&", ignoreCase: true);
-            Add(list, "noise-entity-lt", "Entity &lt;",
-                SpeechTextRuleStage.Noise, @"&lt;", "<", ignoreCase: true);
-            Add(list, "noise-entity-gt", "Entity &gt;",
-                SpeechTextRuleStage.Noise, @"&gt;", ">", ignoreCase: true);
-            Add(list, "noise-entity-quot", "Entity &quot;",
-                SpeechTextRuleStage.Noise, @"&quot;", "\"", ignoreCase: true);
-            Add(list, "noise-entity-apos", "Entity &#39;",
-                SpeechTextRuleStage.Noise, @"&#39;", "'", ignoreCase: true);
+            // HTML tags / entities intentionally omitted: comic dialogue often uses
+            // <…> lettering; Local-LLM should not emit real HTML. Residual < > &
+            // fall through to deco-strip-symbols / NormalizeSpeechPunctuation.
 
             Add(list, "noise-md-heading", "Markdown headings",
                 SpeechTextRuleStage.Noise, @"(?m)^\s{0,3}#{1,6}\s+", "", ignoreCase: false);
@@ -587,6 +573,15 @@ namespace SpeakRect
                 @"\.\s*\.",
                 ".", ignoreCase: false);
 
+            // Residual symbols TTS should not speak (< > [ ] { } ( ) * # ^ & …).
+            // Keep ASCII hyphen so English compounds (well-known, X-Men) stay joined;
+            // keep . ! ? , ' and typed pause marks for the final punctuation chain.
+            // Runs last in Decorators so arrow/dash/bullet rewrites finish first.
+            Add(list, "deco-strip-symbols", "Strip residual symbols (keep hyphen)",
+                SpeechTextRuleStage.Decorators,
+                @"[^\p{L}\p{N}\s.!?',\-\x1C-\x1F]+",
+                " ", ignoreCase: false);
+
             return list;
         }
 
@@ -600,6 +595,14 @@ namespace SpeakRect
             {
                 "abbrev-max",
                 "abbrev-min",
+                // HTML tag / entity strips: ate comic <WHERE ARE YOU…> as fake tags.
+                "noise-md-html",
+                "noise-entity-nbsp",
+                "noise-entity-amp",
+                "noise-entity-lt",
+                "noise-entity-gt",
+                "noise-entity-quot",
+                "noise-entity-apos",
             };
 
         /// <summary>
