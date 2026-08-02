@@ -3692,7 +3692,10 @@ namespace SpeakRect
                                     detail,
                                     paintBullseyes: false,
                                     stripGapPx: 0,
-                                    marginPx: margin);
+                                    marginPx: margin,
+                                    // Full page islands: wide-ribbon expand must not
+                                    // grow into other balloons (double-speak).
+                                    avoidIslands: boxes);
                                 pipeTimer.Add(
                                     $"llm-island-canvas[{i + 1}]",
                                     sw.ElapsedMilliseconds);
@@ -5314,10 +5317,10 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Fixed low floor for <see cref="AppSettings.ComicDynamicFog"/> search.
+        /// Search floor for <see cref="AppSettings.ComicDynamicFog"/> (stock 0.25).
         /// User slider is ignored while dyn is on — always climb from here.
         /// </summary>
-        public const float DynamicFogSearchFloor = 0.10f;
+        public const float DynamicFogSearchFloor = 0.25f;
 
         /// <summary>
         /// Shared detect entry for live + Balloons preview/speak.

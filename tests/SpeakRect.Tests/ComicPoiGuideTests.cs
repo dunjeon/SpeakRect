@@ -283,4 +283,27 @@ public class ComicPoiGuideTests
         Assert.Equal(900, grown.Width);
         Assert.Equal(480, grown.Height);
     }
+
+    [Fact]
+    public void Wide_ribbon_expand_clamps_before_neighbor_island()
+    {
+        // Last-run failure: top ribbon 458×146 @0,0 expanded to H=480 and ate
+        // lower balloon @305,283 173×140 — double-spoke "no he stays / neither".
+        var top = new Rectangle(0, 0, 458, 146);
+        var lower = new Rectangle(305, 283, 173, 140);
+        var grown = ComicPoiGuide.ExpandIslandCropToMinSize(
+            top, frameW: 478, frameH: 900,
+            minWidth: 0,
+            minHeight: ComicPoiGuide.IslandStripMinHeight,
+            avoidIslands: new[] { top, lower });
+        Assert.True(grown.Contains(top) || Rectangle.Intersect(grown, top) == top ||
+            (grown.Left <= top.Left && grown.Right >= top.Right &&
+             grown.Top <= top.Top && grown.Bottom >= top.Bottom));
+        // Must not cover the lower island core.
+        Assert.True(
+            grown.Bottom <= lower.Top,
+            $"expanded bottom {grown.Bottom} must be ≤ lower.Top {lower.Top}; grown={grown}");
+        Assert.True(grown.Height < ComicPoiGuide.IslandStripMinHeight ||
+                    grown.Bottom <= lower.Top);
+    }
 }

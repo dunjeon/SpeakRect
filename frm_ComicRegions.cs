@@ -401,7 +401,7 @@ namespace SpeakRect
 
             _chkDynamicFog = new CheckBox
             {
-                Text = "Dynamic fog (auto — start low, climb to best)",
+                Text = "Dynamic fog (auto — floor 0.25, climb to best)",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -416,7 +416,7 @@ namespace SpeakRect
             };
             AddFull(_chkDynamicFog, 28);
             AddFull(MakeHint(
-                "On (default): ignore Fog strength — start low (~0.10) and raise fog until " +
+                "On (default): ignore Fog strength — start at floor (~0.25) and raise fog until " +
                 "island area shrinks; keep the peak. Merge-overlap is off during the search, " +
                 "then restored. Same pipe for live + preview."),
                 56);

@@ -249,10 +249,10 @@ namespace SpeakRect
         public float ComicDetectFogAmount { get; set; } = DefaultComicDetectFogAmount;
 
         /// <summary>
-        /// Auto fog for OCR detect: start low (see OcrProcessor.DynamicFogSearchFloor),
-        /// climb until island total area shrinks; keep the peak. Merge-overlap is off
-        /// during the search, then restored for the final detect. Shared by live +
-        /// Balloons preview. User fog slider is not used while this is on.
+        /// Auto fog for OCR detect: start at floor (see OcrProcessor.DynamicFogSearchFloor,
+        /// stock 0.25), climb until island total area shrinks; keep the peak.
+        /// Merge-overlap is off during the search, then restored for the final detect.
+        /// Shared by live + Balloons preview. User fog slider is not used while this is on.
         /// </summary>
         public bool ComicDynamicFog { get; set; } = true;
 
@@ -2609,7 +2609,7 @@ namespace SpeakRect
                 sb.AppendLine("; StackBeefExtra=0 (stock: no extra canvas). Pad only — both POI + crop stacks.");
                 sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
                 sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
-                sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
+                sb.AppendLine("; DynamicFog=true: auto fog — start floor (~0.25), climb until island area shrinks;");
                 sb.AppendLine(";   then crop re-OCR each island; empty/junk → drop (fog ghost islands).");
                 sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");

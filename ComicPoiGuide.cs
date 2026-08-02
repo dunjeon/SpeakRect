@@ -127,33 +127,44 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Gap (px) kept between an expanded VL crop and other island boxes
+        /// so wide-ribbon minH never swallows a neighbor balloon.
+        /// </summary>
+        public const int IslandExpandNeighborGapPx = 4;
+
+        /// <summary>
         /// Grow <paramref name="hole"/> to min width/height when the frame allows.
         /// Centered on the island, then clamped into the frame.
+        /// Optional <paramref name="avoidIslands"/>: shrink so the crop does not
+        /// enter other islands (keeps tight box fully inside).
         /// </summary>
         public static Rectangle ExpandIslandCropToMinSize(
             Rectangle hole,
             int frameW,
             int frameH,
             int minWidth = 0,
-            int minHeight = IslandStripMinHeight)
+            int minHeight = IslandStripMinHeight,
+            IReadOnlyList<Rectangle>? avoidIslands = null,
+            int neighborGapPx = IslandExpandNeighborGapPx)
         {
             if (frameW < 1 || frameH < 1)
                 return hole;
 
             var frame = new Rectangle(0, 0, frameW, frameH);
-            hole = Rectangle.Intersect(hole, frame);
-            if (hole.Width < 1 || hole.Height < 1)
+            var tight = Rectangle.Intersect(hole, frame);
+            if (tight.Width < 1 || tight.Height < 1)
                 return hole;
 
             minWidth = Math.Max(0, minWidth);
             minHeight = Math.Max(0, minHeight);
-            int needW = Math.Max(hole.Width, Math.Min(minWidth, frameW));
-            int needH = Math.Max(hole.Height, Math.Min(minHeight, frameH));
-            if (needW == hole.Width && needH == hole.Height)
-                return hole;
+            int needW = Math.Max(tight.Width, Math.Min(minWidth, frameW));
+            int needH = Math.Max(tight.Height, Math.Min(minHeight, frameH));
+            if (needW == tight.Width && needH == tight.Height &&
+                (avoidIslands == null || avoidIslands.Count == 0))
+                return tight;
 
-            int cx = hole.X + hole.Width / 2;
-            int cy = hole.Y + hole.Height / 2;
+            int cx = tight.X + tight.Width / 2;
+            int cy = tight.Y + tight.Height / 2;
             int x = cx - needW / 2;
             int y = cy - needH / 2;
             if (x < 0) x = 0;
@@ -162,7 +173,126 @@ namespace SpeakRect
             if (y + needH > frameH) y = Math.Max(0, frameH - needH);
             needW = Math.Min(needW, frameW - x);
             needH = Math.Min(needH, frameH - y);
-            return new Rectangle(x, y, Math.Max(1, needW), Math.Max(1, needH));
+            var expanded = new Rectangle(x, y, Math.Max(1, needW), Math.Max(1, needH));
+
+            if (avoidIslands != null && avoidIslands.Count > 0)
+            {
+                expanded = ClampCropAwayFromNeighbors(
+                    tight, expanded, avoidIslands, frameW, frameH, neighborGapPx);
+            }
+
+            return expanded;
+        }
+
+        /// <summary>
+        /// Shrink <paramref name="expanded"/> so it does not enter other island boxes
+        /// (with gap), while always containing <paramref name="tight"/>.
+        /// </summary>
+        public static Rectangle ClampCropAwayFromNeighbors(
+            Rectangle tight,
+            Rectangle expanded,
+            IReadOnlyList<Rectangle> others,
+            int frameW,
+            int frameH,
+            int gapPx = IslandExpandNeighborGapPx)
+        {
+            var frame = new Rectangle(0, 0, Math.Max(1, frameW), Math.Max(1, frameH));
+            tight = Rectangle.Intersect(tight, frame);
+            expanded = Rectangle.Intersect(expanded, frame);
+            if (tight.Width < 1 || tight.Height < 1)
+                return expanded;
+
+            // Always keep the detect island fully inside the crop.
+            expanded = Rectangle.Union(expanded, tight);
+            gapPx = Math.Max(0, gapPx);
+
+            foreach (var raw in others)
+            {
+                var n = Rectangle.Intersect(raw, frame);
+                if (n.Width < 1 || n.Height < 1)
+                    continue;
+                // Skip self / near-identical to tight.
+                if (n.Equals(tight) ||
+                    (Math.Abs(n.X - tight.X) <= 1 &&
+                     Math.Abs(n.Y - tight.Y) <= 1 &&
+                     Math.Abs(n.Width - tight.Width) <= 2 &&
+                     Math.Abs(n.Height - tight.Height) <= 2))
+                    continue;
+
+                var blocked = Rectangle.Inflate(n, gapPx, gapPx);
+                blocked.Intersect(frame);
+                if (blocked.Width < 1 || blocked.Height < 1)
+                    continue;
+                if (!expanded.IntersectsWith(blocked))
+                    continue;
+
+                // Vertical: neighbor clearly below / above the tight island.
+                if (blocked.Top >= tight.Bottom - 1)
+                {
+                    int maxBottom = Math.Max(tight.Bottom, blocked.Top);
+                    if (expanded.Bottom > maxBottom)
+                        expanded.Height = Math.Max(tight.Height, maxBottom - expanded.Top);
+                }
+                else if (blocked.Bottom <= tight.Top + 1)
+                {
+                    int minTop = Math.Min(tight.Top, blocked.Bottom);
+                    if (expanded.Top < minTop)
+                    {
+                        int bottom = Math.Max(expanded.Bottom, tight.Bottom);
+                        expanded.Y = minTop;
+                        expanded.Height = Math.Max(tight.Height, bottom - expanded.Y);
+                    }
+                }
+
+                // Horizontal: neighbor clearly right / left of tight.
+                if (blocked.Left >= tight.Right - 1)
+                {
+                    int maxRight = Math.Max(tight.Right, blocked.Left);
+                    if (expanded.Right > maxRight)
+                        expanded.Width = Math.Max(tight.Width, maxRight - expanded.Left);
+                }
+                else if (blocked.Right <= tight.Left + 1)
+                {
+                    int minLeft = Math.Min(tight.Left, blocked.Right);
+                    if (expanded.Left < minLeft)
+                    {
+                        int right = Math.Max(expanded.Right, tight.Right);
+                        expanded.X = minLeft;
+                        expanded.Width = Math.Max(tight.Width, right - expanded.X);
+                    }
+                }
+
+                // Still overlapping (diagonal / nested): back off to tight on that side
+                // by intersecting out the blocked region conservatively.
+                if (expanded.IntersectsWith(blocked))
+                {
+                    // Prefer cutting the expanded margin, never the tight core.
+                    var core = tight;
+                    // If blocked is mostly below core, cut bottom of expanded.
+                    if (blocked.Top >= core.Top + core.Height / 2)
+                    {
+                        int maxBottom = Math.Max(core.Bottom, blocked.Top);
+                        if (expanded.Bottom > maxBottom)
+                            expanded.Height = Math.Max(core.Height, maxBottom - expanded.Top);
+                    }
+                    else if (blocked.Bottom <= core.Top + core.Height / 2)
+                    {
+                        int minTop = Math.Min(core.Top, blocked.Bottom);
+                        if (expanded.Top < minTop)
+                        {
+                            int bottom = Math.Max(expanded.Bottom, core.Bottom);
+                            expanded.Y = minTop;
+                            expanded.Height = Math.Max(core.Height, bottom - expanded.Y);
+                        }
+                    }
+                }
+            }
+
+            expanded = Rectangle.Union(expanded, tight);
+            expanded.Intersect(frame);
+            if (expanded.Width < 1 || expanded.Height < 1)
+                return tight;
+            return expanded;
         }
 
         /// <summary>
@@ -412,13 +542,18 @@ namespace SpeakRect
         /// <see cref="ComposeVerticalStripStack"/> (orange canvas + Balloons beef).
         /// Caller owns result.
         /// </summary>
+        /// <param name="avoidIslands">
+        /// All page islands (optional). When per-island VL passes a single box,
+        /// pass the full island list so wide-ribbon expand cannot swallow neighbors.
+        /// </param>
         public static Bitmap? BuildVerticalStack(
             Bitmap source,
             IReadOnlyList<Rectangle> boxes,
             StringBuilder? detail = null,
             bool paintBullseyes = true,
             int stripGapPx = StackStripGapPx,
-            int marginPx = 0)
+            int marginPx = 0,
+            IReadOnlyList<Rectangle>? avoidIslands = null)
         {
             if (source == null || boxes == null || boxes.Count == 0)
                 return null;
@@ -430,6 +565,9 @@ namespace SpeakRect
             try
             {
                 var imgBounds = new Rectangle(0, 0, source.Width, source.Height);
+                // Neighbors for clamp: full page list, else co-strips on this canvas.
+                var avoid = avoidIslands ?? boxes;
+
                 for (int i = 0; i < boxes.Count; i++)
                 {
                     var tight = Rectangle.Intersect(boxes[i], imgBounds);
@@ -440,24 +578,47 @@ namespace SpeakRect
                     }
 
                     // Panel-spanning short ribbons only (not compact balloons).
+                    // Gate is per-strip geometry; expand clamps against avoidIslands
+                    // so a top ribbon never swallows a lower balloon island.
                     Rectangle hole = tight;
-                    if (IsWideThinIslandStrip(
-                            tight, source.Width, source.Height, boxes.Count))
+                    bool wantWide = IsWideThinIslandStrip(
+                        tight, source.Width, source.Height,
+                        boxCountOnCanvas: 1);
+                    if (wantWide)
                     {
+                        // Build avoid list excluding current tight (approx).
+                        var others = new List<Rectangle>(avoid.Count);
+                        foreach (var a in avoid)
+                        {
+                            var n = Rectangle.Intersect(a, imgBounds);
+                            if (n.Width < 1 || n.Height < 1)
+                                continue;
+                            if (Math.Abs(n.X - tight.X) <= 1 &&
+                                Math.Abs(n.Y - tight.Y) <= 1 &&
+                                Math.Abs(n.Width - tight.Width) <= 2 &&
+                                Math.Abs(n.Height - tight.Height) <= 2)
+                                continue;
+                            others.Add(n);
+                        }
+
                         hole = ExpandIslandCropToMinSize(
                             tight, source.Width, source.Height,
                             minWidth: 0,
-                            minHeight: IslandStripMinHeight);
+                            minHeight: IslandStripMinHeight,
+                            avoidIslands: others.Count > 0 ? others : null);
                     }
 
                     var strip = source.Clone(hole, PixelFormat.Format32bppArgb);
                     if (hole != tight)
                     {
+                        string clampNote = hole.Height < IslandStripMinHeight
+                            ? $" clampedH={hole.Height}<{IslandStripMinHeight}"
+                            : "";
                         detail?.AppendLine(
                             $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
                             $"@({hole.X},{hole.Y}) " +
                             $"(wide-ribbon tight {tight.Width}x{tight.Height} " +
-                            $"→ minH={IslandStripMinHeight})");
+                            $"→ minH={IslandStripMinHeight}{clampNote})");
                     }
                     else
                     {
