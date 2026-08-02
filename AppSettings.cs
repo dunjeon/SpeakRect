@@ -452,7 +452,7 @@ namespace SpeakRect
 
         public const int DefaultImageUpscaleLongSide = 900;
         public const int DefaultImageLlmSendMaxLongEdge = 640;
-        public const float DefaultImageInkGrayWeight = 0.55f;
+        public const float DefaultImageInkGrayWeight = 0.25f;
         public const int DefaultImageDenoiseRadius = 1;
         public const float DefaultImageDenoiseSigma = 22f;
         public const double DefaultImageAutoLevelsLow = 1.0;
