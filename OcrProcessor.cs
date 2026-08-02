@@ -5325,8 +5325,8 @@ namespace SpeakRect
         /// <list type="number">
         /// <item>Search with merge-overlap <b>off</b> (no AppSettings mutation).</item>
         /// <item>Single-pass WinOCR + grow-only; score = total island area.</item>
-        /// <item>Always start at <see cref="DynamicFogSearchFloor"/> and climb
-        /// until area clearly shrinks vs peak (user fog slider not used).</item>
+        /// <item>Coarse step (0.05) until clear area shrink vs peak, then fine (0.01)
+        /// around the coarse peak. No plateau early-out (that missed late peaks ~0.5).</item>
         /// <item>Final full detect at best fog with user's merge setting.</item>
         /// <item>Crop re-OCR each island; empty/junk text → nuke (fog ghosts).</item>
         /// </list>
@@ -5377,55 +5377,83 @@ namespace SpeakRect
                 }
             }
 
-            // --- Dynamic fog: always start low, climb to peak (ignore user slider) ---
+            // --- Dynamic fog: coarse climb until shrink → fine around peak ---
+            // Coarse 0.05 samples mid/high peaks (e.g. 0.51) without 0.01×90 grind.
+            // No plateau early-out: flat-then-late-peak pages need the climb.
+            // Fine 0.01 around coarse peak restores old resolution near the best.
             float start = DynamicFogSearchFloor;
-            const float step = 0.01f;
+            const float coarseStep = 0.05f;
+            const float fineStep = 0.01f;
             const float maxFog = 0.95f;
-            const int maxTrials = 90; // 0.10 → 0.95 @ 0.01
-            // Stop only when area falls clearly below the peak (OCR noise wobble).
             const double shrinkVsPeak = 0.97;
 
             bool userMerge = EnableMergeOverlappingIslands;
             detail.AppendLine(
-                $"dyn-fog SEARCH: floor={start:0.00} step={step:0.00} max={maxFog:0.00} " +
-                $"(always climb from low; user slider ignored; " +
+                $"dyn-fog SEARCH: floor={start:0.00} coarse={coarseStep:0.00} " +
+                $"fine={fineStep:0.00} max={maxFog:0.00} " +
+                $"(stop=shrink×{shrinkVsPeak:0.00} only, no plateau; " +
                 $"score=single-pass+grow-only area; merge OFF during search; " +
                 $"user merge will restore={userMerge})");
 
-            float bestFog = start;
-            long bestScore = -1;
-            int trialsRun = 0;
-            var trialScores = new List<long>(maxTrials);
+            // amount → (score, islands); avoids re-OCR when fine overlaps coarse.
+            var scored = new Dictionary<float, (long Score, int Islands)>(32);
+            var coarseAmounts = new List<float>(24);
 
-            for (int i = 0; i < maxTrials; i++)
+            async Task<(long Score, int Islands)> ScoreCachedAsync(float fogAmt)
             {
-                token.ThrowIfCancellationRequested();
-                float fogAmt = Math.Min(maxFog, start + i * step);
-                fogAmt = MathF.Round(fogAmt, 2);
-                if (fogAmt > maxFog + 1e-6f)
-                    break;
-
+                fogAmt = MathF.Round(Math.Clamp(fogAmt, start, maxFog), 2);
+                if (scored.TryGetValue(fogAmt, out var hit))
+                    return hit;
                 var (score, islands) = await ScoreDynamicFogTrialAsync(
                     toneImage, fogAmt, pipeW, pipeH, token).ConfigureAwait(false);
-                trialsRun++;
-                trialScores.Add(score);
+                scored[fogAmt] = (score, islands);
+                return (score, islands);
+            }
 
-                // Same pure pick as unit tests — recompute best each step for the log.
-                int bestIdx = SmokeSelectDynamicFogBestIndex(trialScores, shrinkVsPeak);
-                bestFog = Math.Min(maxFog, start + bestIdx * step);
-                bestFog = MathF.Round(bestFog, 2);
-                bestScore = trialScores[bestIdx];
-
+            void LogTry(string phase, float fogAmt, long score, int islands, bool isPeak)
+            {
                 detail.AppendLine(
-                    $"  dyn-fog try[{i}] amount={fogAmt:0.00} islands={islands} areaSum={score}" +
-                    (bestIdx == i ? " *peak*" : ""));
+                    $"  dyn-fog {phase} amount={fogAmt:0.00} islands={islands} " +
+                    $"areaSum={score}" + (isPeak ? " *peak*" : ""));
+            }
 
-                // Stop when this trial fell clearly below the peak (same rule as pick).
-                if (bestScore > 0 && score < bestScore * shrinkVsPeak && bestIdx < i)
+            // ---- Phase 1: coarse climb until clear shrink vs peak ----
+            float bestFog = start;
+            long bestScore = -1;
+            var coarseScores = new List<long>(24);
+            for (int i = 0; ; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                float fogAmt = MathF.Round(Math.Min(maxFog, start + i * coarseStep), 2);
+                if (fogAmt > maxFog + 1e-6f)
+                    break;
+                if (i > 0 && fogAmt <= start + (i - 1) * coarseStep + 1e-6f)
+                    break; // clamped at max
+
+                var (score, islands) = await ScoreCachedAsync(fogAmt).ConfigureAwait(false);
+                coarseAmounts.Add(fogAmt);
+                coarseScores.Add(score);
+
+                int bestIdx = SmokeSelectDynamicFogBestIndex(coarseScores, shrinkVsPeak);
+                bestFog = coarseAmounts[bestIdx];
+                bestScore = coarseScores[bestIdx];
+
+                LogTry(
+                    "coarse",
+                    fogAmt,
+                    score,
+                    islands,
+                    bestIdx == coarseScores.Count - 1 && score == bestScore);
+
+                // Stop only when this trial fell clearly below the peak.
+                if (bestScore > 0 &&
+                    score < bestScore * shrinkVsPeak &&
+                    bestIdx < coarseScores.Count - 1)
                 {
                     detail.AppendLine(
-                        $"  dyn-fog STOP: area {score} < peak {bestScore}×{shrinkVsPeak:0.00} " +
-                        $"(boxes shrunk). best amount={bestFog:0.00} areaSum={bestScore}");
+                        $"  dyn-fog STOP coarse: shrink area {score} < " +
+                        $"peak {bestScore}×{shrinkVsPeak:0.00}. " +
+                        $"best amount={bestFog:0.00} areaSum={bestScore}");
                     break;
                 }
 
@@ -5433,9 +5461,57 @@ namespace SpeakRect
                     break;
             }
 
+            // ---- Phase 2: fine step over full window around coarse peak (no early out) ----
+            float fineLo = MathF.Round(Math.Max(start, bestFog - coarseStep), 2);
+            float fineHi = MathF.Round(Math.Min(maxFog, bestFog + coarseStep), 2);
+            detail.AppendLine(
+                $"dyn-fog FINE: [{fineLo:0.00}…{fineHi:0.00}] step={fineStep:0.00} " +
+                $"(full window around coarse peak {bestFog:0.00})");
+
+            for (float fogAmt = fineLo;
+                 fogAmt <= fineHi + 1e-6f;
+                 fogAmt = MathF.Round(fogAmt + fineStep, 2))
+            {
+                token.ThrowIfCancellationRequested();
+                bool cached = scored.ContainsKey(fogAmt);
+                var (score, islands) = await ScoreCachedAsync(fogAmt).ConfigureAwait(false);
+                bool isPeak = score > bestScore;
+                if (isPeak)
+                {
+                    bestScore = score;
+                    bestFog = fogAmt;
+                }
+                else if (score == bestScore && fogAmt < bestFog)
+                {
+                    // Prefer lower fog on ties (less wash-out).
+                    bestFog = fogAmt;
+                }
+
+                LogTry(
+                    cached ? "fine(cache)" : "fine",
+                    fogAmt,
+                    score,
+                    islands,
+                    isPeak || (score == bestScore && Math.Abs(fogAmt - bestFog) < 1e-6f));
+            }
+
+            // Global best across every scored amount (strict max; lower fog on ties).
+            bestFog = start;
+            bestScore = -1;
+            foreach (var kv in scored.OrderBy(k => k.Key))
+            {
+                if (kv.Value.Score > bestScore)
+                {
+                    bestScore = kv.Value.Score;
+                    bestFog = kv.Key;
+                }
+            }
+
+            int trialsRun = scored.Count;
             detail.AppendLine(
                 $"dyn-fog CHOSEN: amount={bestFog:0.00} areaSum={bestScore} " +
-                $"trials={trialsRun} floor={start:0.00} (merge OFF during search only)");
+                $"trials={trialsRun} (unique OCR) floor={start:0.00} " +
+                $"(merge OFF during search only)");
             detail.AppendLine(
                 $"dyn-fog FINAL detect @ {bestFog:0.00} with merge-overlap={userMerge}");
 
@@ -5695,6 +5771,25 @@ namespace SpeakRect
                 }
             }
             return bestIdx;
+        }
+
+        /// <summary>
+        /// Whether the dyn-fog coarse climb should stop after the latest score:
+        /// clear shrink vs peak only (no plateau early-out).
+        /// </summary>
+        public static bool SmokeDynamicFogShouldStopClimb(
+            IReadOnlyList<long> areaScores,
+            double shrinkVsPeak = 0.97)
+        {
+            if (areaScores == null || areaScores.Count < 2)
+                return false;
+
+            int bestIdx = SmokeSelectDynamicFogBestIndex(areaScores, shrinkVsPeak);
+            int i = areaScores.Count - 1;
+            long best = areaScores[bestIdx];
+            long score = areaScores[i];
+
+            return best > 0 && score < best * shrinkVsPeak && bestIdx < i;
         }
 
         /// <summary>

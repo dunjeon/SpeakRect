@@ -81,6 +81,31 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Dynamic_fog_stop_only_on_clear_shrink_not_plateau()
+    {
+        // Flat scores: keep climbing (no plateau early-out) so late peaks (~0.51) are seen.
+        var scores = new List<long> { 29374, 29374, 29374, 29374, 29374 };
+        Assert.False(OcrProcessor.SmokeDynamicFogShouldStopClimb(scores, 0.97));
+
+        // Clear shrink vs peak → stop.
+        long[] shrink = { 10000, 12000, 11000, 8000 };
+        Assert.True(OcrProcessor.SmokeDynamicFogShouldStopClimb(shrink, 0.97));
+    }
+
+    [Fact]
+    public void Dynamic_fog_flat_then_late_peak_not_stopped_early()
+    {
+        // Missed-balloon case: flat low fog, then area rises mid-range.
+        var scores = new List<long> { 29374, 29374, 29374 };
+        Assert.False(OcrProcessor.SmokeDynamicFogShouldStopClimb(scores, 0.97));
+        scores.Add(40000); // new peak
+        Assert.False(OcrProcessor.SmokeDynamicFogShouldStopClimb(scores, 0.97));
+        scores.Add(35000); // still above 0.97×peak? 35000 > 40000*0.97=38800? no
+        // 35000 < 38800 → shrink stop
+        Assert.True(OcrProcessor.SmokeDynamicFogShouldStopClimb(scores, 0.97));
+    }
+
+    [Fact]
     public void Dyn_fog_island_crop_empty_nukes()
     {
         // Ghost island: crop re-OCR empty / junk → drop.
