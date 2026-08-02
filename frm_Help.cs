@@ -9,25 +9,29 @@ namespace SpeakRect
 {
     /// <summary>
     /// Help tab (Settings): structured Getting Started, features, and hotkeys.
-    /// Read-only — no settings are changed here.
+    /// Also hosts factory <b>Restore all defaults</b> (confirm first).
     /// </summary>
     public sealed class frm_Help : Form
     {
         private readonly Action? _onRequestClose;
+        private readonly Action? _onAfterRestoreAllDefaults;
         private readonly bool _embedded;
         private readonly Button? _btnClose;
+        private readonly Button _btnRestoreDefaults;
         private readonly Label _lblVersion;
         private readonly RichTextBox _rtb;
 
         public frm_Help(
             Action<frm_Settings.SettingsTab>? goToTab = null,
             bool embedded = false,
-            Action? onRequestClose = null)
+            Action? onRequestClose = null,
+            Action? onAfterRestoreAllDefaults = null)
         {
             // goToTab kept for call-site compat; the tab strip is navigation.
             _ = goToTab;
             _embedded = embedded;
             _onRequestClose = onRequestClose;
+            _onAfterRestoreAllDefaults = onAfterRestoreAllDefaults;
 
             AutoScaleMode = AutoScaleMode.Font;
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -56,7 +60,7 @@ namespace SpeakRect
             ForeColor = UiTheme.Fg;
             Font = new Font("Segoe UI", 9.5f);
 
-            // ---- Bottom: single action (tabs already navigate Settings) ----
+            // ---- Bottom: README + factory restore (tabs already navigate Settings) ----
             var bottom = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -66,6 +70,11 @@ namespace SpeakRect
             var btnReadme = MakePrimaryButton("Open full README…");
             btnReadme.Click += (_, _) => OpenReadme();
             bottom.Controls.Add(btnReadme);
+
+            _btnRestoreDefaults = MakeButton("Restore all defaults…");
+            _btnRestoreDefaults.Click += (_, _) => RestoreAllDefaults_Click();
+            bottom.Controls.Add(_btnRestoreDefaults);
+
             if (!_embedded)
             {
                 _btnClose = MakePrimaryButton("Close");
@@ -83,6 +92,8 @@ namespace SpeakRect
             {
                 int y = Math.Max(8, (bottom.ClientSize.Height - btnReadme.Height) / 2);
                 btnReadme.Location = new Point(14, y);
+                _btnRestoreDefaults.Location = new Point(
+                    btnReadme.Right + 10, y);
                 if (_btnClose != null)
                 {
                     _btnClose.Location = new Point(
@@ -231,6 +242,7 @@ namespace SpeakRect
             Feature(sb, "Image", "Settings \u2192 Image: letterbox / upscale / gray / tone prep with live preview. Profile-backed.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");
             Feature(sb, "Analytics", "Settings \u2192 Analytics shows the most recent OCR text, pipeline images, and timings. Export\u2026 packs a debug zip (works in Release).");
+            Feature(sb, "Restore all defaults", "This Help tab \u2014 factory-reset mode, image, voice, speech, hotkeys, regions, and follow (asks first). Keeps the active profile name.");
             sb.Append(@"\par ");
 
             // Hotkeys
@@ -342,6 +354,44 @@ namespace SpeakRect
             return sb.ToString();
         }
 
+        private void RestoreAllDefaults_Click()
+        {
+            var dr = UiMessageBox.Show(this,
+                "Restore ALL SpeakRect settings to built-in defaults?\n\n" +
+                "This resets mode, Image prep, Balloons, Voice, Speech (names + text rules + prompts), " +
+                "Key Map (keyboard defaults; gamepad + custom actions cleared), Follow, and all region slots.\n\n" +
+                "Your active profile name is kept, and the reset is written to disk.\n\n" +
+                "This cannot be undone from here.",
+                "Restore all defaults",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (dr != DialogResult.Yes)
+                return;
+
+            try
+            {
+                AppSettings.Current.RestoreAllBuiltInDefaults();
+            }
+            catch (Exception ex)
+            {
+                UiMessageBox.Show(this,
+                    "Could not restore defaults:\n" + ex.Message,
+                    "Restore all defaults",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            try { _onAfterRestoreAllDefaults?.Invoke(); }
+            catch { /* host apply — settings already restored */ }
+
+            UiMessageBox.Show(this,
+                "All settings restored to built-in defaults.",
+                "Restore all defaults",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
         private void OpenReadme()
         {
             string? path = FindReadme();
@@ -405,6 +455,21 @@ namespace SpeakRect
                 Font = new Font("Segoe UI", 9f),
             };
             UiTheme.StylePrimaryButton(btn);
+            return btn;
+        }
+
+        private static Button MakeButton(string text)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(120, 32),
+                Padding = new Padding(14, 4, 14, 4),
+                Font = new Font("Segoe UI", 9f),
+            };
+            UiTheme.StyleButton(btn);
             return btn;
         }
     }

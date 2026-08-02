@@ -1499,6 +1499,34 @@ namespace SpeakRect
             ResetPromptsToDefaults();
         }
 
+        /// <summary>
+        /// Factory-restore every product setting (mode, image prep, voice, speech
+        /// rules/names, prompts, hotkeys, gamepad, custom actions, follow, regions).
+        /// Keeps the active profile name and last Settings tab so the current profile
+        /// file is rewritten on save. Writes main ini + active profile when present.
+        /// </summary>
+        public void RestoreAllBuiltInDefaults()
+        {
+            string keepProfile = ActiveProfileName ?? "Default";
+            string keepTab = LastSettingsTab ?? "Help";
+            ClearComicOnlyModeStash();
+            ResetToBuiltInDefaults();
+            if (TryNormalizeProfileName(keepProfile, out string cleanProfile, out _))
+                ActiveProfileName = cleanProfile;
+            LastSettingsTab = string.IsNullOrWhiteSpace(keepTab) ? "Help" : keepTab.Trim();
+            NormalizeModeFlags();
+            NormalizeFollowSettings();
+            NormalizeVoiceSettings();
+            NormalizeComicRegionSettings();
+            NormalizeImagePrepSettings();
+            try { Save(); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Settings] RestoreAllBuiltInDefaults Save: {ex.Message}");
+            }
+            SyncActiveProfileFile();
+        }
+
         private void ClearRegionSlots()
         {
             foreach (var slot in RegionSlots)

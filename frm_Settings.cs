@@ -230,7 +230,8 @@ namespace SpeakRect
             _help = new frm_Help(
                 goToTab: tab => SelectTab(tab),
                 embedded: true,
-                onRequestClose: () => Close());
+                onRequestClose: () => Close(),
+                onAfterRestoreAllDefaults: AfterRestoreAllDefaults);
             EmbedChild(_help, tabHelp);
 
             _tabs.TabPages.Add(tabKeyMap);
@@ -542,6 +543,32 @@ namespace SpeakRect
             _help.ReloadFromSettings();
             RefreshProfileCombo();
             SetStatusReady();
+        }
+
+        /// <summary>
+        /// After Help → Restore all defaults: refresh every tab and push hotkeys /
+        /// regions / follow / mode to the host (same idea as profile load).
+        /// </summary>
+        private void AfterRestoreAllDefaults()
+        {
+            ReloadFromSettings();
+            SetStatus("Restored all built-in defaults (saved to disk).");
+            try { _onAfterProfileLoad?.Invoke(); }
+            catch { /* host apply failed — settings already restored */ }
+            if (_onAfterProfileLoad == null)
+            {
+                try { _onHotkeysChanged(); } catch { /* ignore */ }
+                try { _onFollowChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onRegionsChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onModeChanged?.Invoke(); } catch { /* ignore */ }
+            }
+            else
+            {
+                // Profile-load host usually rebinds hotkeys; still nudge mode/regions/follow.
+                try { _onModeChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onRegionsChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onFollowChanged?.Invoke(); } catch { /* ignore */ }
+            }
         }
 
         /// <summary>
