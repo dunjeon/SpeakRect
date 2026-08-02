@@ -12,41 +12,57 @@ namespace SpeakRect
     {
         public static bool IsUnusable(string? text) => IsUnusableOcrText(text);
 
+        /// <summary>
+        /// Optional Comic Book mode for this call only (thread-local). Does
+        /// <b>not</b> mutate <see cref="AppSettings.Current"/> so live speak
+        /// can run concurrently with Speech preview / smokes.
+        /// </summary>
+        [ThreadStatic]
+        private static bool? _comicBookOverride;
+
         public static string CleanForSpeech(string input, bool? comicBook)
         {
             if (comicBook is null) return CleanForSpeech(input);
-            bool saved = AppSettings.Current.ComicBook;
-            try { AppSettings.Current.ComicBook = comicBook.Value; return CleanForSpeech(input); }
-            finally { AppSettings.Current.ComicBook = saved; }
+            var prev = _comicBookOverride;
+            try
+            {
+                _comicBookOverride = comicBook.Value;
+                return CleanForSpeech(input);
+            }
+            finally
+            {
+                _comicBookOverride = prev;
+            }
         }
 
 
         private static bool UseCustomPauseEncodings =>
-            AppSettings.Current.VoiceUseCustomPauseEncodings;
+            SpeakRunSettings.GetVoiceUseCustomPauseEncodings();
 
-        private static bool ComicBookOff => !AppSettings.Current.ComicBook;
+        private static bool ComicBookOff =>
+            !(_comicBookOverride ?? SpeakRunSettings.GetComicBook());
 
         private static int ClampSpeakPauseMs(int ms) =>
             Math.Clamp(ms, AppSettings.MinSpeakPauseMs, AppSettings.MaxSpeakPauseMs);
 
         private static int BubblePauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceBubblePauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceBubblePauseMs())
                 : 0;
 
         private static int SentencePauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceSentencePauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceSentencePauseMs())
                 : 0;
 
         private static int CommaPauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceCommaPauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceCommaPauseMs())
                 : 0;
 
         private static int OtherPauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceOtherPauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceOtherPauseMs())
                 : 0;
 
         private static string Truncate(string? s, int max)
@@ -385,7 +401,7 @@ namespace SpeakRect
 
             // Active prompts + hard-coded defaults so custom ini still strips echoes.
             // Longest first so longer custom prompts win over shorter substrings.
-            foreach (string prompt in AppSettings.Current.AllKnownPrompts()
+            foreach (string prompt in SpeakRunSettings.GetKnownPrompts()
                          .Where(p => !string.IsNullOrWhiteSpace(p))
                          .Distinct(StringComparer.Ordinal)
                          .OrderByDescending(p => p.Length))
@@ -475,14 +491,14 @@ namespace SpeakRect
             // Pipeline Noise rules (Settings → Speech → Text rules): spotting,
             // attach-image junk, markdown — formerly hard-coded regex here.
             s = SpeechTextRulesEngine.Apply(
-                s, AppSettings.Current.SpeechTextRules, SpeechTextRuleStage.Noise);
+                s, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Noise);
 
             // Optional casing fold (Settings → Speech → Text rules). Mutually
             // exclusive toggles: title-case ALL CAPS (HELLO → Hello) vs full
             // force-lowercase. Only one should be on; both off keeps OCR casing.
-            if (AppSettings.Current.SpeechTitleCaseAllCaps)
+            if (SpeakRunSettings.GetSpeechTitleCaseAllCaps())
                 s = TitleCaseAllCapsWords(s);
-            else if (AppSettings.Current.SpeechForceLowercase)
+            else if (SpeakRunSettings.GetSpeechForceLowercase())
                 s = s.ToLowerInvariant();
 
             // Keep spoken contractions intact; expand only abbreviations/honorifics
@@ -546,7 +562,7 @@ namespace SpeakRect
             // replacements are not re-pruned and can restore preferred casing /
             // pronunciation that our cleaner would otherwise remove.
             // Pause-mark control chars are preserved by the engine (not spaces).
-            s = SpeechRulesEngine.Apply(s, AppSettings.Current.SpeechRules);
+            s = SpeechRulesEngine.Apply(s, SpeakRunSettings.GetSpeechRules());
             return s;
         }
 
@@ -660,7 +676,7 @@ namespace SpeakRect
 
             // Possessives + abbreviations + titles: Settings → Speech → Text rules.
             s = SpeechTextRulesEngine.Apply(
-                s, AppSettings.Current.SpeechTextRules, SpeechTextRuleStage.Abbrev);
+                s, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Abbrev);
 
             // Unknown dotted acronyms (not covered by catalog): keep as one unit.
             s = ProtectDottedLetterAcronyms(s);
@@ -997,7 +1013,7 @@ namespace SpeakRect
 
             // Settings → Speech → Text rules (Decorators stage).
             return SpeechTextRulesEngine.Apply(
-                input, AppSettings.Current.SpeechTextRules, SpeechTextRuleStage.Decorators);
+                input, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Decorators);
         }
 
 
@@ -1014,7 +1030,7 @@ namespace SpeakRect
             string s = input;
 
             // Exact known prompts (longest first) — active + hard-coded defaults
-            foreach (string prompt in AppSettings.Current.AllKnownPrompts()
+            foreach (string prompt in SpeakRunSettings.GetKnownPrompts()
                          .Where(p => !string.IsNullOrWhiteSpace(p))
                          .Distinct(StringComparer.Ordinal)
                          .OrderByDescending(p => p.Length))

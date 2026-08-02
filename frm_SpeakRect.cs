@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
-using System.Threading.Tasks;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace SpeakRect
 {
@@ -41,6 +43,24 @@ namespace SpeakRect
         private List<Point> _drawLassoPoints = new();
 
         private OcrProcessor? _current;
+        /// <summary>
+        /// Stop and dispose the previous host (fire-and-forget dispose after cancel
+        /// can propagate). Prevents dual TTS / duck races and MediaPlayer leaks.
+        /// </summary>
+        private void RetireCurrentProcessor()
+        {
+            var old = _current;
+            _current = null;
+            if (old == null)
+                return;
+            try { old.Stop(); } catch { /* ignore */ }
+            _ = Task.Run(() =>
+            {
+                try { Thread.Sleep(150); } catch { /* ignore */ }
+                try { old.Dispose(); } catch { /* ignore */ }
+            });
+        }
+
         private NotifyIcon? _trayIcon;
         private ContextMenuStrip? _trayMenu;
         private Cursor? _defaultCursor;
@@ -158,7 +178,8 @@ namespace SpeakRect
         public frm_SpeakRect()
         {
             FormBorderStyle = FormBorderStyle.None;
-            Bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 3840, 2160);
+            // Full virtual desktop so F1–F8 / Follow boxes on any monitor paint + hit-test.
+            Bounds = GetVirtualDesktopBounds();
             TopMost = true;
             Opacity = 0.4;
             DoubleBuffered = true;
@@ -180,7 +201,61 @@ namespace SpeakRect
             KeyDown += frm_SpeakRect_KeyDown;
             // Keep the opaque tool chrome in sync when the overlay repaints (modes, follow, etc.).
             Invalidated += (_, _) => InvalidateSidebarChrome();
+            // Monitor plug/unplug or resolution change while overlay is up.
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             // Settings already loaded in Program.Main before Application.Run
+        }
+
+        /// <summary>Union of all monitors (may have negative origin).</summary>
+        private static Rectangle GetVirtualDesktopBounds()
+        {
+            var vs = SystemInformation.VirtualScreen;
+            if (vs.Width >= 8 && vs.Height >= 8)
+                return vs;
+            return Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+        }
+
+        /// <summary>
+        /// Tool strip lives on the primary monitor's left edge (not the virtual
+        /// desktop's far-left secondary), so controls stay findable.
+        /// </summary>
+        private static Rectangle GetSidebarScreenBounds()
+        {
+            var primary = Screen.PrimaryScreen?.Bounds ?? GetVirtualDesktopBounds();
+            return new Rectangle(primary.Left, primary.Top, SidebarWidth, primary.Height);
+        }
+
+        /// <summary>Screen (desktop) point → form client for paint.</summary>
+        private Point ScreenToForm(Point screen) =>
+            new Point(screen.X - Left, screen.Y - Top);
+
+        /// <summary>Screen rect → form client for paint.</summary>
+        private Rectangle ScreenToForm(Rectangle screen) =>
+            new Rectangle(screen.X - Left, screen.Y - Top, screen.Width, screen.Height);
+
+        private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        {
+            try
+            {
+                if (IsDisposed)
+                    return;
+                void apply()
+                {
+                    if (IsDisposed) return;
+                    if (!Visible) return;
+                    Bounds = GetVirtualDesktopBounds();
+                    SyncSidebarChrome();
+                    Invalidate();
+                }
+                if (InvokeRequired)
+                    BeginInvoke(apply);
+                else
+                    apply();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Overlay] DisplaySettingsChanged: {ex.Message}");
+            }
         }
 
         private void frm_SpeakRect_KeyDown(object? sender, KeyEventArgs e)
@@ -229,7 +304,7 @@ namespace SpeakRect
             };
             _trayIcon.DoubleClick += (s, ev) => ShowOverlay();
 
-            RegisterAllHotkeys();
+            RegisterAllHotkeys(warnUser: false);
             // Restore any region geometries saved in SpeakRect.ini / last profile snapshot.
             ApplyRegionsFromSettings();
 
@@ -574,9 +649,14 @@ namespace SpeakRect
         }
 
         /// <summary>Unregister then register every global hotkey from AppSettings.</summary>
-        private void RegisterAllHotkeys()
+        /// <param name="warnUser">
+        /// When true (settings/profile rebind), show a MessageBox if any chord failed.
+        /// Startup uses false so a stuck chord does not block first paint.
+        /// </param>
+        private void RegisterAllHotkeys(bool warnUser = true)
         {
             UnregisterAllHotkeys();
+            _hotkeyRegisterFailures.Clear();
 
             var s = AppSettings.Current;
             TryRegister(HOTKEY_TOGGLE_OVERLAY, s.HotkeyToggleOverlay, "ToggleOverlay");
@@ -596,6 +676,11 @@ namespace SpeakRect
                     continue;
                 TryRegister(HOTKEY_CUSTOM_BASE + i, c.Keyboard, c.Id);
             }
+
+            if (warnUser)
+                WarnHotkeyRegisterFailuresIfAny();
+            else
+                _hotkeyRegisterFailures.Clear();
         }
 
         private void UnregisterAllHotkeys()
@@ -611,6 +696,9 @@ namespace SpeakRect
                 LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_CUSTOM_BASE + i);
         }
 
+        /// <summary>Chords that failed <see cref="RegisterHotKey"/> this session (for UI warning).</summary>
+        private readonly List<string> _hotkeyRegisterFailures = new();
+
         private void TryRegister(int id, HotkeyChord chord, string name)
         {
             if (chord.IsEmpty || !chord.IsGlobalCandidate)
@@ -622,9 +710,40 @@ namespace SpeakRect
             bool ok = LowLevelInputHooks.RegisterHotKey(this.Handle, id, chord.Modifiers, (uint)chord.Key);
             if (!ok)
             {
+                string msg = $"{name}={chord.ToIniString()}";
+                _hotkeyRegisterFailures.Add(msg);
                 System.Diagnostics.Debug.WriteLine(
-                    $"[Hotkey] RegisterHotKey failed for {name}={chord.ToIniString()} " +
+                    $"[Hotkey] RegisterHotKey failed for {msg} " +
                     "(key may be in use by another app)");
+            }
+        }
+
+        /// <summary>
+        /// After a full re-register, surface any failed global chords once (Key Map looks bound but will not fire).
+        /// </summary>
+        private void WarnHotkeyRegisterFailuresIfAny()
+        {
+            if (_hotkeyRegisterFailures.Count == 0)
+                return;
+            try
+            {
+                string list = string.Join("\n  • ", _hotkeyRegisterFailures);
+                UiMessageBox.Show(
+                    this,
+                    "These hotkeys could not be registered (another app may own the chord):\n\n  • " +
+                    list +
+                    "\n\nThey will not fire until free. Re-open Settings → Key Map to change them.",
+                    "Hotkey registration failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Hotkey] warn UI: {ex.Message}");
+            }
+            finally
+            {
+                _hotkeyRegisterFailures.Clear();
             }
         }
 
@@ -968,7 +1087,7 @@ namespace SpeakRect
                 if (hasSelection)
                 {
                     try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
-                    try { _current?.Stop(); } catch { /* ignore */ }
+                    RetireCurrentProcessor();
                     _current = new OcrProcessor(bounds, lasso, ellipse);
                     Task.Run(() => _current.Start());
                 }
@@ -1026,6 +1145,8 @@ namespace SpeakRect
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            try { SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; }
+            catch { /* ignore */ }
             Cursor = _defaultCursor ?? Cursors.Default;
             UnregisterAllHotkeys();
             try { _gamepadPoller?.Dispose(); } catch { /* ignore */ }
@@ -1264,7 +1385,7 @@ namespace SpeakRect
                     return;
 
                 try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
-                _current?.Stop();
+                RetireCurrentProcessor();
                 bool ellipse = AppSettings.Current.FollowIsEllipse;
                 var next = new OcrProcessor(bounds, null, ellipse);
 
@@ -1342,7 +1463,8 @@ namespace SpeakRect
 
             EnsureSidebarChrome();
             var chrome = _sidebarChrome!;
-            var bounds = new Rectangle(Left, Top, SidebarWidth, Height);
+            // Pin tools to primary left strip (multi-monitor: not virtual far-left).
+            var bounds = GetSidebarScreenBounds();
             if (chrome.Bounds != bounds)
                 chrome.Bounds = bounds;
 
@@ -1415,15 +1537,20 @@ namespace SpeakRect
             _sidebarChrome = null;
         }
 
-        /// <summary>True if click is over the left sidebar (absorb so drawing doesn't start).</summary>
+        /// <summary>True if click is over the tool sidebar (primary left strip).</summary>
         private bool IsInSidebar(Point screenPt)
         {
             if (!IsSidebarVisible)
                 return false;
-            return screenPt.X >= this.Left &&
-                   screenPt.X < this.Left + SidebarWidth &&
-                   screenPt.Y >= this.Top &&
-                   screenPt.Y < this.Top + this.Height;
+            return GetSidebarScreenBounds().Contains(screenPt);
+        }
+
+        /// <summary>Screen → sidebar chrome client (primary-anchored strip).</summary>
+        private static void SidebarLocal(Point screenPt, out int localX, out int localY)
+        {
+            var sb = GetSidebarScreenBounds();
+            localX = screenPt.X - sb.Left;
+            localY = screenPt.Y - sb.Top;
         }
 
         private bool IsShapeButtonHit(Point screenPt, out CaptureMode hitMode)
@@ -1431,8 +1558,7 @@ namespace SpeakRect
             hitMode = _currentMode;
             if (!IsInSidebar(screenPt)) return false;
 
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             if (localX < ShapeBtnX || localX >= ShapeBtnX + ShapeBtnW)
                 return false;
 
@@ -1460,8 +1586,7 @@ namespace SpeakRect
         private bool IsFollowButtonHit(Point screenPt)
         {
             if (!IsInSidebar(screenPt)) return false;
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             return GetFollowButtonRect().Contains(localX, localY);
         }
 
@@ -1488,8 +1613,7 @@ namespace SpeakRect
             slotIndex = -1;
             if (!IsInSidebar(screenPt)) return false;
 
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             for (int i = 0; i < 8; i++)
             {
                 if (GetRegionSlotButtonRect(i).Contains(localX, localY))
@@ -1542,8 +1666,7 @@ namespace SpeakRect
             flagIndex = -1;
             if (!IsInSidebar(screenPt)) return false;
 
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             if (localX < ShapeBtnX || localX >= ShapeBtnX + ShapeBtnW)
                 return false;
 
@@ -1572,8 +1695,7 @@ namespace SpeakRect
         private bool IsSettingsButtonHit(Point screenPt)
         {
             if (!IsInSidebar(screenPt)) return false;
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             return GetSettingsButtonRect().Contains(localX, localY);
         }
 
@@ -1612,16 +1734,14 @@ namespace SpeakRect
         private bool IsHideButtonHit(Point screenPt)
         {
             if (!IsInSidebar(screenPt)) return false;
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             return GetHideButtonRect().Contains(localX, localY);
         }
 
         private bool IsExitButtonHit(Point screenPt)
         {
             if (!IsInSidebar(screenPt)) return false;
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             return GetExitButtonRect().Contains(localX, localY);
         }
 
@@ -1650,8 +1770,7 @@ namespace SpeakRect
         private bool IsOpacitySliderHit(Point screenPt)
         {
             if (!IsInSidebar(screenPt)) return false;
-            int localY = screenPt.Y - this.Top;
-            int localX = screenPt.X - this.Left;
+            SidebarLocal(screenPt, out int localX, out int localY);
             return GetOpacitySliderHitRect().Contains(localX, localY);
         }
 
@@ -1684,7 +1803,7 @@ namespace SpeakRect
         private void SetOpacityFromScreenX(int screenX)
         {
             Rectangle track = GetOpacityTrackRect();
-            int localX = screenX - this.Left;
+            int localX = screenX - GetSidebarScreenBounds().Left;
             double t = (localX - track.X) / (double)Math.Max(1, track.Width);
             t = Math.Clamp(t, 0.0, 1.0);
             SetOverlayOpacity(OpacityMin + t * (OpacityMax - OpacityMin));
@@ -2075,6 +2194,8 @@ namespace SpeakRect
             try { OcrProcessor.CancelAnnouncement(); } catch { /* ignore */ }
             try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
             try { _current?.Stop(); } catch { /* ignore */ }
+            // Keep _current for geometry; only cancel — do not dispose on Stop TTS
+            // so a second Abort is still safe.
         }
 
         private void ShowOverlay()
@@ -2087,7 +2208,7 @@ namespace SpeakRect
             // Active F1–F8 slot (independent of region 9 follow box).
             LoadRegionIntoCurrent(_activeRectKey);
 
-            Bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+            Bounds = GetVirtualDesktopBounds();
             WindowState = FormWindowState.Normal;
             Show();
 
@@ -2153,6 +2274,7 @@ namespace SpeakRect
             }
 
             // ====================== SAVED REGIONS ======================
+            // Geometry is screen (desktop) coords; paint in form client (virtual desktop).
             // Stable color per slot index (F1=0 … F8=7), shared with Settings → Regions.
             foreach (var kvp in _savedRegions)
             {
@@ -2169,23 +2291,25 @@ namespace SpeakRect
                 {
                     if (!region.Rect.IsEmpty)
                     {
-                        e.Graphics.FillRectangle(fill, region.Rect);
-                        e.Graphics.DrawRectangle(pen, region.Rect);
-                        e.Graphics.DrawString(label + " [R]", font, textBrush, region.Rect.Location);
+                        var r = ScreenToForm(region.Rect);
+                        e.Graphics.FillRectangle(fill, r);
+                        e.Graphics.DrawRectangle(pen, r);
+                        e.Graphics.DrawString(label + " [R]", font, textBrush, r.Location);
                     }
                 }
                 else if (region.Mode == CaptureMode.Ellipse)
                 {
                     if (!region.Rect.IsEmpty)
                     {
-                        e.Graphics.FillEllipse(fill, region.Rect);
-                        e.Graphics.DrawEllipse(pen, region.Rect);
-                        e.Graphics.DrawString(label + " [O]", font, textBrush, region.Rect.Location);
+                        var r = ScreenToForm(region.Rect);
+                        e.Graphics.FillEllipse(fill, r);
+                        e.Graphics.DrawEllipse(pen, r);
+                        e.Graphics.DrawString(label + " [O]", font, textBrush, r.Location);
                     }
                 }
                 else if (region.Mode == CaptureMode.Lasso && region.LassoPoints.Count > 2)
                 {
-                    var pts = region.LassoPoints.ToArray();
+                    var pts = region.LassoPoints.Select(ScreenToForm).ToArray();
                     e.Graphics.FillPolygon(fill, pts);
                     e.Graphics.DrawPolygon(pen, pts);
                     e.Graphics.DrawString(label + " [L]", font, textBrush, pts[0]);
@@ -2210,19 +2334,21 @@ namespace SpeakRect
 
                 if (_currentMode == CaptureMode.Rectangle && !_currentRect.IsEmpty)
                 {
-                    e.Graphics.FillRectangle(currentFill, _currentRect);
-                    e.Graphics.DrawRectangle(currentPen, _currentRect);
-                    e.Graphics.DrawString(modeLabel, currentFont, currentTextBrush, _currentRect.Location);
+                    var r = ScreenToForm(_currentRect);
+                    e.Graphics.FillRectangle(currentFill, r);
+                    e.Graphics.DrawRectangle(currentPen, r);
+                    e.Graphics.DrawString(modeLabel, currentFont, currentTextBrush, r.Location);
                 }
                 else if (_currentMode == CaptureMode.Ellipse && !_currentEllipse.IsEmpty)
                 {
-                    e.Graphics.FillEllipse(currentFill, _currentEllipse);
-                    e.Graphics.DrawEllipse(currentPen, _currentEllipse);
-                    e.Graphics.DrawString(modeLabel, currentFont, currentTextBrush, _currentEllipse.Location);
+                    var r = ScreenToForm(_currentEllipse);
+                    e.Graphics.FillEllipse(currentFill, r);
+                    e.Graphics.DrawEllipse(currentPen, r);
+                    e.Graphics.DrawString(modeLabel, currentFont, currentTextBrush, r.Location);
                 }
                 else if (_currentMode == CaptureMode.Lasso && _currentLasso.Count > 2)
                 {
-                    var pts = _currentLasso.ToArray();
+                    var pts = _currentLasso.Select(ScreenToForm).ToArray();
                     e.Graphics.FillPolygon(currentFill, pts);
                     e.Graphics.DrawPolygon(currentPen, pts);
                     e.Graphics.DrawString(modeLabel, currentFont, currentTextBrush, pts[0]);
@@ -2230,34 +2356,39 @@ namespace SpeakRect
             }
 
             // ====================== IN-PROGRESS DRAWING ======================
+            // _draw* points are screen coords from the mouse hook.
             if (_isDrawing)
             {
                 using var drawFill = new SolidBrush(Color.FromArgb(70, 240, 128, 24));
                 using var drawPen = new Pen(UiTheme.AccentHot, 3);
+                var drawStartC = ScreenToForm(_drawStart);
+                var drawEndC = ScreenToForm(_drawEnd);
 
                 if (_currentMode == CaptureMode.Lasso && _drawLassoPoints.Count >= 2)
                 {
-                    e.Graphics.DrawLines(drawPen, _drawLassoPoints.ToArray());
+                    var pts = _drawLassoPoints.Select(ScreenToForm).ToArray();
+                    e.Graphics.DrawLines(drawPen, pts);
 
                     if (_drawLassoPoints.Count > 4)
                     {
-                        var last = _drawLassoPoints.Last();
-                        double d = Distance(last, _drawStart);
+                        var last = pts[^1];
+                        double d = Distance(_drawLassoPoints.Last(), _drawStart);
                         if (d < 40)
                         {
-                            e.Graphics.DrawLine(drawPen, last, _drawStart);
+                            e.Graphics.DrawLine(drawPen, last, drawStartC);
                             using var snapBrush = new SolidBrush(Color.LimeGreen);
-                            e.Graphics.FillEllipse(snapBrush, _drawStart.X - 6, _drawStart.Y - 6, 12, 12);
+                            e.Graphics.FillEllipse(
+                                snapBrush, drawStartC.X - 6, drawStartC.Y - 6, 12, 12);
                         }
                     }
                 }
                 else if (_currentMode == CaptureMode.Rectangle)
                 {
                     var r = new Rectangle(
-                        Math.Min(_drawStart.X, _drawEnd.X),
-                        Math.Min(_drawStart.Y, _drawEnd.Y),
-                        Math.Abs(_drawEnd.X - _drawStart.X),
-                        Math.Abs(_drawEnd.Y - _drawStart.Y));
+                        Math.Min(drawStartC.X, drawEndC.X),
+                        Math.Min(drawStartC.Y, drawEndC.Y),
+                        Math.Abs(drawEndC.X - drawStartC.X),
+                        Math.Abs(drawEndC.Y - drawStartC.Y));
                     if (r.Width > 3 && r.Height > 3)
                     {
                         e.Graphics.FillRectangle(drawFill, r);
@@ -2267,10 +2398,10 @@ namespace SpeakRect
                 else if (_currentMode == CaptureMode.Ellipse)
                 {
                     var r = new Rectangle(
-                        Math.Min(_drawStart.X, _drawEnd.X),
-                        Math.Min(_drawStart.Y, _drawEnd.Y),
-                        Math.Abs(_drawEnd.X - _drawStart.X),
-                        Math.Abs(_drawEnd.Y - _drawStart.Y));
+                        Math.Min(drawStartC.X, drawEndC.X),
+                        Math.Min(drawStartC.Y, drawEndC.Y),
+                        Math.Abs(drawEndC.X - drawStartC.X),
+                        Math.Abs(drawEndC.Y - drawStartC.Y));
                     if (r.Width > 3 && r.Height > 3)
                     {
                         e.Graphics.FillEllipse(drawFill, r);
@@ -2282,7 +2413,7 @@ namespace SpeakRect
             // Follow region 9 box (floating or locked) — size/shape from FOLLOW settings
             if (FollowActive)
             {
-                var r = GetDynamicBounds();
+                var r = ScreenToForm(GetDynamicBounds());
                 if (!r.IsEmpty)
                 {
                     // Floating = orange; locked = deeper amber so lock state is obvious
@@ -2336,8 +2467,6 @@ namespace SpeakRect
                 }
 
                 // Regions 1–8: speak the committed selection (overlay stays open).
-                _current?.Stop();
-
                 SaveCurrentSelection(_activeRectKey);
 
                 OcrProcessor? next = null;
@@ -2389,6 +2518,9 @@ namespace SpeakRect
                 _currentLasso.Clear();
                 _currentRect = Rectangle.Empty;
                 _currentEllipse = Rectangle.Empty;
+                // Persist clear like SaveCurrentSelection — otherwise restart resurrects slot.
+                SyncRegionsToSettings();
+                try { AppSettings.Current.Save(); } catch { /* ignore */ }
                 Invalidate();
                 return true;
             }
@@ -2554,7 +2686,7 @@ namespace SpeakRect
         {
             // Stop overlay-hide Balloons refine TTS if still playing.
             try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
-            try { _current?.Stop(); } catch { /* ignore */ }
+            RetireCurrentProcessor();
             _current = next;
 
             // Capture current opacity so Left/Right dimming is preserved after snap.

@@ -81,8 +81,9 @@ namespace SpeakRect
         public Bitmap? BaseImage { get; set; }
 
         /// <summary>
-        /// Core reading islands after improve / coalesce / mega-split (pipeline coords).
-        /// Crop pad is applied later at crop time — do not store expanded boxes here.
+        /// Display-final reading islands (grow + crop pad already applied) for Balloons
+        /// preview / Speak override. Live path expands cores once via
+        /// <c>ActiveCropPadPx</c>; override sets pad to 0 so these boxes are not padded again.
         /// Order = reading / crop-stack order.
         /// </summary>
         public IReadOnlyList<Rectangle> Regions { get; init; } = Array.Empty<Rectangle>();
@@ -496,19 +497,19 @@ namespace SpeakRect
 
         /// <summary>Active full-frame / default Kobold prompt for the current mode.</summary>
         private static string LocalLlmTaskPrompt =>
-            AppSettings.Current.ActiveFullOrSimplePrompt;
+            SpeakRunSettings.GetFullOrSimplePrompt();
 
         /// <summary>Active crop prompt (ComicBook ON region crops + stack base).</summary>
         private static string CropTaskPrompt =>
-            AppSettings.Current.ResolveCropPrompt();
+            SpeakRunSettings.GetCropPrompt();
 
         /// <summary>ComicBook OFF / simple-extract retry.</summary>
         private static string SimpleExtractPrompt =>
-            AppSettings.Current.ResolveSimplePrompt();
+            SpeakRunSettings.GetSimplePrompt();
 
         /// <summary>Last-ditch recovery when the primary prompt blanks.</summary>
         private static string RecoveryPrompt =>
-            AppSettings.Current.ResolveRecoveryPrompt();
+            SpeakRunSettings.GetRecoveryPrompt();
 
         /// <summary>
         /// Full-frame path only: extra scale + unsharp before Kobold.
@@ -555,8 +556,8 @@ namespace SpeakRect
         /// Active Local-LLM send long-edge cap from Image tab (or 0 if downscale off).
         /// </summary>
         private static int ActiveLlmSendMaxLongEdge =>
-            AppSettings.Current.ImageLlmSendDownscale
-                ? Math.Clamp(AppSettings.Current.ImageLlmSendMaxLongEdge, 256, 4096)
+            SpeakRunSettings.GetImageLlmSendDownscale()
+                ? Math.Clamp(SpeakRunSettings.GetImageLlmSendMaxLongEdge(), 256, 4096)
                 : 0;
 
         /// <summary>
@@ -652,29 +653,29 @@ namespace SpeakRect
         // Stock defaults: comma 102, sentence 502, other 52, bubble 752.
         // When VoiceUseCustomPauseEncodings is false, encoding and delays are off.
         private static bool UseCustomPauseEncodings =>
-            AppSettings.Current.VoiceUseCustomPauseEncodings;
+            SpeakRunSettings.GetVoiceUseCustomPauseEncodings();
 
         private static int ClampSpeakPauseMs(int ms) =>
             Math.Clamp(ms, AppSettings.MinSpeakPauseMs, AppSettings.MaxSpeakPauseMs);
 
         private static int BubblePauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceBubblePauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceBubblePauseMs())
                 : 0;
 
         private static int SentencePauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceSentencePauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceSentencePauseMs())
                 : 0;
 
         private static int CommaPauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceCommaPauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceCommaPauseMs())
                 : 0;
 
         private static int OtherPauseMs =>
             UseCustomPauseEncodings
-                ? ClampSpeakPauseMs(AppSettings.Current.VoiceOtherPauseMs)
+                ? ClampSpeakPauseMs(SpeakRunSettings.GetVoiceOtherPauseMs())
                 : 0;
 
 
@@ -697,7 +698,7 @@ namespace SpeakRect
         /// Settings crop pad (no per-run override). Static helpers / merge tests use this.
         /// </summary>
         private static int TextRegionPadding =>
-            AppSettings.Current.ComicRegionPadding;
+            SpeakRunSettings.GetComicRegionPadding();
 
         /// <summary>
         /// Crop pad for this host run (settings unless Balloons override forced 0).
@@ -728,7 +729,7 @@ namespace SpeakRect
         /// From <see cref="AppSettings.ComicOrphanRecoverPasses"/>.
         /// </summary>
         private static int MaxOrphanWinOcrPasses =>
-            AppSettings.Current.ComicOrphanRecoverPasses;
+            SpeakRunSettings.GetComicOrphanRecoverPasses();
 
         private static int ActiveMaxOrphanWinOcrPasses => MaxOrphanWinOcrPasses;
 
@@ -752,7 +753,7 @@ namespace SpeakRect
         /// From <see cref="AppSettings.ImageUpscaleLongSide"/>.
         /// </summary>
         private static int PipelineUpscaleLongSideComic =>
-            AppSettings.Current.ImageUpscaleLongSide;
+            SpeakRunSettings.GetImageUpscaleLongSide();
 
         private static int ActivePipelineUpscaleLongSide => PipelineUpscaleLongSideComic;
 
@@ -761,93 +762,93 @@ namespace SpeakRect
         /// From <see cref="AppSettings.ImageInkGrayWeight"/>.
         /// </summary>
         private static float InkGrayMinWeight =>
-            AppSettings.Current.ImageInkGrayWeight;
+            SpeakRunSettings.GetImageInkGrayWeight();
 
         /// <summary>Auto-levels low/high percentiles from settings.</summary>
         private static double AutoLevelsLowPercentile =>
-            AppSettings.Current.ImageAutoLevelsLow;
+            SpeakRunSettings.GetImageAutoLevelsLow();
         private static double AutoLevelsHighPercentile =>
-            AppSettings.Current.ImageAutoLevelsHigh;
+            SpeakRunSettings.GetImageAutoLevelsHigh();
 
         private static int AutoLevelsMinRange =>
-            AppSettings.Current.ImageAutoLevelsMinRange;
+            SpeakRunSettings.GetImageAutoLevelsMinRange();
 
         private static bool EnableAutoLevels =>
-            EnableImagePrep && AppSettings.Current.ImageAutoLevels;
+            EnableImagePrep && SpeakRunSettings.GetImageAutoLevels();
 
         /// <summary>
         /// Edge-preserving denoise spatial radius (0 = off).
         /// From <see cref="AppSettings.ImageDenoiseRadius"/>.
         /// </summary>
         private static int DenoiseSpatialRadius =>
-            EnableImagePrep ? AppSettings.Current.ImageDenoiseRadius : 0;
+            EnableImagePrep ? SpeakRunSettings.GetImageDenoiseRadius() : 0;
 
         private static float DenoiseRangeSigma =>
-            AppSettings.Current.ImageDenoiseSigma;
+            SpeakRunSettings.GetImageDenoiseSigma();
 
         private static float PipelineSharpenAmount =>
-            EnableImagePrep ? AppSettings.Current.ImageSharpenAmount : 0f;
+            EnableImagePrep ? SpeakRunSettings.GetImageSharpenAmount() : 0f;
         private static int PipelineSharpenPasses =>
-            EnableImagePrep ? AppSettings.Current.ImageSharpenPasses : 0;
+            EnableImagePrep ? SpeakRunSettings.GetImageSharpenPasses() : 0;
 
         /// <summary>
         /// Master image-prep switch. From <see cref="AppSettings.ImagePrepEnabled"/>.
         /// Off = raw snap (no letterbox / scale / gray / tone).
         /// </summary>
         private static bool EnableImagePrep =>
-            AppSettings.Current.ImagePrepEnabled;
+            SpeakRunSettings.GetImagePrepEnabled();
 
         /// <summary>
         /// Convert to ink-preserving grayscale after upscale.
         /// From <see cref="AppSettings.ImageGrayscale"/> (and master prep on).
         /// </summary>
         private static bool EnablePipelineGrayscale =>
-            EnableImagePrep && AppSettings.Current.ImageGrayscale;
+            EnableImagePrep && SpeakRunSettings.GetImageGrayscale();
 
         /// <summary>
         /// Gray fog after tone prep for <b>WinOCR detect only</b>. ComicBook ON only.
         /// From <see cref="AppSettings.ComicDetectFog"/>.
         /// </summary>
         private static bool EnableWinOcrDetectGrayFog =>
-            AppSettings.Current.ComicDetectFog;
+            SpeakRunSettings.GetComicDetectFog();
 
         /// <summary>
         /// ComicBook OFF (Default): same Image prep as ComicBook, then one full-frame
         /// Kobold call (no fog/detect/crops). ComicBook ON: full balloon pipeline.
         /// </summary>
-        private static bool ComicBookOff => !AppSettings.Current.ComicBook;
+        private static bool ComicBookOff => !SpeakRunSettings.GetComicBook();
 
         /// <summary>0 = no fog, 1 = solid gray. From settings (default 0.35).</summary>
         private static float WinOcrDetectGrayFogAmount =>
-            AppSettings.Current.ComicDetectFogAmount;
+            SpeakRunSettings.GetComicDetectFogAmount();
 
         /// <summary>Gray level for the fog (128 = mid gray).</summary>
         private const byte WinOcrDetectGrayFogLevel = 128;
 
         /// <summary>Mega-island re-detect (caption+row globs). Settings toggle.</summary>
         private static bool EnableMegaIslandSplit =>
-            AppSettings.Current.ComicSplitLargeRegions;
+            SpeakRunSettings.GetComicSplitLargeRegions();
 
         /// <summary>
         /// Union overlapping inflated islands instead of nudging them apart.
         /// From <see cref="AppSettings.ComicMergeOverlappingIslands"/> (default on).
         /// </summary>
         private static bool EnableMergeOverlappingIslands =>
-            AppSettings.Current.ComicMergeOverlappingIslands;
+            SpeakRunSettings.GetComicMergeOverlappingIslands();
 
         /// <summary>
         /// Combined letterbox dark bar threshold.
         /// From <see cref="AppSettings.ImageLetterboxBlack"/>.
         /// </summary>
         private static int LetterboxBlackThreshold =>
-            AppSettings.Current.ImageLetterboxBlack;
+            SpeakRunSettings.GetImageLetterboxBlack();
 
         /// <summary>
         /// Combined letterbox light bar threshold.
         /// From <see cref="AppSettings.ImageLetterboxWhite"/>.
         /// </summary>
         private static int LetterboxWhiteThreshold =>
-            AppSettings.Current.ImageLetterboxWhite;
+            SpeakRunSettings.GetImageLetterboxWhite();
 
         /// <summary>
         /// Row/col needs at least this fraction of dark-content <b>and</b>
@@ -872,10 +873,10 @@ namespace SpeakRect
 
         /// <summary>Pad kept around detected content. From settings.</summary>
         private static int LetterboxContentPad =>
-            AppSettings.Current.ImageLetterboxPad;
+            SpeakRunSettings.GetImageLetterboxPad();
 
         private static bool EnableLetterbox =>
-            EnableImagePrep && AppSettings.Current.ImageLetterbox;
+            EnableImagePrep && SpeakRunSettings.GetImageLetterbox();
 
         // Letterbox edge trim treats a row/col as a bar when it is predominantly
         // dark OR predominantly light. That handles black-only, white-only, and
@@ -897,7 +898,7 @@ namespace SpeakRect
         /// are dropped before crop-Kobold. From <see cref="AppSettings.ComicMinIslandAlnum"/>.
         /// </summary>
         private static int MinIslandAlnumChars =>
-            AppSettings.Current.ComicMinIslandAlnum;
+            SpeakRunSettings.GetComicMinIslandAlnum();
 
         /// <summary>
         /// Minimum words for a speak unit to survive full-order / crop-primary merge.
@@ -912,9 +913,9 @@ namespace SpeakRect
         /// From <see cref="AppSettings.ComicInflateFracX"/> / <see cref="AppSettings.ComicInflateFracY"/>.
         /// </summary>
         private static double RegionInflateFractionY =>
-            AppSettings.Current.ComicInflateFracY;
+            SpeakRunSettings.GetComicInflateFracY();
         private static double RegionInflateFractionX =>
-            AppSettings.Current.ComicInflateFracX;
+            SpeakRunSettings.GetComicInflateFracX();
         /// <summary>
         /// Below this max-side (px), non-dense islands with non-zero grow get a 2px
         /// minimum pad so lettering is not crop-starved. No hard 16px floor.
@@ -925,7 +926,7 @@ namespace SpeakRect
         /// comic balloons stay separable after inflate. 0 = never use dense pad.
         /// </summary>
         private static int RegionInflateDenseIslandCount =>
-            AppSettings.Current.ComicDenseIslandCount;
+            SpeakRunSettings.GetComicDenseIslandCount();
         private const double RegionInflateDenseFractionY = 0.18;
         private const double RegionInflateDenseFractionX = 0.14;
 
@@ -934,9 +935,9 @@ namespace SpeakRect
         /// From <see cref="AppSettings.ComicClusterGapX"/> / <see cref="AppSettings.ComicClusterGapY"/>.
         /// </summary>
         private static double ClusterGapXFactor =>
-            AppSettings.Current.ComicClusterGapX;
+            SpeakRunSettings.GetComicClusterGapX();
         private static double ClusterGapYFactor =>
-            AppSettings.Current.ComicClusterGapY;
+            SpeakRunSettings.GetComicClusterGapY();
 
         /// <summary>
         /// Wide/tall captures with this few regions are treated as low-confidence
@@ -1021,6 +1022,12 @@ namespace SpeakRect
         /// </summary>
         public Action? RestoreAfterCapture { get; set; }
 
+        // Duck state is process-wide so concurrent OcrProcessor hosts cannot each
+        // sample already-ducked volume as "original" and leave apps stuck quiet.
+        private static readonly object DuckLock = new();
+        private static readonly List<(SimpleAudioVolume VolumeControl, float OriginalVolume)>
+            DuckedSessions = new();
+
         private readonly HashSet<string> _excludedProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
             "SpeakRect", "explorer", "shellexperiencehost", "searchapp",
@@ -1035,12 +1042,16 @@ namespace SpeakRect
         private readonly WinSpeech.SpeechSynthesizer _synth;
         private readonly MediaPlayer _player;
         private readonly object _ttsLock = new();
-        private readonly object _duckLock = new();
         private readonly object _sapiLock = new();
         private SapiSpeech.SpeechSynthesizer? _sapiSynth;
         private CancellationTokenSource? _processingCts;
 
-        private readonly List<(SimpleAudioVolume VolumeControl, float OriginalVolume)> _duckedSessions = new();
+        /// <summary>
+        /// Process-wide generation for live <see cref="Start"/> speaks. Stop/preempt
+        /// bumps this so a cancelled host does not keep TTS after a new host starts.
+        /// </summary>
+        private static int LiveSpeakGeneration;
+        private int _speakGeneration;
 
         private static readonly string DebugFolder = Path.Combine(
             AppContext.BaseDirectory, "debug_images");
@@ -1105,7 +1116,8 @@ namespace SpeakRect
             lock (_ttsLock)
             {
                 // Cancel any in-flight capture/TTS on this instance
-                _processingCts?.Cancel();
+                try { _processingCts?.Cancel(); } catch { /* ignore */ }
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
                 try
                 {
                     _player.Pause();
@@ -1120,14 +1132,35 @@ namespace SpeakRect
 
             // Unduck previous session before a new snap (speak path ducks again if needed)
             RestoreAudio();
-            Task.Run(async () => await CaptureAndRecognizeAsync(token));
+            // Bump generation so a Stop()'d host that still runs ignores late TTS.
+            int gen = Interlocked.Increment(ref LiveSpeakGeneration);
+            _speakGeneration = gen;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await CaptureAndRecognizeAsync(token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected on Stop / preempt.
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[OCR] CaptureAndRecognizeAsync: {ex.Message}");
+                }
+            });
         }
 
         public void Stop()
         {
+            // Invalidate this host's speak generation first so in-flight work
+            // that only checks generation (not CTS) still bails.
+            _speakGeneration = -1;
             lock (_ttsLock)
             {
-                _processingCts?.Cancel();
+                try { _processingCts?.Cancel(); } catch { /* ignore */ }
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
                 _processingCts = null;
 
                 try
@@ -1141,6 +1174,13 @@ namespace SpeakRect
 
             RestoreAudio();
         }
+
+        /// <summary>
+        /// True when this host is still the active live speak generation
+        /// (not Stop()'d / not replaced by a newer Start).
+        /// </summary>
+        private bool IsLiveSpeakCurrent =>
+            _speakGeneration > 0 && _speakGeneration == Volatile.Read(ref LiveSpeakGeneration);
 
         // ---- Background comic speak (Balloons refine on overlay hide) ----
         private static readonly object BgComicSpeakLock = new();
@@ -1181,7 +1221,7 @@ namespace SpeakRect
         /// <summary>
         /// Build the Balloons detect-view bitmap (prep + optional gray fog) without
         /// running WinOCR. Same pixels WinOCR would see. Caller owns the return.
-        /// Used to refresh fog preview when boxes are locked.
+        /// Used to refresh fog preview when boxes are locked (non-POI).
         /// </summary>
         public static Bitmap BuildComicDetectViewBitmap(Bitmap rawSnap)
         {
@@ -1207,6 +1247,23 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Build the Comic Book tone (Local-LLM / POI base) without WinOCR.
+        /// Caller owns the return. Used when POI is on so locked-box fog refreshes
+        /// never swap the refine surface onto detect fog (VL still reads tone).
+        /// </summary>
+        public static Bitmap BuildComicToneViewBitmap(Bitmap rawSnap)
+        {
+            if (rawSnap == null)
+                throw new ArgumentNullException(nameof(rawSnap));
+
+            AppSettings.Current.NormalizeImagePrepSettings();
+
+            using var stages = BuildImagePrepStages(
+                rawSnap, buildTone: true, detail: null);
+            return new Bitmap(stages.ToneOrPre);
+        }
+
+        /// <summary>
         /// Run Comic Book prep + WinOCR detect + region improve (no Kobold) for Settings preview.
         /// Preview base is the detect view (fog when on). Uses live comic-region knobs.
         /// Caller disposes the result.
@@ -1228,7 +1285,7 @@ namespace SpeakRect
                 $" gray={(EnablePipelineGrayscale ? "on" : "off")}" +
                 $" fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(AppSettings.Current.ComicDynamicFog ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
+                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
@@ -1271,7 +1328,7 @@ namespace SpeakRect
 
                 // POI: preview canvas = TONE (VL canvas). Non-POI: detect image so fog is visible
                 // at the *chosen* dyn-fog amount (not the start slider alone).
-                bool poiMode = AppSettings.Current.ComicPoiMarkers;
+                bool poiMode = SpeakRunSettings.GetComicPoiMarkers();
                 detail.AppendLine(
                     $"grow X/Y={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##} " +
                     $"cropPad={TextRegionPadding}px " +
@@ -1406,12 +1463,15 @@ namespace SpeakRect
             CancellationToken token,
             IReadOnlyList<Rectangle>? regionOverride = null)
         {
+            // Freeze knobs for this Balloons still-image speak (same as live).
+            using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
+
             var detail = new StringBuilder();
             detail.AppendLine("speak-test=ComicBook full path (no screen capture)");
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(AppSettings.Current.ComicDynamicFog ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
+                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
@@ -1420,7 +1480,7 @@ namespace SpeakRect
                 $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}" +
                 $" orphans={ActiveMaxOrphanWinOcrPasses}" +
                 $" minAlnum={(MinIslandAlnumChars <= 0 ? "off" : MinIslandAlnumChars.ToString())}" +
-                $" sequential={(AppSettings.Current.ComicSequentialRegions ? "on" : "off")}");
+                $" sequential={(SpeakRunSettings.GetComicSequentialRegions() ? "on" : "off")}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
             bool useOverride = regionOverride != null && regionOverride.Count > 0;
             if (useOverride)
@@ -1471,8 +1531,25 @@ namespace SpeakRect
                 prepStages = BuildImagePrepStages(
                     rawSnap, buildTone: true, detail);
                 Bitmap toneOwned = prepStages.ToneOrPre;
+                Bitmap letterboxOwned = prepStages.Letterbox;
+                Bitmap? upscaleOwned = prepStages.Upscale;
+                Bitmap? grayOwned = prepStages.Gray;
                 pipeTimer.Mark("image-prep", sw);
-                CaptureAnalyticsImage("capture", "Capture / source", rawSnap);
+                // Same Analytics stage keys as live CaptureAndRecognizeAsync.
+                CaptureAnalyticsImage("capture", "Capture", rawSnap);
+                if (letterboxOwned.Width != rawSnap.Width ||
+                    letterboxOwned.Height != rawSnap.Height)
+                {
+                    CaptureAnalyticsImage("letterbox", "Letterbox", letterboxOwned);
+                }
+                if (upscaleOwned != null &&
+                    (upscaleOwned.Width != letterboxOwned.Width ||
+                     upscaleOwned.Height != letterboxOwned.Height))
+                {
+                    CaptureAnalyticsImage("upscale", "Upscale", upscaleOwned);
+                }
+                if (grayOwned != null)
+                    CaptureAnalyticsImage("gray", "Ink gray", grayOwned);
                 CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", toneOwned);
 
                 token.ThrowIfCancellationRequested();
@@ -1550,10 +1627,13 @@ namespace SpeakRect
                         ")");
                 }
 
+                if (!ReferenceEquals(detectImage, toneOwned))
+                    CaptureAnalyticsImage("detect", "Detect (fog)", detectImage);
+
                 // Same green boxes as Settings → Balloons: grow cores + settings crop pad
                 // on detect view (fog when on). Use settings pad even when override pad=0
                 // so the returned overlay / Analytics match what the user tuned.
-                int overlayPad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
+                int overlayPad = Math.Max(0, SpeakRunSettings.GetComicRegionPadding());
                 // Override boxes from Balloons already include pad — do not expand again.
                 var speakOverlayBoxes = useOverride
                     ? regions
@@ -1562,7 +1642,10 @@ namespace SpeakRect
                 // Publish for Analytics when speaking from Balloons / still image
                 try
                 {
-                    CaptureAnalyticsImage("regions", "Detect regions", overlay);
+                    CaptureAnalyticsImage(
+                        "regions",
+                        "WinOCR detect boxes (fog when on; not VL input)",
+                        overlay);
                 }
                 catch { /* ignore */ }
 
@@ -1571,11 +1654,11 @@ namespace SpeakRect
 
                 // Same strategy switch as live CaptureAndRecognizeAsync (POI / sequential / stack).
                 bool usePoi =
-                    AppSettings.Current.ComicPoiMarkers &&
+                    SpeakRunSettings.GetComicPoiMarkers() &&
                     regions.Count > 0;
                 bool useSequential =
                     !usePoi &&
-                    AppSettings.Current.ComicSequentialRegions &&
+                    SpeakRunSettings.GetComicSequentialRegions() &&
                     regions.Count > 0;
 
                 if (usePoi)
@@ -2024,7 +2107,8 @@ namespace SpeakRect
 
         private void DuckOtherAudio()
         {
-            lock (_duckLock) RestoreAudio();
+            // Process-wide: clear any prior duck first so originals stay correct.
+            RestoreAudio();
 
             try
             {
@@ -2062,8 +2146,8 @@ namespace SpeakRect
                     if (original < 0.01f) continue;
 
                     vol.Volume = DuckVolumeLevel;
-                    lock (_duckLock)
-                        _duckedSessions.Add((vol, original));
+                    lock (DuckLock)
+                        DuckedSessions.Add((vol, original));
                 }
             }
             catch (Exception ex)
@@ -2075,10 +2159,10 @@ namespace SpeakRect
         private void RestoreAudio()
         {
             List<(SimpleAudioVolume, float)> toRestore;
-            lock (_duckLock)
+            lock (DuckLock)
             {
-                toRestore = new List<(SimpleAudioVolume, float)>(_duckedSessions);
-                _duckedSessions.Clear();
+                toRestore = new List<(SimpleAudioVolume, float)>(DuckedSessions);
+                DuckedSessions.Clear();
             }
 
             foreach (var (ctrl, original) in toRestore)
@@ -2087,6 +2171,8 @@ namespace SpeakRect
 
         private async Task CaptureAndRecognizeAsync(CancellationToken token)
         {
+            // Freeze knobs for this run (MODE / pad / pauses / prompts / voice).
+            using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
             // Fresh analytics image list for this run (published via WriteLastOcrDebug).
             _runImages = new List<OcrResultImage>(16);
             try
@@ -2098,8 +2184,10 @@ namespace SpeakRect
                 // -------------------------------------------------------------
                 // ComicBook OFF (Default): letterbox → upscale → ink-gray → tone →
                 //     one full-frame Local-LLM call (no fog / detect / crops).
-                // ComicBook ON + POI: tone + green boxes (± outside fog); 1 island → VL guide;
-                //     2+ islands → sequential crops (guide published for analytics/preview).
+                // ComicBook ON + POI: tone + green boxes (± outside fog for map);
+                //     AutoStack on (stock) → per-island orange canvas VL ×N;
+                //     stack off/fail multi → §9 sequential or crop-stack;
+                //     1 island + stack off → full-page guide VL.
                 // ComicBook ON:
                 //  0) Same Image prep → tone (Local-LLM) + optional fog (OCR detect only)
                 //  1) Always run balloon OCR detect + region improve (when no override)
@@ -2334,7 +2422,7 @@ namespace SpeakRect
                         List<string> chosen = new();
                         string chosenTag = "none";
                         // User's ComicBook setting for this capture (restored after any temp OFF).
-                        bool userComicBook = AppSettings.Current.ComicBook;
+                        bool userComicBook = SpeakRunSettings.GetComicBook();
                         // ComicBook ON: regions already ran WinOCR (reuse for TTS fallback).
                         List<DetectedTextRegion>? winOcrRegions = null;
 
@@ -2358,18 +2446,18 @@ namespace SpeakRect
 
                             // POI guide: Comic Book alternate (shared with Balloons Speak).
                             bool usePoi =
-                                AppSettings.Current.ComicPoiMarkers &&
+                                SpeakRunSettings.GetComicPoiMarkers() &&
                                 regions.Count > 0;
 
                             // Non-POI only: §9 sequential. Under POI, multi-island
                             // fallback after stack uses §9 inside RunComicPoiGuideAsync.
                             bool useSequential =
                                 !usePoi &&
-                                AppSettings.Current.ComicSequentialRegions &&
+                                SpeakRunSettings.GetComicSequentialRegions() &&
                                 regions.Count > 0;
 
                             string strategyHint = usePoi
-                                ? (AppSettings.Current.ComicPoiAutoStack
+                                ? (SpeakRunSettings.GetComicPoiAutoStack()
                                     ? "detect+poi-stack (per-island canvas VL; multi fail → §9)"
                                     : "detect+poi (no AutoStack; multi → §9 seq or crop-stack)")
                                 : useSequential
@@ -2825,10 +2913,10 @@ namespace SpeakRect
                 sb.AppendLine($"  upscale long-edge={PipelineUpscaleLongSideComic}");
                 sb.AppendLine(
                     $"  tone={(EnableImagePrep ? "denoise+levels+sharpen (shared prep)" : "off (prep disabled)")}");
-                if (AppSettings.Current.ImageLlmSendDownscale)
+                if (SpeakRunSettings.GetImageLlmSendDownscale())
                 {
                     sb.AppendLine(
-                        $"  Local-LLM send long-edge≤{AppSettings.Current.ImageLlmSendMaxLongEdge}");
+                        $"  Local-LLM send long-edge≤{SpeakRunSettings.GetImageLlmSendMaxLongEdge()}");
                 }
                 else
                 {
@@ -2840,9 +2928,9 @@ namespace SpeakRect
                 return sb.ToString();
             }
 
-            bool poi = AppSettings.Current.ComicPoiMarkers;
-            bool autoStack = AppSettings.Current.ComicPoiAutoStack;
-            bool sequential = AppSettings.Current.ComicSequentialRegions;
+            bool poi = SpeakRunSettings.GetComicPoiMarkers();
+            bool autoStack = SpeakRunSettings.GetComicPoiAutoStack();
+            bool sequential = SpeakRunSettings.GetComicSequentialRegions();
             sb.AppendLine(
                 poi
                     ? "profile=full+poi (ComicBook: detect → POI guide; " +
@@ -2860,7 +2948,7 @@ namespace SpeakRect
                 $"  winocr detect=pass1+pass2" +
                 $", orphans={ActiveMaxOrphanWinOcrPasses}" +
                 $", fog={(detectUsesFog ? "on" : "off")}" +
-                (detectUsesFog && AppSettings.Current.ComicDynamicFog
+                (detectUsesFog && SpeakRunSettings.GetComicDynamicFog()
                     ? $", dynFog=on floor={DynamicFogSearchFloor:0.###} (climb to peak)"
                     : detectUsesFog
                         ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
@@ -2870,15 +2958,15 @@ namespace SpeakRect
                 sb.AppendLine(
                     "  poi guide=bright green region boxes (same as Balloons preview)");
                 sb.AppendLine(
-                    AppSettings.Current.ComicPoiFogOutside
+                    SpeakRunSettings.GetComicPoiFogOutside()
                         ? "  poi outside-fog=thick (hide art/UI outside islands)"
                         : "  poi outside-fog=off");
                 if (autoStack)
                 {
                     sb.AppendLine(
                         $"  poi Local-LLM stack=on (per-island canvas VL, one at a time) " +
-                        $"(margin={AppSettings.Current.ComicPoiAutoStackMarginPx}px " +
-                        $"beef+{AppSettings.Current.ComicPoiStackBeefExtra:0.###}; " +
+                        $"(margin={SpeakRunSettings.GetComicPoiAutoStackMarginPx()}px " +
+                        $"beef+{SpeakRunSettings.GetComicPoiStackBeefExtra():0.###}; " +
                         "preview stays full page; compose long-edge cap 2560)");
                 }
                 else
@@ -2888,10 +2976,10 @@ namespace SpeakRect
                             ? "  poi Local-LLM stack=off (multi → sequential; 1 → full-page)"
                             : "  poi Local-LLM stack=off (multi → crop-stack; 1 → full-page)");
                 }
-                if (AppSettings.Current.ImageLlmSendDownscale)
+                if (SpeakRunSettings.GetImageLlmSendDownscale())
                 {
                     sb.AppendLine(
-                        $"  Local-LLM send long-edge≤{AppSettings.Current.ImageLlmSendMaxLongEdge}");
+                        $"  Local-LLM send long-edge≤{SpeakRunSettings.GetImageLlmSendMaxLongEdge()}");
                 }
                 else
                 {
@@ -3455,8 +3543,8 @@ namespace SpeakRect
                 detail.AppendLine(
                     $"crop-stack: building strips={regions.Count} " +
                     $"(native prep crops; canvas=shared orange+beef " +
-                    $"gap={AppSettings.Current.ComicPoiAutoStackGapPx} " +
-                    $"margin={AppSettings.Current.ComicPoiAutoStackMarginPx})");
+                    $"gap={SpeakRunSettings.GetComicPoiAutoStackGapPx()} " +
+                    $"margin={SpeakRunSettings.GetComicPoiAutoStackMarginPx()})");
                 sw.Restart();
                 using var stackBmp = BuildVerticalCropStack(
                     pipelineImage, regions, detail, ActiveCropPadPx);
@@ -3613,8 +3701,11 @@ namespace SpeakRect
             bool speakNow,
             bool alreadyDucked)
         {
-            var sPoi = AppSettings.Current;
             var sw = Stopwatch.StartNew();
+            bool poiFogOutside = SpeakRunSettings.GetComicPoiFogOutside();
+            bool poiAutoStack = SpeakRunSettings.GetComicPoiAutoStack();
+            int poiStackGap = SpeakRunSettings.GetComicPoiAutoStackGapPx();
+            int poiStackMargin = SpeakRunSettings.GetComicPoiAutoStackMarginPx();
 
             // Pad once: live uses cores (_forcedCropPadPx null); Balloons override already final.
             bool displayBoxesFinal = _forcedCropPadPx == 0;
@@ -3636,10 +3727,10 @@ namespace SpeakRect
 
             detail.AppendLine(
                 $"strategy=comic-poi (tone base; islands={boxes.Count}; " +
-                $"outsideFog={sPoi.ComicPoiFogOutside}; " +
-                $"llmStack={sPoi.ComicPoiAutoStack} " +
-                $"gap={sPoi.ComicPoiAutoStackGapPx}px " +
-                $"margin={sPoi.ComicPoiAutoStackMarginPx}px)");
+                $"outsideFog={poiFogOutside}; " +
+                $"llmStack={poiAutoStack} " +
+                $"gap={poiStackGap}px " +
+                $"margin={poiStackMargin}px)");
 
             // Full-page guide on TONE — same DrawRegionGuides as Balloons POI preview.
             // Always published for Analytics; Speak may use island stack instead.
@@ -3647,7 +3738,7 @@ namespace SpeakRect
             try
             {
                 sw.Restart();
-                bool fogOutside = sPoi.ComicPoiFogOutside;
+                bool fogOutside = poiFogOutside;
                 guideBmp = ComicPoiGuide.DrawRegionGuides(
                     toneImage, boxes, detail, fogOutside: fogOutside);
                 pipeTimer.Mark(
@@ -3657,14 +3748,14 @@ namespace SpeakRect
                     fogOutside ? "POI boxes + outside fog (tone)" : "POI green boxes (tone)",
                     guideBmp);
                 // isVlInput only if we will NOT replace with stack (stack overwrites send files).
-                SavePoiVlDebug(guideBmp, isVlInput: !sPoi.ComicPoiAutoStack && boxes.Count == 1);
+                SavePoiVlDebug(guideBmp, isVlInput: !poiAutoStack && boxes.Count == 1);
 
                 // Local-LLM send: when Stack islands is on, each island gets its own
                 // orange canvas (same beef/margin compose as before) and is sent to VL
                 // one at a time — not one multi-strip stack image. Preview stays full page.
-                if (sPoi.ComicPoiAutoStack && boxes.Count >= 1)
+                if (poiAutoStack && boxes.Count >= 1)
                 {
-                    int margin = Math.Clamp(sPoi.ComicPoiAutoStackMarginPx, 0, 64);
+                    int margin = Math.Clamp(poiStackMargin, 0, 64);
                     int sendCap = ActiveLlmSendMaxLongEdge;
                     detail.AppendLine(
                         $"llm-send-stack: per-island canvas ×{boxes.Count} " +
@@ -3744,7 +3835,7 @@ namespace SpeakRect
                                     detail,
                                     token,
                                     savePrep: false,
-                                    promptOverride: AppSettings.Current.ResolvePoiPrompt())
+                                    promptOverride: SpeakRunSettings.GetPoiPrompt())
                                     .ConfigureAwait(false);
                                 pipeTimer.Add(
                                     $"full-frame-ocr (llm-island[{i + 1}])",
@@ -3826,17 +3917,36 @@ namespace SpeakRect
                         detail.AppendLine(
                             "comic-poi-stack empty/unusable (all islands) → fall through");
                     }
+                    catch (OperationCanceledException)
+                    {
+                        // Stop TTS / new speak — never fall through to sequential
+                        // or crop-stack (that re-spoke islands already TTS'd).
+                        throw;
+                    }
                     catch (Exception ex)
                     {
+                        // Partial success: return what we already OCR'd/spoke.
+                        // Falling through would re-read the same islands.
+                        if (spoken.Count > 0 || stackParts.Count > 0)
+                        {
+                            detail.AppendLine(
+                                $"llm-send-stack failed after partial " +
+                                $"(spoken={spoken.Count} ocr={stackParts.Count}): {ex.Message} " +
+                                "— return partial (no re-speak fallthrough)");
+                            if (speakNow)
+                                return (spoken, "comic-poi-stack-partial", duckedStack);
+                            return (stackParts.Count > 0 ? stackParts : spoken,
+                                "comic-poi-stack-partial", duckedStack);
+                        }
                         detail.AppendLine($"llm-send-stack failed: {ex.Message}");
                     }
-                    // Fall through if every island empty/failed.
+                    // Fall through only when every island empty/failed (no partial).
                 }
 
-                // Multi-island (stack off or stack failed): honor Balloons §9.
+                // Multi-island (stack off or stack failed empty): honor Balloons §9.
                 if (boxes.Count >= 2)
                 {
-                    if (AppSettings.Current.ComicSequentialRegions)
+                    if (SpeakRunSettings.GetComicSequentialRegions())
                     {
                         detail.AppendLine(
                             "poi-speak: sequential per-island on tone " +
@@ -3920,7 +4030,7 @@ namespace SpeakRect
                     detail,
                     token,
                     savePrep: false,
-                    promptOverride: AppSettings.Current.ResolvePoiPrompt())
+                    promptOverride: SpeakRunSettings.GetPoiPrompt())
                     .ConfigureAwait(false);
                 pipeTimer.Mark("full-frame-ocr (poi)", sw);
 
@@ -4045,9 +4155,9 @@ namespace SpeakRect
                 // Same canvas as POI: orange + beef/bottom-share from Balloons.
                 // Gap/margin from stack knobs so one UI drives both paths.
                 int gap = Math.Clamp(
-                    AppSettings.Current.ComicPoiAutoStackGapPx, 0, 64);
+                    SpeakRunSettings.GetComicPoiAutoStackGapPx(), 0, 64);
                 int margin = Math.Clamp(
-                    AppSettings.Current.ComicPoiAutoStackMarginPx, 0, 64);
+                    SpeakRunSettings.GetComicPoiAutoStackMarginPx(), 0, 64);
                 var canvas = ComicPoiGuide.ComposeVerticalStripStack(
                     strips,
                     detail,
@@ -5361,7 +5471,7 @@ namespace SpeakRect
                     FogAmountUsed: 0f, DynamicFogSearched: false, FogAmountStart: 0f);
             }
 
-            if (!AppSettings.Current.ComicDynamicFog)
+            if (!SpeakRunSettings.GetComicDynamicFog())
             {
                 detail.AppendLine($"detect-fog=fixed amount={fixedAmt:0.###}");
                 Bitmap fog = ApplyGrayFog(toneImage, fixedAmt, WinOcrDetectGrayFogLevel);
@@ -9483,12 +9593,16 @@ namespace SpeakRect
 
                 // Always use settings pad (not ActiveCropPadPx override) so Analytics shows
                 // the same solid crop boxes as Balloons even when Speak overrides pad to 0.
-                int pad = Math.Max(0, AppSettings.Current.ComicRegionPadding);
+                int pad = Math.Max(0, SpeakRunSettings.GetComicRegionPadding());
                 var boxes = ExpandRegionsByCropPad(
                     regions, capture.Width, capture.Height, pad);
 
                 using var overlay = BuildRegionsOverlayBitmap(capture, boxes);
-                CaptureAnalyticsImage("regions", "Detect regions", overlay);
+                // WinOCR detect view only — not Local-LLM VL input (see poi_guide / llm_island_*).
+                CaptureAnalyticsImage(
+                    "regions",
+                    "WinOCR detect boxes (fog when on; not VL input)",
+                    overlay);
                 if (ActiveHeavyDebugImages)
                 {
                     EnsureDebugFolder();
@@ -10248,17 +10362,9 @@ namespace SpeakRect
         /// </summary>
         public static string SmokeCleanForSpeech(string input, bool comicBook = true)
         {
-            bool saved = AppSettings.Current.ComicBook;
-            try
-            {
-                AppSettings.Current.ComicBook = comicBook;
-                // Prefer SpeechCleaner entry for new call sites; body still here.
-                return SpeechCleaner.CleanForSpeech(input);
-            }
-            finally
-            {
-                AppSettings.Current.ComicBook = saved;
-            }
+            // Thread-local override only — never mutates SpeakRunSettings.GetComicBook()
+            // (live speak may be reading mode flags concurrently).
+            return SpeechCleaner.CleanForSpeech(input, comicBook);
         }
 
         /// <summary>Smoke helper: count speak units (same as TTS splitter).</summary>
@@ -10349,7 +10455,7 @@ namespace SpeakRect
             var regions = (cores ?? Array.Empty<Rectangle>())
                 .Select(b => new DetectedTextRegion { Bounds = b, WinOcrText = "" })
                 .ToList();
-            int pad = Math.Max(0, padPx ?? AppSettings.Current.ComicRegionPadding);
+            int pad = Math.Max(0, padPx ?? SpeakRunSettings.GetComicRegionPadding());
             return ExpandRegionsByCropPad(regions, capW, capH, pad)
                 .Select(r => r.Bounds)
                 .ToList();
@@ -10644,7 +10750,9 @@ namespace SpeakRect
                 g.SmoothingMode = SmoothingMode.AntiAlias;
 
                 using var path = new GraphicsPath();
-                path.AddEllipse(0, 0, Math.Max(1, bounds.Width - 1), Math.Max(1, bounds.Height - 1));
+                // Full bounds — matches rect capture and painted overlay ellipse
+                // (Width-1/Height-1 clipped dialogue on the oval rim).
+                path.AddEllipse(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height));
                 g.SetClip(path);
                 g.DrawImage(full, Point.Empty);
                 g.ResetClip();
@@ -10658,6 +10766,11 @@ namespace SpeakRect
             try
             {
                 if (string.IsNullOrWhiteSpace(text)) return;
+                // Live Start() hosts only: preempted by newer Start/Stop — do not TTS.
+                // Balloons SpeakComicFromBitmap leaves _speakGeneration at 0 (skip).
+                if (_speakGeneration != 0 && !IsLiveSpeakCurrent)
+                    throw new OperationCanceledException();
+                token.ThrowIfCancellationRequested();
 
                 // Defense in depth: multi-unit cleaned strings get typed pauses.
                 var pieces = SpeechCleaner.SplitSpeakPieces(text);
@@ -10694,8 +10807,10 @@ namespace SpeakRect
 
         private async Task SpeakOneUnitAsync(string text, CancellationToken token)
         {
-            AppSettings.Current.NormalizeVoiceSettings();
-            if (AppSettings.Current.IsSapiTtsEngine)
+            // Prefer frozen speak-run voice knobs; normalize live only when no snap.
+            if (SpeakRunSettings.Active == null)
+                AppSettings.Current.NormalizeVoiceSettings();
+            if (SpeakRunSettings.GetIsSapiTtsEngine())
             {
                 await SpeakWithSapiAsync(text, token).ConfigureAwait(false);
                 return;
@@ -10812,7 +10927,7 @@ namespace SpeakRect
                         text,
                         breakMs,
                         TtsForcedLanguage,
-                        AppSettings.Current.VoicePitch);
+                        SpeakRunSettings.GetVoicePitch());
                     synth.SpeakSsmlAsync(ssml);
 
                     await tcs.Task.ConfigureAwait(false);
@@ -10824,30 +10939,33 @@ namespace SpeakRect
             }
         }
 
-        /// <summary>Apply rate/volume/voice to a SAPI synthesizer from AppSettings.</summary>
+        /// <summary>Apply rate/volume/voice to a SAPI synthesizer (speak snap or live settings).</summary>
         public static void ApplySapiVoiceSettings(SapiSpeech.SpeechSynthesizer synth)
         {
             if (synth == null) return;
 
-            var s = AppSettings.Current;
-            s.NormalizeVoiceSettings();
+            if (SpeakRunSettings.Active == null)
+                AppSettings.Current.NormalizeVoiceSettings();
+            string sapiName = SpeakRunSettings.GetSapiVoiceName();
+            double rate = SpeakRunSettings.GetVoiceSpeakingRate();
+            double volume = SpeakRunSettings.GetVoiceVolume();
 
             try
             {
                 // Explicit name → that voice (any culture — user picked it).
                 // Blank → leave engine default (do not substitute first English).
-                if (!string.IsNullOrWhiteSpace(s.SapiVoiceName))
+                if (!string.IsNullOrWhiteSpace(sapiName))
                 {
                     var named = synth.GetInstalledVoices()
                         .FirstOrDefault(v => v.Enabled &&
                             string.Equals(
-                                v.VoiceInfo.Name, s.SapiVoiceName,
+                                v.VoiceInfo.Name, sapiName,
                                 StringComparison.OrdinalIgnoreCase));
                     if (named != null)
                         synth.SelectVoice(named.VoiceInfo.Name);
                     else
                         Debug.WriteLine(
-                            $"[SapiTTS] voice missing: {s.SapiVoiceName}");
+                            $"[SapiTTS] voice missing: {sapiName}");
                 }
             }
             catch (Exception ex)
@@ -10857,8 +10975,8 @@ namespace SpeakRect
 
             try
             {
-                synth.Rate = MapSpeakingRateToSapi(s.VoiceSpeakingRate);
-                synth.Volume = Math.Clamp((int)Math.Round(s.VoiceVolume * 100.0), 0, 100);
+                synth.Rate = MapSpeakingRateToSapi(rate);
+                synth.Volume = Math.Clamp((int)Math.Round(volume * 100.0), 0, 100);
             }
             catch (Exception ex)
             {
@@ -10993,19 +11111,26 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Apply <see cref="AppSettings"/> voice Id + SpeechSynthesizerOptions
-        /// (rate, pitch, volume, silence) to a synthesizer instance.
+        /// Apply voice Id + SpeechSynthesizerOptions (rate, pitch, volume, silence).
+        /// Uses <see cref="SpeakRunSettings"/> when a speak run is active so mid-run
+        /// Settings changes do not alter TTS; otherwise live AppSettings (Voice preview).
         /// </summary>
         public static void ApplyVoiceSettings(WinSpeech.SpeechSynthesizer synth)
         {
             if (synth == null) return;
 
-            var s = AppSettings.Current;
-            s.NormalizeVoiceSettings();
+            if (SpeakRunSettings.Active == null)
+                AppSettings.Current.NormalizeVoiceSettings();
+            string voiceId = SpeakRunSettings.GetVoiceId();
+            double rate = SpeakRunSettings.GetVoiceSpeakingRate();
+            double pitch = SpeakRunSettings.GetVoicePitch();
+            double volume = SpeakRunSettings.GetVoiceVolume();
+            string appended = SpeakRunSettings.GetVoiceAppendedSilence();
+            string punct = SpeakRunSettings.GetVoicePunctuationSilence();
 
             try
             {
-                synth.Voice = ResolveWinRtVoice(s.VoiceId);
+                synth.Voice = ResolveWinRtVoice(voiceId);
             }
             catch (Exception ex)
             {
@@ -11020,17 +11145,17 @@ namespace SpeakRect
             try
             {
                 var opts = synth.Options;
-                opts.SpeakingRate = s.VoiceSpeakingRate;
-                opts.AudioPitch = s.VoicePitch;
-                opts.AudioVolume = s.VoiceVolume;
+                opts.SpeakingRate = rate;
+                opts.AudioPitch = pitch;
+                opts.AudioVolume = volume;
 
                 opts.AppendedSilence =
-                    s.VoiceAppendedSilence.Equals("Min", StringComparison.OrdinalIgnoreCase)
+                    appended.Equals("Min", StringComparison.OrdinalIgnoreCase)
                         ? WinSpeech.SpeechAppendedSilence.Min
                         : WinSpeech.SpeechAppendedSilence.Default;
 
                 opts.PunctuationSilence =
-                    s.VoicePunctuationSilence.Equals("Min", StringComparison.OrdinalIgnoreCase)
+                    punct.Equals("Min", StringComparison.OrdinalIgnoreCase)
                         ? WinSpeech.SpeechPunctuationSilence.Min
                         : WinSpeech.SpeechPunctuationSilence.Default;
             }
@@ -11298,7 +11423,7 @@ namespace SpeakRect
                 }))
                 {
                     string ssml = BuildSapiSpeakSsml(
-                        text, breakMs: 0, TtsForcedLanguage, AppSettings.Current.VoicePitch);
+                        text, breakMs: 0, TtsForcedLanguage, SpeakRunSettings.GetVoicePitch());
                     synth.SpeakSsmlAsync(ssml);
                     await tcs.Task.ConfigureAwait(false);
                 }

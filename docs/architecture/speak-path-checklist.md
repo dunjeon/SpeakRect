@@ -2,7 +2,7 @@
 
 Method-level map of capture → recognize → speak. Update this file when you change the call chain.
 
-**Product:** SpeakRect 1.4.23+ · See also [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
+**Product:** SpeakRect 1.4.33+ · See also [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 **Legend:** ✅ intended · ⚠️ edge · 📌 regression anchor
 
@@ -50,11 +50,14 @@ StartSpeakKeepingOverlay(next)
 
 ## 3. Shared preamble (`CaptureAndRecognizeAsync`)
 
-1. `LocalLlmHost` ready wait (announce if slow; attempt may continue)
-2. `PrepareForCapture` → delay → snap (`CreateRectBitmap` / ellipse / lasso)
-3. `RestoreAfterCapture` (always)
-4. `DevCaptureCache.PublishLastCapture` — **full-res** for Balloons 📌
-5. Branch Default vs Comic Book
+1. `SpeakRunSettings.Push(CaptureFromApp())` — freeze MODE / pad / pauses / prompts / voice for the run (AsyncLocal; mid-run Settings toggles do not affect this speak)
+2. `LocalLlmHost` ready wait (announce if slow; attempt may continue)
+3. `PrepareForCapture` → delay → snap (`CreateRectBitmap` / ellipse / lasso)
+4. `RestoreAfterCapture` (always)
+5. `DevCaptureCache.PublishLastCapture` — **full-res** for Balloons 📌
+6. Branch Default vs Comic Book
+
+Overlay form bounds = **virtual desktop** (all monitors). Geometry is screen coords; paint converts to form client. Tool chrome pins to **primary** left strip.
 
 ---
 
@@ -87,11 +90,12 @@ shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads t
 Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**
 - **Canvas is always TONE** (detect fog is WinOCR-only; never POI base).  
 - Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final). Full-page green guide always published for analytics/preview (`poi_guide`).  
-- **`ComicPoiAutoStack` on (stock):** islands → orange stack (`ComposeVerticalStripStack`) → **one VL call is the primary speak path** (`comic-poi-stack`). Preview stays full page for editing.  
+- **`ComicPoiAutoStack` on (stock):** each island → its own orange canvas (`BuildVerticalStack` one box) → **one VL call per island** (`comic-poi-stack`). Preview stays full-page map for editing (not VL input).  
 - **Stack off/fail + multi-island:** honor Balloons §9 — Sequential **on** → per-island OCR+TTS; Sequential **off** → crop-stack best-of on tone.  
 - **1 island + stack off/fail:** full-page guide VL.  
 - Stack compose: orange + beef/bottom-pad; hard long-edge **2560** (even if Image downscale is off). Image-tab downscale default **off**.  
-- Balloons Speak publishes Analytics (`_runImages`) without clearing refine session.
+- Balloons Speak publishes Analytics (`_runImages`) without clearing refine session.  
+- Analytics `regions` = WinOCR detect paint; `poi_guide` = full-page map; `llm_island_*` = actual VL send.
 
 **Regression anchors (ModeSmoke):**
 

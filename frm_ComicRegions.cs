@@ -292,9 +292,11 @@ namespace SpeakRect
             AddFull(_chkPoiFogOutside, 28);
             AddFull(MakeHint(
                 "Sub-option of POI: heavy gray fog over everything outside the green boxes " +
-                "(clear holes for speech islands). Hides art/UI so OCR and speech stay on " +
-                "dialogue. Preview matches what the Local-LLM sees."),
-                48);
+                "(clear holes for speech islands). Hides art/UI on the full-page map. " +
+                "With Island canvases on (stock), Local-LLM sees orange per-island canvases — " +
+                "not this full-page fog map. Full-page map = VL only when Island canvases are off " +
+                "and there is one island."),
+                64);
 
             _chkPoiAutoStack = new CheckBox
             {
@@ -1306,7 +1308,7 @@ namespace SpeakRect
             _trkClusterY.Enabled = ready;
             _trkInflateX.Enabled = ready;
             _trkInflateY.Enabled = ready;
-            // Crop pad / dense pad still size islands for POI (bullseyes + outside fog).
+            // Crop pad / dense pad still size islands for POI (green boxes + outside fog).
             _trkPadding.Enabled = ready;
             _trkDenseCount.Enabled = ready;
             _chkMergeOverlap.Enabled = ready;
@@ -1359,9 +1361,23 @@ namespace SpeakRect
             }
             else if (_refine.IsShowingPoiGuidePreview)
             {
-                poiNote = _refine.RegionCount >= 2
-                    ? "  ·  POI map on tone (speak = sequential)"
-                    : "  ·  POI guide on tone (= VL input)";
+                if (_refine.RegionCount >= 2)
+                {
+                    if (_chkPoiAutoStack.Checked)
+                        poiNote = "  ·  POI map on tone (Speak = orange island VL ×N)";
+                    else if (_chkSequential.Checked)
+                        poiNote = "  ·  POI map on tone (Speak multi = sequential)";
+                    else
+                        poiNote = "  ·  POI map on tone (Speak multi = crop-stack)";
+                }
+                else if (_chkPoiAutoStack.Checked)
+                {
+                    poiNote = "  ·  POI map on tone (Speak = orange island VL)";
+                }
+                else
+                {
+                    poiNote = "  ·  POI guide on tone (= VL input)";
+                }
             }
             else if (_chkPoiFogOutside.Checked)
             {
@@ -1484,7 +1500,7 @@ namespace SpeakRect
                 if (poi && _chkPoiAutoStack.Checked)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — full page for editing  ·  Speak = orange island stack VL  ·  drag / resize / add";
+                        "PREVIEW — full page for editing  ·  Speak = orange island VL ×N  ·  not VL input";
                 }
                 else if (poi && _refine.RegionCount >= 2)
                 {
@@ -1495,12 +1511,12 @@ namespace SpeakRect
                 else if (poi && outside)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island)";
+                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island, stack off)";
                 }
                 else if (poi)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + green boxes = VL input (1 island)  ·  drag / resize / add";
+                        "PREVIEW — TONE + green boxes = VL input (1 island, stack off)  ·  drag / resize / add";
                 }
                 else
                 {
@@ -1600,8 +1616,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Rebuild prep + fog base for the refine surface; keep existing boxes.
-        /// So Fog strength / on-off is visible without wiping a locked override.
+        /// Rebuild prep base for the refine surface; keep existing boxes.
+        /// Non-POI: detect fog so fog slider is visible. POI: tone only (VL base) —
+        /// detect fog must not replace the POI map canvas.
         /// </summary>
         private async Task RefreshDetectViewBaseAsync()
         {
@@ -1618,30 +1635,46 @@ namespace SpeakRect
             try
             {
                 work = new Bitmap(_sourceImage);
+                bool poiOn = AppSettings.Current.ComicPoiMarkers;
                 bool fogOn = AppSettings.Current.ComicDetectFog;
                 bool dynFog = AppSettings.Current.ComicDynamicFog;
                 float fogAmt = AppSettings.Current.ComicDetectFogAmount;
-                Bitmap detectView = await Task.Run(
-                    () => OcrProcessor.BuildComicDetectViewBitmap(work),
+                // POI VL / map base is always tone. Detect fog is WinOCR-only.
+                Bitmap baseView = await Task.Run(
+                    () => poiOn
+                        ? OcrProcessor.BuildComicToneViewBitmap(work)
+                        : OcrProcessor.BuildComicDetectViewBitmap(work),
                     CancellationToken.None).ConfigureAwait(true);
 
                 if (IsDisposed || gen != _liveGeneration)
                 {
-                    try { detectView.Dispose(); } catch { /* ignore */ }
+                    try { baseView.Dispose(); } catch { /* ignore */ }
                     return;
                 }
 
-                _refine.UpdateBaseKeepRegions(detectView);
+                _refine.UpdateBaseKeepRegions(baseView);
                 // Locked-box fog view: fixed slider amount only (dyn needs full re-detect).
-                string fogHint = !fogOn
-                    ? "fog=off"
-                    : dynFog
-                        ? "dyn=on (re-detect for auto fog)"
-                        : $"fog={fogAmt:0.00}";
+                string fogHint;
+                if (poiOn)
+                {
+                    fogHint = "POI tone base (detect fog is WinOCR-only)";
+                }
+                else if (!fogOn)
+                {
+                    fogHint = "fog=off";
+                }
+                else if (dynFog)
+                {
+                    fogHint = "dyn=on (re-detect for auto fog)";
+                }
+                else
+                {
+                    fogHint = $"fog={fogAmt:0.00}";
+                }
                 _lblPreviewStatus.Text =
                     $"Source: {_sourceLabel}  ·  {_refine.RegionCount} region" +
                     (_refine.RegionCount == 1 ? "" : "s") +
-                    $"  ·  detect view ({fogHint})  ·  boxes locked";
+                    $"  ·  {(poiOn ? "tone" : "detect")} view ({fogHint})  ·  boxes locked";
                 _lblPreviewStatus.ForeColor = UiTheme.Warn;
                 if (HasLockedRefine)
                 {

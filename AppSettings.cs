@@ -319,9 +319,11 @@ namespace SpeakRect
         public bool ComicSequentialRegions { get; set; } = false;
 
         /// <summary>
-        /// Comic Book alternate: tone + green region boxes (± outside fog).
-        /// 1 island → full-page VL guide; 2+ → sequential per-island OCR.
-        /// Forces Comic Book mode on. Preview base is tone when this is on.
+        /// Comic Book alternate: tone + green region boxes (± outside fog map).
+        /// Stock: <see cref="ComicPoiAutoStack"/> on → each island orange canvas VL
+        /// one at a time. Stack off/fail multi → §9 sequential or crop-stack.
+        /// 1 island + stack off → full-page guide VL. Forces Comic Book on.
+        /// Preview is full-page edit map (not always VL input).
         /// Product Default mode / fresh ini: off. Comic Book starting defaults
         /// (first MODE enter, Balloons reset while in Comic Book): on.
         /// </summary>
@@ -2601,8 +2603,9 @@ namespace SpeakRect
                 sb.AppendLine("; SequentialRegions=false (default, Balloons §9): vertical crop-stack + global plan.");
                 sb.AppendLine("; SequentialRegions=true: OCR+speak each balloon alone (isolates from global dedupe).");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
-                sb.AppendLine(";   1 island: full-page VL with boxes (± outside fog). 2+: sequential per-island OCR.");
-                sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone canvas.");
+                sb.AppendLine(";   AutoStack on (stock): per-island orange canvas VL ×N (preview = full-page map only).");
+                sb.AppendLine(";   AutoStack off + multi: §9 Sequential or crop-stack. 1 island + stack off: full-page VL.");
+                sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone map canvas.");
                 sb.AppendLine("; PoiAutoStack=true: each island → own orange canvas → Local-LLM one at a time");
                 sb.AppendLine(";   (preview stays on full page for editing). Not one multi-strip image.");
                 sb.AppendLine(";   Margin=outer pad on each canvas. Gap used by multi-strip crop-stack only.");

@@ -1,6 +1,6 @@
 # SpeakRect architecture (as-built)
 
-**Product:** SpeakRect 1.4.23 · **License:** GPLv2 · **Platform:** Windows x64 (WinForms + WPF)
+**Product:** SpeakRect 1.4.33 · **License:** GPLv2 · **Platform:** Windows x64 (WinForms + WPF)
 
 For the full speak/capture call graph, see [`architecture/speak-path-checklist.md`](architecture/speak-path-checklist.md).  
 For build/test steps, see [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`dev/smoke-runbook.md`](dev/smoke-runbook.md).
@@ -13,7 +13,7 @@ Users draw or save screen regions; SpeakRect captures those pixels, recognizes t
 |------|------|
 | **Default** (Comic Book off) | Image prep → one full-frame Local-LLM call → speech clean → TTS |
 | **Comic Book on** | Image prep → **OCR** balloon detect (optional gray fog on detect only) → crop / consensus / best-of → speech clean → TTS |
-| **Comic Book + POI** (Balloons → POI guide) | Same detect → red bullseye markers on gray prep (+ optional outside fog) → one full-frame Local-LLM call (no crops) → TTS |
+| **Comic Book + POI** (Balloons → POI guide) | Same detect → green region boxes on tone map (± outside fog) → stock AutoStack: per-island orange canvas VL ×N → TTS; stack off/fail multi → §9 sequential or crop-stack; 1 island + stack off → full-page guide VL |
 
 No cloud recognition or telemetry. Local-LLM HTTP is **loopback only** (`127.0.0.1`).
 

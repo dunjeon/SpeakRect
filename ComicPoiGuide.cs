@@ -334,9 +334,9 @@ namespace SpeakRect
             out double beefExtra,
             out double bottomPadShare)
         {
-            var s = AppSettings.Current;
-            beefExtra = s.ComicPoiStackBeefExtra;
-            bottomPadShare = s.ComicPoiStackBottomPadShare;
+            // Prefer frozen speak-run knobs when OCR is mid-pipeline.
+            beefExtra = SpeakRunSettings.GetComicPoiStackBeefExtra();
+            bottomPadShare = SpeakRunSettings.GetComicPoiStackBottomPadShare();
         }
 
         /// <summary>Default gap (px) between multi-strip island bands on the orange canvas.</summary>

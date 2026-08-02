@@ -9,9 +9,9 @@ namespace SpeakRect
 {
     /// <summary>
     /// Balloons preview surface: zoomed base image + interactive reading islands.
-    /// Base is the detect view (gray fog when on — what OCR detect sees).
-    /// Rects are stored in <b>pipeline image coordinates</b> (same size as tone/fog).
-    /// List order is crop / reading order (1-based numbers drawn on boxes).
+    /// Non-POI base is the detect view (gray fog when on). POI base is tone
+    /// (Local-LLM / map canvas). Rects are <b>pipeline image coordinates</b>
+    /// (display-final grow + crop pad). List order is crop / reading order.
     /// </summary>
     public sealed class RegionRefineSurface : Control
     {
@@ -151,7 +151,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Seed from an OCR detect preview. Takes ownership of <paramref name="baseImage"/>
-        /// (caller must not dispose it). Regions are copied as core islands (pre crop-pad).
+        /// (caller must not dispose it). Regions are <b>display-final</b> (grow + crop pad
+        /// already applied by <c>PreviewComicRegionsAsync</c>). Speak override uses pad=0.
         /// Clears dirty (fresh auto seed).
         /// </summary>
         public void SetSeed(Bitmap? baseImage, IEnumerable<Rectangle>? regions)
@@ -291,8 +292,8 @@ namespace SpeakRect
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            // Full-page POI guide on tone: same DrawRegionGuides as live/analytics.
-            // Multi-island: still this map (speak is sequential per island — no stack cosplay).
+            // Full-page POI edit map on tone (same DrawRegionGuides as analytics poi_guide).
+            // Speak VL under stock AutoStack is orange per-island canvases — not this map.
             if (TryGetPoiGuidePreview(out var guideBmp) && guideBmp != null)
             {
                 var guideDisp = GetDisplayRectFor(guideBmp.Width, guideBmp.Height);
@@ -332,8 +333,7 @@ namespace SpeakRect
                     using var badgeFont = new Font("Segoe UI", 8f, FontStyle.Bold);
                     using var bg = new SolidBrush(Color.FromArgb(200, 20, 20, 20));
                     using var fg = new SolidBrush(UiTheme.Warn);
-                    string banner =
-                        $"POI map · {_regions.Count} islands · speak = sequential per island";
+                    string banner = BuildPoiMultiSpeakBanner();
                     var sz = g.MeasureString(banner, badgeFont);
                     g.FillRectangle(bg, 6, 6, sz.Width + 10, sz.Height + 4);
                     g.DrawString(banner, badgeFont, fg, 11, 8);
@@ -392,6 +392,19 @@ namespace SpeakRect
 
             using (var border = new Pen(UiTheme.Border, 1f))
                 g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        }
+
+        /// <summary>
+        /// Honest multi-island speak path for the overlay banner (reads live settings).
+        /// </summary>
+        private static string BuildPoiMultiSpeakBanner()
+        {
+            var s = AppSettings.Current;
+            if (s.ComicPoiAutoStack)
+                return "POI map · multi · Speak = orange island VL ×N (not this page)";
+            if (s.ComicSequentialRegions)
+                return "POI map · multi · Speak = sequential per island";
+            return "POI map · multi · Speak = crop-stack best-of";
         }
 
         /// <summary>
