@@ -153,8 +153,10 @@ public class ComicPoiGuideTests
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
-        Assert.Equal(ComicPoiGuide.DefaultAutoStackGapPx,
-            AppSettings.Current.ComicPoiAutoStackGapPx);
+        Assert.Equal(10, AppSettings.Current.ComicPoiAutoStackGapPx);
+        Assert.Equal(12, AppSettings.Current.ComicPoiAutoStackMarginPx);
+        Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBeefExtra);
+        Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBottomPadShare);
     }
 
     [Fact]
@@ -185,21 +187,18 @@ public class ComicPoiGuideTests
     }
 
     [Fact]
-    public void ComputeBeefyStackCanvas_default_beef_centered()
+    public void ComputeBeefyStackCanvas_default_beef_is_tight()
     {
-        // Content 300×120 → canvas ×(1+⅔), content centered.
-        double factor = 1.0 + ComicPoiGuide.DefaultStackBeefExtra;
         ComicPoiGuide.ComputeBeefyStackCanvas(
             300, 120,
             out int cw, out int ch,
             out float ox, out float oy,
             ComicPoiGuide.DefaultStackBeefExtra,
-            bottomPadShare: 0.5);
-        Assert.Equal((int)Math.Ceiling(300 * factor), cw);
-        Assert.Equal((int)Math.Ceiling(120 * factor), ch);
-        Assert.True(cw > 300 && ch > 120);
-        Assert.InRange(ox, (cw - 300) / 2f - 1f, (cw - 300) / 2f + 1f);
-        Assert.InRange(oy, (ch - 120) / 2f - 1f, (ch - 120) / 2f + 1f);
+            ComicPoiGuide.DefaultStackBottomPadShare);
+        Assert.Equal(300, cw);
+        Assert.Equal(120, ch);
+        Assert.Equal(0f, ox);
+        Assert.Equal(0f, oy);
     }
 
     [Fact]
@@ -218,18 +217,16 @@ public class ComicPoiGuideTests
     }
 
     [Fact]
-    public void Default_stack_beef_is_two_thirds()
+    public void Default_stack_canvas_knobs()
     {
-        Assert.Equal(2.0 / 3.0, ComicPoiGuide.DefaultStackBeefExtra, 3);
-        ComicPoiGuide.ComputeBeefyStackCanvas(
-            300, 120, out int w, out int h, out _, out _,
-            ComicPoiGuide.DefaultStackBeefExtra, 0.5);
-        Assert.Equal((int)Math.Ceiling(300 * (1.0 + 2.0 / 3.0)), w);
-        Assert.Equal((int)Math.Ceiling(120 * (1.0 + 2.0 / 3.0)), h);
+        Assert.Equal(0.0, ComicPoiGuide.DefaultStackBeefExtra);
+        Assert.Equal(0.0, ComicPoiGuide.DefaultStackBottomPadShare);
+        Assert.Equal(10, ComicPoiGuide.DefaultAutoStackGapPx);
+        Assert.Equal(12, ComicPoiGuide.LlmSendStackMarginPx);
     }
 
     [Fact]
-    public void BuildVerticalStack_canvas_has_beef_around_content()
+    public void BuildVerticalStack_canvas_includes_margin_around_content()
     {
         using var src = new Bitmap(200, 100);
         using (var g = Graphics.FromImage(src))
@@ -243,9 +240,47 @@ public class ComicPoiGuideTests
         using var stack = ComicPoiGuide.BuildVerticalStack(
             src, boxes, stripGapPx: 8, marginPx: 12);
         Assert.NotNull(stack);
-        Assert.True(stack!.Width > 100);
-        Assert.True(stack.Height > 50);
-        Assert.True(stack.Width >= (int)(100 * 1.25));
-        Assert.True(stack.Height >= (int)(50 * 1.25));
+        Assert.True(stack!.Width >= 100 + 24);
+        Assert.True(stack.Height >= 50);
+    }
+
+    [Fact]
+    public void Wide_ribbon_gate_from_archive_geometry()
+    {
+        var cases = new (int W, int H, int FW, int FH, bool Expand)[]
+        {
+            (900, 162, 900, 598, true),
+            (900, 296, 900, 699, true),
+            (892, 242, 900, 600, true),
+            (695, 201, 900, 479, true),
+            (587, 209, 900, 785, true),
+            (448, 116, 900, 710, true),
+            (191, 88, 900, 273, false),
+            (186, 106, 900, 273, false),
+            (184, 127, 900, 867, false),
+            (128, 101, 900, 381, false),
+            (255, 174, 900, 540, false),
+            (440, 240, 900, 765, false),
+        };
+        foreach (var c in cases)
+        {
+            bool got = ComicPoiGuide.IsWideThinIslandStrip(
+                new Rectangle(0, 0, c.W, c.H), c.FW, c.FH, boxCountOnCanvas: 1);
+            Assert.True(got == c.Expand,
+                $"tight {c.W}x{c.H} on {c.FW}x{c.FH}: expand want={c.Expand} got={got}");
+        }
+        Assert.False(ComicPoiGuide.IsWideThinIslandStrip(
+            new Rectangle(0, 0, 900, 160), 900, 600, boxCountOnCanvas: 2));
+    }
+
+    [Fact]
+    public void Wide_ribbon_expands_to_min_height()
+    {
+        var tight = new Rectangle(0, 0, 900, 162);
+        Assert.True(ComicPoiGuide.IsWideThinIslandStrip(tight, 900, 598, 1));
+        var grown = ComicPoiGuide.ExpandIslandCropToMinSize(
+            tight, 900, 598, 0, ComicPoiGuide.IslandStripMinHeight);
+        Assert.Equal(900, grown.Width);
+        Assert.Equal(480, grown.Height);
     }
 }

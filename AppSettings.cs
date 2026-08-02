@@ -357,7 +357,7 @@ namespace SpeakRect
             ComicPoiGuide.LlmSendStackMarginPx;
 
         /// <summary>
-        /// Extra canvas size vs stacked content (0.33 = ⅓ larger, 0.67 = ⅔).
+        /// Extra canvas size vs stacked content (0 = stock tight; 0.33 = ⅓ larger).
         /// Pads only — lettering not scaled. A/B for Local-LLM vision headroom.
         /// </summary>
         public double ComicPoiStackBeefExtra { get; set; } =
@@ -2606,9 +2606,9 @@ namespace SpeakRect
                 sb.AppendLine("; PoiAutoStack=true: each island → own orange canvas → Local-LLM one at a time");
                 sb.AppendLine(";   (preview stays on full page for editing). Not one multi-strip image.");
                 sb.AppendLine(";   Margin=outer pad on each canvas. Gap used by multi-strip crop-stack only.");
-                sb.AppendLine("; StackBeefExtra=0.667 (⅔ larger canvas, stock). Pad only — both POI + crop stacks.");
-                sb.AppendLine("; StackBottomPadShare=0.5 center vertical pad; 0.85 = bottom-heavy (less top).");
-                sb.AppendLine("; PoiAutoStackGapPx=8 (multi-strip crop-stack). PoiAutoStackMarginPx=12 (per canvas).");
+                sb.AppendLine("; StackBeefExtra=0 (stock: no extra canvas). Pad only — both POI + crop stacks.");
+                sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
+                sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
                 sb.AppendLine("; DynamicFog=true: auto fog — start low (~0.10), climb until island area shrinks;");
                 sb.AppendLine(";   then crop re-OCR each island; empty/junk → drop (fog ghost islands).");
                 sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");

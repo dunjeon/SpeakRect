@@ -50,20 +50,18 @@ namespace SpeakRect
             Color.FromArgb(255, 240, 128, 24);
 
         /// <summary>
-        /// Default extra canvas vs content (⅔ larger). Matched live VL A/B
-        /// (SpeakRect.ini ComicPoiStackBeefExtra=0.66). Balloons can still retune.
+        /// Default extra canvas vs content (0 = no beef). Balloons can still retune.
         /// </summary>
-        public const double DefaultStackBeefExtra = 2.0 / 3.0;
+        public const double DefaultStackBeefExtra = 0.0;
 
         /// <summary>
-        /// Default share of vertical pad on the bottom (0.5 = centered).
-        /// Higher (0.8–0.9) = bottom-heavy beef.
+        /// Default share of vertical pad on the bottom (0 with beef 0 = tight canvas).
+        /// Higher (0.8–0.9) = bottom-heavy when beef &gt; 0.
         /// </summary>
-        public const double DefaultStackBottomPadShare = 0.5;
+        public const double DefaultStackBottomPadShare = 0.0;
 
         /// <summary>
-        /// Local-LLM send experiment: outer margin (px) on top/left/right/bottom of
-        /// the forced island stack before the 640 long-edge cap.
+        /// Outer margin (px) on top/left/right/bottom of each Local-LLM island canvas.
         /// </summary>
         public const int LlmSendStackMarginPx = 12;
 
@@ -75,6 +73,97 @@ namespace SpeakRect
         /// send downscale). Always applied so huge multi-strip stacks stay VL-safe.
         /// </summary>
         public const int StackComposeMaxLongEdge = 2560;
+
+        /// <summary>
+        /// Min tone-crop height for a panel-spanning wide ribbon (not compact balloons).
+        /// Extra real panel pixels beyond the tight box; orange beef is separate.
+        /// </summary>
+        public const int IslandStripMinHeight = 480;
+
+        /// <summary>Landscape aspect (width/height) floor for wide-ribbon expand.</summary>
+        public const double IslandStripWideThinAspect = 2.0;
+
+        /// <summary>Must span this fraction of panel width (or <see cref="IslandStripMinWidthPx"/>).</summary>
+        public const double IslandStripMinWidthFrac = 0.45;
+
+        /// <summary>Absolute width floor (px) for wide-ribbon expand.</summary>
+        public const int IslandStripMinWidthPx = 400;
+
+        /// <summary>Height must stay under this fraction of panel height (thin band).</summary>
+        public const double IslandStripMaxHeightFrac = 0.55;
+
+        /// <summary>
+        /// Panel-spanning short ribbon only — not compact side balloons (e.g. 191×88).
+        /// </summary>
+        public static bool IsWideThinIslandStrip(
+            Rectangle tight,
+            int frameW,
+            int frameH,
+            int boxCountOnCanvas,
+            int minHeight = IslandStripMinHeight)
+        {
+            if (boxCountOnCanvas != 1)
+                return false;
+            if (frameW < 8 || frameH < 8)
+                return false;
+            if (tight.Width < 8 || tight.Height < 8)
+                return false;
+            if (tight.Height >= minHeight)
+                return false;
+
+            double aspect = tight.Width / (double)tight.Height;
+            double wFrac = tight.Width / (double)frameW;
+            double hFrac = tight.Height / (double)frameH;
+
+            if (hFrac > IslandStripMaxHeightFrac)
+                return false;
+            if (aspect < IslandStripWideThinAspect)
+                return false;
+
+            bool spansWide =
+                wFrac >= IslandStripMinWidthFrac ||
+                tight.Width >= IslandStripMinWidthPx;
+            return spansWide;
+        }
+
+        /// <summary>
+        /// Grow <paramref name="hole"/> to min width/height when the frame allows.
+        /// Centered on the island, then clamped into the frame.
+        /// </summary>
+        public static Rectangle ExpandIslandCropToMinSize(
+            Rectangle hole,
+            int frameW,
+            int frameH,
+            int minWidth = 0,
+            int minHeight = IslandStripMinHeight)
+        {
+            if (frameW < 1 || frameH < 1)
+                return hole;
+
+            var frame = new Rectangle(0, 0, frameW, frameH);
+            hole = Rectangle.Intersect(hole, frame);
+            if (hole.Width < 1 || hole.Height < 1)
+                return hole;
+
+            minWidth = Math.Max(0, minWidth);
+            minHeight = Math.Max(0, minHeight);
+            int needW = Math.Max(hole.Width, Math.Min(minWidth, frameW));
+            int needH = Math.Max(hole.Height, Math.Min(minHeight, frameH));
+            if (needW == hole.Width && needH == hole.Height)
+                return hole;
+
+            int cx = hole.X + hole.Width / 2;
+            int cy = hole.Y + hole.Height / 2;
+            int x = cx - needW / 2;
+            int y = cy - needH / 2;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x + needW > frameW) x = Math.Max(0, frameW - needW);
+            if (y + needH > frameH) y = Math.Max(0, frameH - needH);
+            needW = Math.Min(needW, frameW - x);
+            needH = Math.Min(needH, frameH - y);
+            return new Rectangle(x, y, Math.Max(1, needW), Math.Max(1, needH));
+        }
 
         /// <summary>
         /// Canvas for a composed stack: content stays native; canvas is
@@ -120,8 +209,8 @@ namespace SpeakRect
             bottomPadShare = s.ComicPoiStackBottomPadShare;
         }
 
-        /// <summary>Default gap threshold: stack when consecutive islands are farther than this.</summary>
-        public const int DefaultAutoStackGapPx = 8;
+        /// <summary>Default gap (px) between multi-strip island bands on the orange canvas.</summary>
+        public const int DefaultAutoStackGapPx = 10;
 
         /// <summary>
         /// Radius of the outer bullseye ring, scaled to island size.
@@ -343,17 +432,39 @@ namespace SpeakRect
                 var imgBounds = new Rectangle(0, 0, source.Width, source.Height);
                 for (int i = 0; i < boxes.Count; i++)
                 {
-                    var hole = Rectangle.Intersect(boxes[i], imgBounds);
-                    if (hole.Width < 4 || hole.Height < 4)
+                    var tight = Rectangle.Intersect(boxes[i], imgBounds);
+                    if (tight.Width < 4 || tight.Height < 4)
                     {
                         detail?.AppendLine($"  poi-stack strip[{i + 1}]: skip empty");
                         continue;
                     }
 
+                    // Panel-spanning short ribbons only (not compact balloons).
+                    Rectangle hole = tight;
+                    if (IsWideThinIslandStrip(
+                            tight, source.Width, source.Height, boxes.Count))
+                    {
+                        hole = ExpandIslandCropToMinSize(
+                            tight, source.Width, source.Height,
+                            minWidth: 0,
+                            minHeight: IslandStripMinHeight);
+                    }
+
                     var strip = source.Clone(hole, PixelFormat.Format32bppArgb);
-                    detail?.AppendLine(
-                        $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
-                        $"@({hole.X},{hole.Y})");
+                    if (hole != tight)
+                    {
+                        detail?.AppendLine(
+                            $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
+                            $"@({hole.X},{hole.Y}) " +
+                            $"(wide-ribbon tight {tight.Width}x{tight.Height} " +
+                            $"→ minH={IslandStripMinHeight})");
+                    }
+                    else
+                    {
+                        detail?.AppendLine(
+                            $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
+                            $"@({hole.X},{hole.Y})");
+                    }
                     strips.Add(strip);
                 }
 
@@ -376,7 +487,7 @@ namespace SpeakRect
 
         /// <summary>
         /// Shared canvas compose for POI island stack and Comic Book crop-stack.
-        /// Orange fill, Balloons beef (+⅔ stock) / bottom-pad share, optional green
+        /// Orange fill, Balloons beef / bottom-pad share (stock beef 0), optional green
         /// strip boxes. Hard long-edge cap 2560 (independent of Image-tab downscale).
         /// Does not dispose <paramref name="strips"/> — caller owns them.
         /// Caller owns the returned bitmap.

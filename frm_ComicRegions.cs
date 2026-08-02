@@ -376,7 +376,7 @@ namespace SpeakRect
                 "(beef knobs + margin), sends to Local-LLM one island at a time. " +
                 "Preview stays full page for edit. Same canvas rules apply to non-POI " +
                 "crop-stack (multi-strip) and to POI multi when this is off and §9 is off. " +
-                "Stock beef +67%, bottom pad 50%. Margin=12px. " +
+                "Stock: beef 0%, bottom pad 0%, between=10px, margin=12px. " +
                 "Compose hard-caps canvas long edge at 2560; Image-tab downscale is separate (off)."),
                 72);
 
