@@ -36,7 +36,7 @@ namespace SpeakRect
         private bool _dirty;
         private bool _showPoiMarkers;
         private bool _showPoiOutsideFog;
-        private int _poiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+
         /// <summary>Same bitmap compose as live/analytics: DrawRegionGuides.</summary>
         private Bitmap? _poiGuideCache;
         private string _poiGuideSig = "";
@@ -108,23 +108,23 @@ namespace SpeakRect
 
         /// <summary>
         /// Kept for Balloons API compat. Preview always edits full-page islands;
-        /// live Speak uses stack VL when AutoStack is on (not shown in this control).
+        /// live Speak uses orange island VL when Island canvases is on (not shown here).
         /// </summary>
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool ShowPoiAutoStack
         {
             get => false;
-            set { /* preview never swaps to stack canvas */ }
+            set { /* preview never swaps to island canvas */ }
         }
 
-        /// <summary>Kept for Balloons API compat (live stack uses settings gap).</summary>
+        /// <summary>Dead API — canvas gap is fixed in <see cref="ComicPoiGuide"/> (10px).</summary>
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int PoiAutoStackGapPx
         {
-            get => _poiAutoStackGapPx;
-            set => _poiAutoStackGapPx = Math.Clamp(value, 0, 256);
+            get => ComicPoiGuide.DefaultAutoStackGapPx;
+            set { /* ignored — fixed compose knobs */ }
         }
 
         /// <summary>True when preview is showing the full-page POI guide (tone compose).</summary>
@@ -401,8 +401,8 @@ namespace SpeakRect
         {
             var s = AppSettings.Current;
             if (s.ComicPoiAutoStack)
-                return "POI map · multi · Speak = orange island VL ×N (not this page)";
-            return "POI map · multi · Speak = per-island on tone";
+                return "Edit map · multi · Speak = orange island VL ×N (not this page)";
+            return "Edit map · multi · Speak = tone crop VL per island (not full-page)";
         }
 
         /// <summary>

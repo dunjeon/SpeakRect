@@ -90,14 +90,14 @@ shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads t
 
 **POI guide** (`AppSettings.ComicPoiMarkers`, Balloons tab): Comic Book alternate.
 Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**
-- **Canvas is always TONE** (detect fog is WinOCR-only; never POI base).  
-- Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final). Full-page green guide always published for analytics/preview (`poi_guide`).  
-- **`ComicPoiAutoStack` on (stock):** each island → its own orange canvas (`BuildVerticalStack` one box) → **one VL call per island** (`comic-poi-stack`). Preview stays full-page map for editing (not VL input). **Not multi-strip stack.**  
-- **Island-canvas off/fail + multi-island:** per-island OCR+TTS on tone.  
+- **Edit map is always TONE** (detect fog is WinOCR-only). Full-page green map is **not** VL when Island canvases are on.  
+- Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final). Full-page guide published as Analytics `poi_guide` (edit map).  
+- **`ComicPoiAutoStack` on (stock):** each island → its own orange canvas → **one VL call per island** (`llm_island_N`). Preview stays full-page map for editing (**not VL input**). **Not multi-strip stack.**  
+- **Island-canvas off/fail + multi-island:** per-island tone crop VL (`comic-poi-per-island`).  
 - **1 island + canvas off/fail:** full-page guide VL.  
-- Canvas compose: orange + beef/bottom-pad; hard long-edge **2560** (even if Image downscale is off). Image-tab downscale default **off**.  
-- Balloons Speak publishes Analytics (`_runImages`) without clearing refine session.  
-- Analytics `regions` = WinOCR detect paint; `poi_guide` = full-page map; `llm_island_*` = actual VL send.
+- Canvas compose fixed: gap 10, margin 12, beef 0, bottom 0; hard long-edge **2560**. Image-tab downscale default **off**.  
+- Balloons Speak always uses Comic Book path (ignores MODE Default) and publishes Analytics without clearing refine session.  
+- Analytics: `poi_guide` = edit map; `llm_island_*` = actual VL; non-POI may show `regions` WinOCR overlay.
 
 **Regression anchors (ModeSmoke):**
 

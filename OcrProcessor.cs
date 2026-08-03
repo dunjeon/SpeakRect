@@ -1259,13 +1259,17 @@ namespace SpeakRect
                     regions, pipeW, pipeH, TextRegionPadding);
                 var displayRects = previewBoxes.Select(r => r.Bounds).ToList();
 
-                // POI: preview canvas = TONE (VL canvas). Non-POI: detect image so fog is visible
+                // POI: preview base = TONE (edit map). VL is orange island / tone crop /
+                // full-page guide depending on Island canvases — not this full page when
+                // multi + canvases on. Non-POI: detect image so fog is visible.
                 bool poiMode = SpeakRunSettings.GetComicPoiMarkers();
+                bool poiCanvas = poiMode && SpeakRunSettings.GetComicPoiAutoStack();
                 detail.AppendLine(
                     $"grow X/Y={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##} " +
                     $"cropPad={TextRegionPadding}px " +
                     $"(display boxes = grow + pad; " +
-                    $"preview base={(poiMode ? "TONE (POI=live VL canvas)" : "detect @ fog")}; " +
+                    $"preview base={(poiMode ? "TONE (POI edit map; not always VL)" : "detect @ fog")}; " +
+                    $"speak={(poiCanvas ? "orange island VL ×N" : poiMode ? "tone crop / full-page guide" : "per-island / crop-stack")}; " +
                     $"fogUsed={fogUsed:0.###})");
 
                 Bitmap detectForOverlay = detectImage;
@@ -1315,14 +1319,14 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Settings → Balloons: run Comic Book detect + crop-stack/full OCR + TTS on
+        /// Settings → Balloons: run Comic Book detect + POI/per-island OCR + TTS on
         /// a still image (same knobs as live Comic Book). Always uses the comic
         /// pipeline — does <b>not</b> mutate <see cref="AppSettings.ComicBook"/> so a
-        /// mid-speak mode toggle is not clobbered on finally.
+        /// mid-speak mode toggle is not clobbered on finally. Independent of MODE.
         /// </summary>
         /// <param name="regionOverride">
         /// When non-null and non-empty: skip WinOCR detect and use these pipeline-space
-        /// core rects (reading order = list order) for crop-stack. Crop pad still applied.
+        /// display-final rects (reading order = list order). Crop pad not re-applied.
         /// </param>
         public static async Task<ComicRegionSpeakResult> SpeakComicFromBitmapAsync(
             Bitmap rawSnap,
@@ -1391,11 +1395,12 @@ namespace SpeakRect
             CancellationToken token,
             IReadOnlyList<Rectangle>? regionOverride = null)
         {
-            // Freeze knobs for this Balloons still-image speak (same as live).
+            // Freeze knobs for this Balloons still-image speak (same as live Comic Book).
             using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
 
             var detail = new StringBuilder();
-            detail.AppendLine("speak-test=ComicBook full path (no screen capture)");
+            detail.AppendLine(
+                "speak-test=ComicBook full path (Balloons Speak; ignores MODE Default)");
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
@@ -2091,10 +2096,10 @@ namespace SpeakRect
                 // -------------------------------------------------------------
                 // ComicBook OFF (Default): letterbox → upscale → ink-gray → tone →
                 //     one full-frame Local-LLM call (no fog / detect / crops).
-                // ComicBook ON + POI: tone + green boxes (± outside fog for map);
-                //     AutoStack on (stock) → per-island orange canvas VL ×N;
-                //     stack off/fail multi → §9 sequential or crop-stack;
-                //     1 island + stack off → full-page guide VL.
+                // ComicBook ON + POI: tone + green boxes (± outside fog for edit map);
+                //     Island canvases on (stock) → per-island orange canvas VL ×N;
+                //     canvases off/fail multi → per-island tone crop VL;
+                //     1 island + canvases off → full-page guide VL.
                 // ComicBook ON:
                 //  0) Same Image prep → tone (Local-LLM) + optional fog (OCR detect only)
                 //  1) Always run balloon OCR detect + region improve (when no override)
@@ -2433,7 +2438,8 @@ namespace SpeakRect
                     // 1-island POI: tag "comic-poi" missed the old check).
                     bool alreadySpoke =
                         spokenParts.Count > 0 &&
-                        (chosenTag.StartsWith("sequential-regions", StringComparison.Ordinal) ||
+                        (chosenTag.StartsWith("per-island", StringComparison.Ordinal) ||
+                         chosenTag.StartsWith("sequential-regions", StringComparison.Ordinal) ||
                          chosenTag.StartsWith("comic-poi", StringComparison.Ordinal));
 
                     if (!alreadySpoke)
@@ -3015,17 +3021,17 @@ namespace SpeakRect
         {
             var spokenParts = new List<string>();
             bool ducked = alreadyDucked;
-            const string tag = "sequential-regions";
+            const string tag = "per-island";
 
             if (pipelineImage == null || regions == null || regions.Count == 0)
             {
-                detail.AppendLine("sequential-regions: no regions — skip");
+                detail.AppendLine("per-island: no regions — skip");
                 return (spokenParts, tag, ducked);
             }
 
             detail.AppendLine(
-                $"strategy=sequential-regions (OCR+TTS per balloon; " +
-                $"regions={regions.Count}; no crop-stack / no global dedupe bag)");
+                $"strategy=per-island (OCR+TTS each balloon on tone; " +
+                $"regions={regions.Count}; no multi-strip stack / no global dedupe bag)");
 
             var sw = Stopwatch.StartNew();
             int regionSpoke = 0;
@@ -3238,7 +3244,7 @@ namespace SpeakRect
             if (spokenParts.Count == 0)
             {
                 detail.AppendLine(
-                    "sequential-regions: all crops empty → full-frame fallback");
+                    "per-island: all crops empty → full-frame fallback");
                 sw.Restart();
                 var fullParts = await RunFullFrameWithWideRescueAsync(
                     pipelineImage, detail, token).ConfigureAwait(false);
@@ -3253,7 +3259,7 @@ namespace SpeakRect
                 if (pieces.Count > 0)
                 {
                     detail.AppendLine(
-                        $"sequential-regions full-frame units={pieces.Count}");
+                        $"per-island full-frame units={pieces.Count}");
                     if (speakNow)
                     {
                         if (!ducked)
@@ -3542,11 +3548,13 @@ namespace SpeakRect
                     "poi_guide",
                     poiAutoStack
                         ? (fogOutside
-                            ? "POI edit map (boxes + outside fog; not VL)"
-                            : "POI edit map (green boxes; not VL)")
-                        : (fogOutside
-                            ? "POI guide + outside fog (tone)"
-                            : "POI green boxes (tone)"),
+                            ? "1 · POI edit map only (not Local-LLM input)"
+                            : "1 · POI edit map only (not Local-LLM input)")
+                        : boxes.Count >= 2
+                            ? "1 · POI edit map (Speak multi = tone crops, not this full page)"
+                            : (fogOutside
+                                ? "1 · POI full-page VL guide + outside fog"
+                                : "1 · POI full-page VL guide"),
                     guideBmp);
                 // isVlInput only if we will NOT replace with stack (stack overwrites send files).
                 SavePoiVlDebug(guideBmp, isVlInput: !poiAutoStack && boxes.Count == 1);
@@ -3602,7 +3610,7 @@ namespace SpeakRect
                                 // One slot per island (not "stack" — multi-strip stack is gone).
                                 CaptureAnalyticsImage(
                                     $"llm_island_{i + 1}",
-                                    $"Local-LLM island {i + 1}/{boxes.Count} " +
+                                    $"2 · Local-LLM VL island {i + 1}/{boxes.Count} " +
                                     $"{islandCanvas.Width}x{islandCanvas.Height} " +
                                     $"(margin={margin}" +
                                     (sendCap > 0 ? $"; then ≤{sendCap}" : "") + ")",
@@ -3762,9 +3770,10 @@ namespace SpeakRect
                             toneImage, regions, detail, pipeTimer, token,
                             speakNow: speakNow, alreadyDucked: alreadyDucked)
                         .ConfigureAwait(false);
-                    string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
-                        ? "comic-poi-seq"
-                        : $"comic-poi-seq/{seqTag}";
+                    string tag = seqTag.StartsWith("per-island", StringComparison.Ordinal) ||
+                                 seqTag.StartsWith("sequential", StringComparison.Ordinal)
+                        ? "comic-poi-per-island"
+                        : $"comic-poi-per-island/{seqTag}";
                     detail.AppendLine(
                         $"winner={tag} parts={seqParts.Count} " +
                         $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
@@ -8454,26 +8463,6 @@ namespace SpeakRect
             CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", ocrTone);
         }
 
-        /// <summary>
-        /// True when Analytics already has per-island / crop VL frames so a generic
-        /// <c>llm_send</c> thumb would only confuse (and overwrite with the last call).
-        /// </summary>
-        private bool HasSpecializedVlAnalyticsFrames()
-        {
-            if (_runImages == null || _runImages.Count == 0)
-                return false;
-            foreach (var img in _runImages)
-            {
-                string k = img.Key ?? "";
-                if (k.StartsWith("llm_island", StringComparison.OrdinalIgnoreCase) ||
-                    k.StartsWith("region_", StringComparison.OrdinalIgnoreCase) ||
-                    k.StartsWith("wide_half", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(k, "crop_stack", StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            return false;
-        }
-
         private void CaptureAnalyticsImage(string key, string title, Bitmap? source)
         {
             if (source == null || _runImages == null)
@@ -9483,19 +9472,16 @@ namespace SpeakRect
                         $"{send.Width}x{send.Height} (max long-edge {maxEdge})");
                 }
 
-                // Analytics: only when send pixels differ from already-published frames.
-                // Skip when downscale is off (clone of ocr_prep) or when island/crop
-                // thumbs already show the real VL inputs (llm_island_*, region_*, …).
-                string scaleNote = didScale
-                    ? $" (from {bmp.Width}x{bmp.Height})"
-                    : (maxEdge > 0 ? "" : " (downscale off)");
+                // Analytics: only when send pixels actually change (long-edge downscale).
+                // Otherwise llm_send is a clone of ocr_prep / island / crop already shown.
                 try
                 {
-                    if (didScale || !HasSpecializedVlAnalyticsFrames())
+                    if (didScale)
                     {
                         CaptureAnalyticsImage(
                             "llm_send",
-                            $"Local-LLM send {send.Width}x{send.Height}{scaleNote}",
+                            $"Local-LLM send {send.Width}x{send.Height} " +
+                            $"(from {bmp.Width}x{bmp.Height})",
                             send);
                     }
                 }

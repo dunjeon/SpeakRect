@@ -13,7 +13,7 @@ Users draw or save screen regions; SpeakRect captures those pixels, recognizes t
 |------|------|
 | **Default** (Comic Book off) | Image prep → one full-frame Local-LLM call → speech clean → TTS |
 | **Comic Book on** | Image prep → **OCR** balloon detect (optional gray fog on detect only) → per-island VL when islands found → speech clean → TTS |
-| **Comic Book + POI** (Balloons → POI guide) | Same detect → green region boxes on tone map (± outside fog) → stock island canvases: per-island orange canvas VL ×N → TTS; canvas off/fail multi → per-island on tone; 1 island + canvas off → full-page guide VL |
+| **Comic Book + POI** (Balloons → POI guide) | Same detect → green **edit map** on tone (± outside fog; not VL when island canvases on) → stock island canvases: orange canvas VL ×N → TTS; canvas off/fail multi → tone crop VL; 1 island + canvas off → full-page guide VL |
 
 No cloud recognition or telemetry. Local-LLM HTTP is **loopback only** (`127.0.0.1`).
 

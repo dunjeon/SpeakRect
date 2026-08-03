@@ -10,10 +10,10 @@ namespace SpeakRect
     /// <summary>
     /// Comic Book alternate POI guide: WinOCR finds text islands, optional thick fog
     /// outside them, then <b>bright green region boxes</b> (same idea as Balloons
-    /// preview) on the ink-gray prep. No free-floating markers that can cover text.
-    /// Speak: AutoStack on → each island gets its own orange canvas and is sent to VL
-    /// one at a time; stack off/fail + multi-island → Balloons §9 (sequential or
-    /// crop-stack); 1 island → full-page guide.
+    /// preview) on tone prep. Full-page map is for edit/Analytics — not always VL.
+    /// Speak: Island canvases on → each island orange canvas VL one at a time;
+    /// canvases off/fail multi → per-island tone crop VL; 1 island + canvases off →
+    /// full-page guide VL. Canvas compose fixed: gap 10, margin 12, beef 0, bottom 0.
     /// </summary>
     public static class ComicPoiGuide
     {

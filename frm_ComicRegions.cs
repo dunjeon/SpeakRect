@@ -918,8 +918,9 @@ namespace SpeakRect
                     }
                     else if (s.ComicPoiMarkers)
                     {
-                        _lblStatus.Text =
-                            "Comic Book + POI — green region boxes (same as live speak).";
+                        _lblStatus.Text = s.ComicPoiAutoStack
+                            ? "Comic Book + POI — edit map (green boxes). Speak = orange island VL ×N (not this page)."
+                            : "Comic Book + POI — edit map (green boxes). Speak multi = tone crops; 1 island = full-page guide.";
                         _lblStatus.ForeColor = UiTheme.Ok;
                     }
                     else if (s.ComicBook)
@@ -1218,9 +1219,8 @@ namespace SpeakRect
             {
                 _refine.ShowPoiMarkers = poi;
                 _refine.ShowPoiOutsideFog = outside;
-                // Never swap preview to stack canvas — user must edit islands on the page.
+                // Never swap preview to island canvas — user edits full page only.
                 _refine.ShowPoiAutoStack = false;
-                _refine.PoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
                 _refine.Invalidate();
             }
             catch { /* ignore */ }
@@ -1229,22 +1229,22 @@ namespace SpeakRect
                 if (poi && _chkPoiAutoStack.Checked)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — full page for editing  ·  Speak = orange island VL ×N  ·  not VL input";
+                        "PREVIEW — edit map only  ·  Speak = orange island VL ×N  ·  not Local-LLM input";
                 }
                 else if (poi && _refine.RegionCount >= 2)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — POI map on TONE (Speak multi = per-island)  ·  drag / resize / add";
+                        "PREVIEW — edit map on TONE  ·  Speak multi = tone crop VL per island  ·  not full-page VL";
                 }
                 else if (poi && outside)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island, stack off)";
+                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island, canvases off)";
                 }
                 else if (poi)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + green boxes = VL input (1 island, stack off)  ·  drag / resize / add";
+                        "PREVIEW — TONE + green boxes = VL input (1 island, canvases off)  ·  drag / resize / add";
                 }
                 else
                 {
@@ -1799,9 +1799,9 @@ namespace SpeakRect
                 else if (_sourceImage != null)
                     _refine.SetSeed((Bitmap)_sourceImage.Clone(), displayBoxes);
 
-                // Preview boxes now match live detect knobs (grow/cluster/pad/…)
+                // Preview boxes match live detect knobs (fog / grow / pad / merge).
                 MarkSeedMatchesLiveDetectSettings();
-                // Re-apply POI guide (same DrawRegionGuides as live).
+                // Re-apply POI edit map (same DrawRegionGuides as live Analytics map).
                 ApplyPoiPreviewUi();
 
                 _txtDetail.Text = UiTheme.SanitizeUiEngineNames(detailText);
@@ -1819,10 +1819,13 @@ namespace SpeakRect
                 {
                     if (_chkPoiMarkers.Checked)
                     {
+                        string speakHint = _chkPoiAutoStack.Checked
+                            ? "Edit map only — Speak = orange island VL ×N (not this page)"
+                            : regionCount >= 2
+                                ? "Edit map only — Speak multi = tone crop per island"
+                                : "1 island + canvases off — Speak VL = this full-page guide";
                         _lblStatus.Text =
-                            $"OCR seeded {regionCount} island(s) · {fogStatus}. " +
-                            "POI guide = live pipe (green boxes" +
-                            (_chkPoiFogOutside.Checked ? " + outside fog" : "") + ").";
+                            $"OCR seeded {regionCount} island(s) · {fogStatus}. {speakHint}.";
                     }
                     else
                     {
@@ -1902,7 +1905,9 @@ namespace SpeakRect
             _progress.BeginWork();
             _lblPreviewStatus.Text = "Reading text and speaking…";
             _lblPreviewStatus.ForeColor = UiTheme.Warn;
-            _lblStatus.Text = "Reading balloons and speaking… this can take a minute.";
+            _lblStatus.Text =
+                "Speaking via Comic Book detect path (Balloons Speak always uses Comic Book " +
+                "pipeline, even if MODE is Default)…";
             _lblStatus.ForeColor = UiTheme.FgMuted;
 
             try

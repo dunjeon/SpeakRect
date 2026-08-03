@@ -571,7 +571,7 @@ namespace SpeakRect
             }
 
             _lblImagesHeader.Text =
-                $"PIPELINE IMAGES  ·  {images.Count}  ·  full pipe res (same as live)  ·  double-click to enlarge";
+                $"PIPELINE IMAGES  ·  {images.Count}  ·  full pipe res  ·  double-click to enlarge";
 
             _imageFlow.SuspendLayout();
             foreach (var entry in images)
