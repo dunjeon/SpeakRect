@@ -204,18 +204,17 @@ namespace SpeakRect
                 row++;
             }
 
-            AddFull(MakeSection("BALLOON DETECT"), 22);
+            AddFull(MakeSection("BALLOONS"), 22);
             AddFull(MakeHint(
-                "Tune how OCR finds speech balloons. Comic Book uses boxes for crops; " +
-                "POI is a Comic Book alternate: green region boxes on gray prep " +
-                "(same image as live/analytics). Preview is that pipe — not a separate paint path."),
-                48);
+                "Find speech balloons and set green boxes around them. " +
+                "Used when Comic Book mode is on."),
+                36);
 
             // 0) Comic Book POI alternate path
-            AddFull(MakeSection("0 · POI GUIDE (COMIC BOOK)"), 20);
+            AddFull(MakeSection("0 · GUIDE BOXES"), 20);
             _chkPoiMarkers = new CheckBox
             {
-                Text = "POI region boxes (Comic Book)",
+                Text = "Guide boxes (turns on Comic Book)",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -234,17 +233,13 @@ namespace SpeakRect
             };
             AddFull(_chkPoiMarkers, 28);
             AddFull(MakeHint(
-                "On: switches to Comic Book mode (sidebar MODE updates). OCR finds text islands, " +
-                "draws bright green boxes on the gray prep (same as this preview), optional fog " +
-                "outside them. Speak: with Island canvases on (stock) → each island on its own orange " +
-                "canvas to Local-LLM one at a time (not multi-strip stack); canvases off/fail multi → " +
-                "per-island on tone; 1 island → full-page guide. " +
-                "OCR prompt is under Speech → Prompts. Grow / crop pad size the islands."),
-                72);
+                "Draws green boxes on the page so you can check and edit them. " +
+                "Turns on Comic Book mode. How text is read depends on “One balloon at a time” below."),
+                48);
 
             _chkPoiFogOutside = new CheckBox
             {
-                Text = "    Fog outside islands (thick)",
+                Text = "    Dim art outside boxes",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -261,16 +256,13 @@ namespace SpeakRect
             };
             AddFull(_chkPoiFogOutside, 28);
             AddFull(MakeHint(
-                "Sub-option of POI: heavy gray fog over everything outside the green boxes " +
-                "(clear holes for speech islands). Hides art/UI on the full-page map. " +
-                "With Island canvases on (stock), Local-LLM sees orange per-island canvases — " +
-                "not this full-page fog map. Full-page map = VL only when Island canvases are off " +
-                "and there is one island."),
-                64);
+                "Grays out everything outside the boxes so you can see what counts as speech. " +
+                "Does not change how each balloon is read when “One balloon at a time” is on."),
+                44);
 
             _chkPoiAutoStack = new CheckBox
             {
-                Text = "    Island canvases for Local-LLM (one at a time)",
+                Text = "    One balloon at a time",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -287,18 +279,16 @@ namespace SpeakRect
             };
             AddFull(_chkPoiAutoStack, 28);
             AddFull(MakeHint(
-                "On (default): Speak crops each green island onto its own orange canvas " +
-                "(fixed margin 12px, gap 10px, beef 0) and sends to Local-LLM one island " +
-                "at a time (not multi-strip stack). Preview stays full page for edit. " +
-                "Off/fail multi → per-island on tone; 1 island → full-page guide. " +
-                "Compose hard-caps canvas long edge at 2560."),
-                64);
+                "On (recommended): each green box is read separately. " +
+                "The preview stays the full page so you can edit boxes. " +
+                "Off: several balloons are read as separate crops; a single box uses the full page."),
+                52);
 
             // 1) Detect fog
-            AddFull(MakeSection("1 · DETECT FOG"), 20);
+            AddFull(MakeSection("1 · FIND BOXES"), 20);
             _chkFog = new CheckBox
             {
-                Text = "Gray fog for OCR detect",
+                Text = "Soften art when finding balloons",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -315,36 +305,36 @@ namespace SpeakRect
 
 
             _trkFogAmount = MakeTrack(0, 100, 35);
-            _lblFogAmount = MakeLabel("Fog strength");
+            _lblFogAmount = MakeLabel("Softness");
             _lblFogAmountVal = MakeValueLabel();
             AddRow(_lblFogAmount, WrapTrack(_trkFogAmount, _lblFogAmountVal), 42);
             AddFull(MakeHint(
-                "Softens art so ink plates stand out. " +
-                "Preview shows the fog used; speech OCR still reads the clear tone image."),
+                "Higher softens the picture so lettering stands out when boxes are found. " +
+                "Speech still uses a clear image."),
                 40);
 
             // 2) Box pad
-            AddFull(MakeSection("2 · BOX PADDING"), 20);
+            AddFull(MakeSection("2 · BOX SIZE"), 20);
             _trkInflateX = MakeTrack(0, 80, 22);
             _lblInflateXVal = MakeValueLabel();
-            AddRow(MakeLabel("Grow X"), WrapTrack(_trkInflateX, _lblInflateXVal), 42);
+            AddRow(MakeLabel("Wider"), WrapTrack(_trkInflateX, _lblInflateXVal), 42);
             _trkInflateY = MakeTrack(0, 80, 28);
             _lblInflateYVal = MakeValueLabel();
-            AddRow(MakeLabel("Grow Y"), WrapTrack(_trkInflateY, _lblInflateYVal), 42);
+            AddRow(MakeLabel("Taller"), WrapTrack(_trkInflateY, _lblInflateYVal), 42);
             _trkPadding = MakeTrack(0, 64, 16);
             _lblPaddingVal = MakeValueLabel();
-            AddRow(MakeLabel("Crop pad"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
+            AddRow(MakeLabel("Extra margin"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
             // Extra row height leaves a clear gap before merge section.
             AddFull(MakeHint(
-                "Grow X/Y and Crop pad resize the solid green boxes (what Speak crops). " +
-                "Pad stops at neighbor islands. Live preview updates the boxes."),
-                48);
+                "How much the green boxes grow around the text. " +
+                "They stop short of neighboring balloons."),
+                40);
 
             // 3) Merge overlapping (default on)
-            AddFull(MakeSection("3 · MERGE OVERLAPPING ISLANDS"), 20);
+            AddFull(MakeSection("3 · OVERLAPPING BOXES"), 20);
             _chkMergeOverlap = new CheckBox
             {
-                Text = "Merge overlapping islands",
+                Text = "Join boxes that overlap",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -354,11 +344,9 @@ namespace SpeakRect
             _chkMergeOverlap.CheckedChanged += (_, _) => OnFieldChanged();
             AddFull(_chkMergeOverlap, 28);
             AddFull(MakeHint(
-                "On (default): after Grow X/Y and Crop pad, any islands whose boxes " +
-                "would overlap become one union rectangle large enough to cover all " +
-                "text — good for busy pages where OCR splits close balloons. " +
-                "Off: nudge grow-overlaps apart instead."),
-                68);
+                "On: overlapping boxes become one. " +
+                "Off: they are nudged apart instead."),
+                40);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -383,7 +371,7 @@ namespace SpeakRect
             _lblPreviewHeader = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "PREVIEW — detect view (fog when on)  ·  drag / resize / add  ·  Del = remove  ·  Ctrl+↑↓ = reorder",
+                Text = "PREVIEW — drag to move · corners to resize · Del removes · Ctrl+↑↓ reorders",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -449,7 +437,7 @@ namespace SpeakRect
             _lblPreviewStatus = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Load a panel image, then Preview to seed OCR boxes.",
+                Text = "Open a page image, then Preview to find balloons.",
                 ForeColor = UiTheme.FgMuted,
                 TextAlign = ContentAlignment.MiddleLeft,
                 AutoEllipsis = true,
@@ -494,7 +482,7 @@ namespace SpeakRect
             _lblStatus = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Comic Book balloon detect.",
+                Text = "Comic Book balloon boxes.",
                 ForeColor = UiTheme.Ok,
                 TextAlign = ContentAlignment.MiddleLeft,
                 AutoEllipsis = true,
@@ -919,19 +907,19 @@ namespace SpeakRect
                     else if (s.ComicPoiMarkers)
                     {
                         _lblStatus.Text = s.ComicPoiAutoStack
-                            ? "Comic Book + POI — edit map (green boxes). Speak = orange island VL ×N (not this page)."
-                            : "Comic Book + POI — edit map (green boxes). Speak multi = tone crops; 1 island = full-page guide.";
+                            ? "Guide boxes on — each balloon is read one at a time."
+                            : "Guide boxes on — several balloons read as separate crops.";
                         _lblStatus.ForeColor = UiTheme.Ok;
                     }
                     else if (s.ComicBook)
                     {
-                        _lblStatus.Text = "Comic Book is ON — these settings apply to the next speak.";
+                        _lblStatus.Text = "Comic Book is on — these settings apply when you speak.";
                         _lblStatus.ForeColor = UiTheme.Ok;
                     }
                     else
                     {
                         _lblStatus.Text =
-                            "Comic Book is OFF — enable Ctrl+B for live reads (preview still works).";
+                            "Comic Book is off — press Ctrl+B for live comic reads (preview still works).";
                         _lblStatus.ForeColor = UiTheme.Warn;
                     }
                 }
@@ -1096,38 +1084,38 @@ namespace SpeakRect
             if (IsDisposed)
                 return;
             int n = _refine.RegionCount;
-            string dirty = HasLockedRefine ? "  ·  LOCKED override" : "  ·  auto seed";
+            string dirty = HasLockedRefine ? "  ·  your edits" : "  ·  auto boxes";
             int sel = _refine.SelectedIndex;
             string selTxt = sel >= 0 ? $"  ·  selected #{sel + 1}" : "";
             string poiNote;
             if (!_chkPoiMarkers.Checked)
             {
-                poiNote = "  ·  solid = Speak crop (grow + pad baked in)";
+                poiNote = "  ·  green boxes = what will be read";
             }
             else if (_refine.IsShowingPoiGuidePreview)
             {
                 if (_refine.RegionCount >= 2)
                 {
                     poiNote = _chkPoiAutoStack.Checked
-                        ? "  ·  POI map on tone (Speak = orange island VL ×N)"
-                        : "  ·  POI map on tone (Speak multi = per-island)";
+                        ? "  ·  edit only · reads each balloon separately"
+                        : "  ·  edit only · reads each balloon as its own crop";
                 }
                 else if (_chkPoiAutoStack.Checked)
                 {
-                    poiNote = "  ·  POI map on tone (Speak = orange island VL)";
+                    poiNote = "  ·  edit only · reads this balloon separately";
                 }
                 else
                 {
-                    poiNote = "  ·  POI guide on tone (= VL input)";
+                    poiNote = "  ·  this page is what gets read";
                 }
             }
             else if (_chkPoiFogOutside.Checked)
             {
-                poiNote = "  ·  green POI boxes + thick fog outside islands";
+                poiNote = "  ·  art outside boxes is dimmed";
             }
             else
             {
-                poiNote = "  ·  green boxes = Local-LLM POI guide";
+                poiNote = "  ·  green guide boxes";
             }
             _lblPreviewStatus.Text =
                 $"Source: {_sourceLabel}  ·  {n} region" +
@@ -1229,27 +1217,27 @@ namespace SpeakRect
                 if (poi && _chkPoiAutoStack.Checked)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — edit map only  ·  Speak = orange island VL ×N  ·  not Local-LLM input";
+                        "PREVIEW — edit boxes only · each balloon is read separately";
                 }
                 else if (poi && _refine.RegionCount >= 2)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — edit map on TONE  ·  Speak multi = tone crop VL per island  ·  not full-page VL";
+                        "PREVIEW — edit boxes only · each balloon is read as its own crop";
                 }
                 else if (poi && outside)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + outside fog + green boxes = VL input (1 island, canvases off)";
+                        "PREVIEW — this page is what gets read (one balloon)";
                 }
                 else if (poi)
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — TONE + green boxes = VL input (1 island, canvases off)  ·  drag / resize / add";
+                        "PREVIEW — this page is what gets read · drag or resize boxes";
                 }
                 else
                 {
                     _lblPreviewHeader.Text =
-                        "PREVIEW — detect view (fog when on)  ·  drag / resize / add  ·  Del = remove  ·  Ctrl+↑↓ = reorder";
+                        "PREVIEW — drag to move · corners to resize · Del removes · Ctrl+↑↓ reorders";
                 }
             }
             UpdateRefineStatus();
@@ -1808,10 +1796,10 @@ namespace SpeakRect
                 UpdateRefineStatus();
 
                 string fogStatus = !_chkFog.Checked
-                    ? "fog=off"
-                    : $"fog={fogUsed:0.00}";
+                    ? "soften off"
+                    : $"soften {fogUsed:0.00}";
                 _lblPreviewStatus.Text =
-                    $"Source: {_sourceLabel}  ·  {regionCount} region" +
+                    $"{_sourceLabel}  ·  {regionCount} balloon" +
                     (regionCount == 1 ? "" : "s") +
                     $"  ·  {fogStatus}";
 
@@ -1820,25 +1808,25 @@ namespace SpeakRect
                     if (_chkPoiMarkers.Checked)
                     {
                         string speakHint = _chkPoiAutoStack.Checked
-                            ? "Edit map only — Speak = orange island VL ×N (not this page)"
+                            ? "Edit the boxes — each balloon is read separately"
                             : regionCount >= 2
-                                ? "Edit map only — Speak multi = tone crop per island"
-                                : "1 island + canvases off — Speak VL = this full-page guide";
+                                ? "Edit the boxes — each is read as its own crop"
+                                : "This page is what gets read";
                         _lblStatus.Text =
-                            $"OCR seeded {regionCount} island(s) · {fogStatus}. {speakHint}.";
+                            $"Found {regionCount} balloon(s) · {fogStatus}. {speakHint}.";
                     }
                     else
                     {
                         _lblStatus.Text =
-                            $"OCR seeded {regionCount} island(s) · {fogStatus}. " +
-                            "Edit boxes to lock · Speak uses your list.";
+                            $"Found {regionCount} balloon(s) · {fogStatus}. " +
+                            "Edit boxes if needed, then Speak.";
                     }
                     _lblStatus.ForeColor = UiTheme.Ok;
                 }
                 else
                 {
                     _lblStatus.Text =
-                        $"No OCR islands · {fogStatus} — click+drag to add boxes, then Speak.";
+                        $"No balloons found · {fogStatus} — draw boxes, then Speak.";
                     _lblStatus.ForeColor = UiTheme.Warn;
                 }
             }
@@ -1905,9 +1893,7 @@ namespace SpeakRect
             _progress.BeginWork();
             _lblPreviewStatus.Text = "Reading text and speaking…";
             _lblPreviewStatus.ForeColor = UiTheme.Warn;
-            _lblStatus.Text =
-                "Speaking via Comic Book detect path (Balloons Speak always uses Comic Book " +
-                "pipeline, even if MODE is Default)…";
+            _lblStatus.Text = "Reading balloons… this may take a moment.";
             _lblStatus.ForeColor = UiTheme.FgMuted;
 
             try

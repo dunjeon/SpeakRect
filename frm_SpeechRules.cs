@@ -251,7 +251,7 @@ namespace SpeakRect
             var header = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "NAME RULES — Find as on screen  ·  blank Say as = never speak  ·  profile-backed",
+                Text = "NAMES — Find as on screen · leave Say as blank to skip speaking",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -326,7 +326,7 @@ namespace SpeakRect
             chkTitleCaseAllCaps = new CheckBox
             {
                 Dock = DockStyle.Fill,
-                Text = "Title-case ALL CAPS words  (HELLO → Hello; mixed case left alone)",
+                Text = "Title-case ALL CAPS words (HELLO → Hello)",
                 ForeColor = UiTheme.FgMuted,
                 BackColor = UiTheme.Bg,
                 Checked = false,
@@ -353,8 +353,8 @@ namespace SpeakRect
                     finally { _loading = false; }
                 }
                 MarkChanged(_chkTitleCaseAllCaps.Checked
-                    ? "Title-case ALL CAPS on — force lowercase off."
-                    : "Title-case ALL CAPS off — OCR casing kept for speech.");
+                    ? "Title-case ALL CAPS on."
+                    : "Title-case ALL CAPS off.");
                 if (!string.IsNullOrWhiteSpace(_txtTestIn?.Text))
                     RunPreview(speak: false);
             };
@@ -364,7 +364,7 @@ namespace SpeakRect
             chkForceLowercase = new CheckBox
             {
                 Dock = DockStyle.Fill,
-                Text = "Force lowercase for speech  (on = normalize ALL CAPS; off = keep OCR casing)  ·  default on",
+                Text = "Force lowercase when speaking (default on)",
                 ForeColor = UiTheme.FgMuted,
                 BackColor = UiTheme.Bg,
                 Checked = true,
@@ -390,8 +390,8 @@ namespace SpeakRect
                     finally { _loading = false; }
                 }
                 MarkChanged(_chkForceLowercase.Checked
-                    ? "Force lowercase on — title-case ALL CAPS off."
-                    : "Force lowercase off — OCR casing kept for speech.");
+                    ? "Force lowercase on."
+                    : "Force lowercase off.");
                 // Re-run test preview when sample text is already loaded so the
                 // casing toggle is visible immediately (no extra Preview click).
                 if (!string.IsNullOrWhiteSpace(_txtTestIn?.Text))
@@ -494,7 +494,7 @@ namespace SpeakRect
             var header = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "OCR PROMPT — sole instruction for Local-LLM (all modes)  ·  blank = built-in default",
+                Text = "READING PROMPT — how text is read · blank uses the built-in default",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -572,7 +572,7 @@ namespace SpeakRect
             var lblTest = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "TEST — paste comic/OCR text  ·  Preview runs clean + rules  ·  Speak uses Voice settings",
+                Text = "TEST — paste sample text · Preview applies rules · Speak uses your Voice settings",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.BottomLeft,
@@ -1107,7 +1107,7 @@ namespace SpeakRect
         private void ResetAllTextRules()
         {
             var dr = UiMessageBox.Show(GetModalOwner(),
-                "Reset ALL pipeline text rules to SpeakRect built-ins?\n\n" +
+                "Reset ALL text cleanup rules to the built-in list?\n\n" +
                 "Custom rules will be removed. Name rules and prompts are not changed.",
                 "Reset text rules",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -1162,8 +1162,8 @@ namespace SpeakRect
                 bool isDefault = AppSettings.Current.IsOcrPromptUsingDefault();
                 _txtPrompt.Text = resolved;
                 _lblPromptDefault.Text = isDefault
-                    ? "Using built-in default (edit and Apply to override)."
-                    : "Custom override (Reset restores the built-in default).";
+                    ? "Using the built-in default. Edit and Apply to change it."
+                    : "Custom prompt. Reset restores the built-in default.";
                 _lblPromptDefault.ForeColor = isDefault ? UiTheme.FgDim : UiTheme.Warn;
                 _promptDirty = false;
             }

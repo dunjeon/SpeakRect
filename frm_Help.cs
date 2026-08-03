@@ -136,7 +136,7 @@ namespace SpeakRect
             };
             var introSub = new Label
             {
-                Text = "Local-LLM  ·  Windows speech (default)  ·  optional SAPI 5",
+                Text = "Reads text on your screen · Windows speech (default)",
                 Dock = DockStyle.Top,
                 Height = 20,
                 ForeColor = UiTheme.FgMuted,
@@ -237,12 +237,12 @@ namespace SpeakRect
             Feature(sb, "Key Map", "Remap keyboard and gamepad; add custom actions.");
             Feature(sb, "Profiles", "Save regions, hotkeys, modes, voice, speech rules, and Follow per game.");
             Feature(sb, "Voice", "Windows TTS by default. Optional SAPI 5 for adapters (see README).");
-            Feature(sb, "Speech", "Settings \u2192 Speech: name rules, pipeline text rules (regex), and one OCR prompt. Reset defaults per section. Profile-backed.");
-            Feature(sb, "Balloons", "Settings \u2192 Balloons: tune Comic Book balloon detect + live green-box preview. Profile-backed.");
-            Feature(sb, "Image", "Settings \u2192 Image: letterbox / upscale / gray / tone prep with live preview. Profile-backed.");
+            Feature(sb, "Speech", "Settings \u2192 Speech: name rules, text cleanup, and the reading prompt. Saved with your profile.");
+            Feature(sb, "Balloons", "Settings \u2192 Balloons: find and edit speech-balloon boxes for Comic Book. Saved with your profile.");
+            Feature(sb, "Image", "Settings \u2192 Image: clean up the capture before reading, with live preview. Saved with your profile.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");
-            Feature(sb, "Analytics", "Settings \u2192 Analytics shows the most recent OCR text, pipeline images, and timings. Export\u2026 packs a debug zip (works in Release).");
-            Feature(sb, "Restore all defaults", "This Help tab \u2014 factory-reset mode, image, voice, speech, hotkeys, regions, and follow (asks first). Keeps the active profile name.");
+            Feature(sb, "Analytics", "Settings \u2192 Analytics shows the last spoken text, pictures from that run, and timings. Export saves a zip.");
+            Feature(sb, "Restore all defaults", "This Help tab \u2014 reset mode, image, voice, speech, hotkeys, regions, and follow (asks first). Keeps the profile name.");
             sb.Append(@"\par ");
 
             // Hotkeys
@@ -268,9 +268,9 @@ namespace SpeakRect
             Tip(sb, "Ctrl+click FOLLOW on the overlay to open Follow size and offset settings.");
             Tip(sb, "Sidebar REGIONS buttons 1–8 switch slots for drawing (same as region hotkeys).");
             Tip(sb, "Leave Voice engine on Windows unless you installed a SAPI adapter; full steps are in README.md.");
-            Tip(sb, "Speech \u2192 Names: X-Men \u2192 Ex-Men. Text rules: pipeline regex (abbrevs, noise) + Title-case ALL CAPS (HELLO \u2192 Hello) or Force lowercase (mutually exclusive; Force lowercase on by default for all modes). Prompt: sole Local-LLM OCR instruction (all modes). Use Reset for defaults.");
-            Tip(sb, "Balloons tab: open a panel or last capture — knobs live-update green boxes. Speak (F6) runs full OCR. Min letters 0 = off. Merge overlapping islands (default on) unions grown boxes that collide.");
-            Tip(sb, "Image tab: live prep preview matches what OCR receives (letterbox/scale/gray/tone; same for Default and ComicBook). Balloons uses the same prep. Detect fog is Balloons only.");
+            Tip(sb, "Speech \u2192 Names: e.g. X-Men \u2192 Ex-Men. You can also force lowercase or title-case ALL CAPS. Use Reset for defaults.");
+            Tip(sb, "Balloons: open a page or last capture — settings update the green boxes live. Speak (F6) reads them.");
+            Tip(sb, "Image: cleanup preview matches what is used when speaking. Soften-for-find boxes is on Balloons only.");
             sb.Append(@"\par ");
 
             sb.Append(@"\cf6 Full documentation ships as README.md next to SpeakRect.exe (includes optional SAPI 5 setup).\cf1\par ");

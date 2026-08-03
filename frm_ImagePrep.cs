@@ -186,14 +186,13 @@ namespace SpeakRect
                 row++;
             }
 
-            AddFull(MakeSection("IMAGE PREP PIPELINE"), 22);
+            AddFull(MakeSection("PICTURE CLEANUP"), 22);
             AddFull(MakeHint(
-                "Letterbox → scale long-edge → ink-gray → tone (denoise + levels + sharpen). " +
-                "Same pipe as live speak and Analytics (full resolution — not a separate preview path). " +
-                "Turn prep off for raw snap. Detect fog is Balloons only."),
-                56);
+                "Trim edges, resize, and clean the picture before text is read. " +
+                "Same steps as when you speak. Turn off to use the raw capture."),
+                48);
 
-            _chkPrepEnabled = MakeCheck("Enable image prep");
+            _chkPrepEnabled = MakeCheck("Clean up the picture before reading");
             _chkPrepEnabled.Checked = true;
             _chkPrepEnabled.CheckedChanged += (_, _) =>
             {
@@ -201,11 +200,11 @@ namespace SpeakRect
                 ApplyKeyboardTabOrder();
             };
             AddFull(_chkPrepEnabled, 28);
-            AddFull(MakeHint("Off = use the capture as-is (no letterbox, scale, gray, or tone)."), 32);
+            AddFull(MakeHint("Off = use the capture as captured, with no cleanup."), 28);
 
             // Letterbox
-            AddFull(MakeSection("LETTERBOX"), 20);
-            _chkLetterbox = MakeCheck("Trim black / white bars");
+            AddFull(MakeSection("TRIM BARS"), 20);
+            _chkLetterbox = MakeCheck("Trim black or white edges");
             _chkLetterbox.CheckedChanged += (_, _) =>
             {
                 OnFieldChanged();
@@ -214,32 +213,30 @@ namespace SpeakRect
             AddFull(_chkLetterbox, 28);
             _trkLetterboxPad = MakeTrack(0, 32, 3);
             _lblLetterboxPadVal = MakeValueLabel();
-            AddRow(MakeLabel("Content pad"), WrapTrack(_trkLetterboxPad, _lblLetterboxPadVal), 42);
+            AddRow(MakeLabel("Keep border"), WrapTrack(_trkLetterboxPad, _lblLetterboxPadVal), 42);
             _trkLetterboxBlack = MakeTrack(0, 255, 80);
             _lblLetterboxBlackVal = MakeValueLabel();
-            AddRow(MakeLabel("Dark bar"), WrapTrack(_trkLetterboxBlack, _lblLetterboxBlackVal), 42);
+            AddRow(MakeLabel("Dark edges"), WrapTrack(_trkLetterboxBlack, _lblLetterboxBlackVal), 42);
             _trkLetterboxWhite = MakeTrack(0, 255, AppSettings.DefaultImageLetterboxWhite);
             _lblLetterboxWhiteVal = MakeValueLabel();
-            AddRow(MakeLabel("Light bar"), WrapTrack(_trkLetterboxWhite, _lblLetterboxWhiteVal), 42);
-            AddFull(MakeHint("Higher dark / lower light = more aggressive trim. Off uses full snap."), 36);
+            AddRow(MakeLabel("Light edges"), WrapTrack(_trkLetterboxWhite, _lblLetterboxWhiteVal), 42);
+            AddFull(MakeHint("Higher dark / lower light trims more. Off keeps the full capture."), 36);
 
             // Scale — not free-form resolution. Long edge only; aspect always kept.
-            AddFull(MakeSection("SCALE (LONG EDGE)"), 20);
+            AddFull(MakeSection("SIZE"), 20);
             _trkUpscale = MakeTrack(640, 4096, AppSettings.DefaultImageUpscaleLongSide);
             _trkUpscale.TickFrequency = 128;
             _lblUpscaleVal = MakeValueLabel();
             // Wider value column for "1920 → ~1920×1080"
-            AddRow(MakeLabel("Long edge"), WrapTrack(_trkUpscale, _lblUpscaleVal, valueWidth: 110), 42);
+            AddRow(MakeLabel("Longer side"), WrapTrack(_trkUpscale, _lblUpscaleVal, valueWidth: 110), 42);
             AddFull(MakeHint(
-                "After letterbox, resize so the longer side equals this many pixels. " +
-                "Aspect ratio is always kept (no stretch). Not a free width×height — " +
-                "if the image is already larger, this downscales. Used for detect/boxes " +
-                "and the prep canvas (default 900)."),
-                52);
+                "Resize so the longer side is this many pixels. " +
+                "Shape is kept (no stretch). Larger values are sharper but slower."),
+                44);
 
-            // Local-LLM send size (Default + Comic Book) — after prep / island stack.
-            AddFull(MakeSection("LOCAL-LLM SEND SIZE"), 20);
-            _chkLlmSendDownscale = MakeCheck("Downscale for Local-LLM send");
+            // Send size after prep
+            AddFull(MakeSection("READING SIZE"), 20);
+            _chkLlmSendDownscale = MakeCheck("Shrink before reading");
             _chkLlmSendDownscale.Checked = false;
             _chkLlmSendDownscale.CheckedChanged += (_, _) =>
             {
@@ -251,19 +248,18 @@ namespace SpeakRect
             _trkLlmSendMaxEdge.TickFrequency = 64;
             _lblLlmSendMaxEdgeVal = MakeValueLabel();
             AddRow(
-                MakeLabel("Max long edge"),
+                MakeLabel("Max longer side"),
                 WrapTrack(_trkLlmSendMaxEdge, _lblLlmSendMaxEdgeVal, valueWidth: 90),
                 42);
             AddFull(MakeHint(
-                "Off (default for all modes): send prep/stack size as-is (island stacks still " +
-                "compose-cap long edge at 2560). On: after prep (and island stack when used), " +
-                "cap the Local-LLM payload long edge here (stock 640). Detect, green boxes, and " +
-                "Analytics prep stages stay at the Scale long edge either way."),
-                64);
+                "Off (default): read at the size after cleanup. " +
+                "On: shrink so the longer side is no larger than this (faster, less detail). " +
+                "Finding balloons still uses the Size setting above."),
+                52);
 
             // Gray
-            AddFull(MakeSection("INK GRAYSCALE"), 20);
-            _chkGray = MakeCheck("Convert to ink-preserving gray");
+            AddFull(MakeSection("GRAYSCALE"), 20);
+            _chkGray = MakeCheck("Convert to grayscale");
             _chkGray.CheckedChanged += (_, _) =>
             {
                 OnFieldChanged();
@@ -273,21 +269,21 @@ namespace SpeakRect
             _trkInkWeight = MakeTrack(0, 100, 55);
             _lblInkWeightVal = MakeValueLabel();
             AddRow(MakeLabel("Ink weight"), WrapTrack(_trkInkWeight, _lblInkWeightVal), 42);
-            AddFull(MakeHint("Higher keeps colored SFX (yellow) darker vs luminance blend."), 36);
+            AddFull(MakeHint("Higher keeps bright colors (like yellow SFX) darker in gray."), 36);
 
             // Tone: denoise
-            AddFull(MakeSection("TONE — DENOISE (Comic Book)"), 20);
+            AddFull(MakeSection("SMOOTH"), 20);
             _trkDenoiseR = MakeTrack(0, 4, 1);
             _lblDenoiseRVal = MakeValueLabel();
-            AddRow(MakeLabel("Radius"), WrapTrack(_trkDenoiseR, _lblDenoiseRVal), 42);
+            AddRow(MakeLabel("Strength"), WrapTrack(_trkDenoiseR, _lblDenoiseRVal), 42);
             _trkDenoiseSigma = MakeTrack(1, 80, 22);
             _lblDenoiseSigmaVal = MakeValueLabel();
-            AddRow(MakeLabel("Range σ"), WrapTrack(_trkDenoiseSigma, _lblDenoiseSigmaVal), 42);
-            AddFull(MakeHint("0 radius = off. Edge-preserving bilateral before levels."), 32);
+            AddRow(MakeLabel("Detail keep"), WrapTrack(_trkDenoiseSigma, _lblDenoiseSigmaVal), 42);
+            AddFull(MakeHint("0 = off. Softens noise while trying to keep edges."), 28);
 
             // Tone: levels
-            AddFull(MakeSection("TONE — AUTO LEVELS"), 20);
-            _chkAutoLevels = MakeCheck("Percentile auto-levels");
+            AddFull(MakeSection("CONTRAST"), 20);
+            _chkAutoLevels = MakeCheck("Auto contrast");
             _chkAutoLevels.CheckedChanged += (_, _) =>
             {
                 OnFieldChanged();
@@ -296,24 +292,24 @@ namespace SpeakRect
             AddFull(_chkAutoLevels, 28);
             _trkLevelsLow = MakeTrack(0, 200, 10); // 0.0–20.0 via /10
             _lblLevelsLowVal = MakeValueLabel();
-            AddRow(MakeLabel("Low %"), WrapTrack(_trkLevelsLow, _lblLevelsLowVal), 42);
+            AddRow(MakeLabel("Shadows"), WrapTrack(_trkLevelsLow, _lblLevelsLowVal), 42);
             _trkLevelsHigh = MakeTrack(800, 1000, 990); // 80.0–100.0 via /10
             _lblLevelsHighVal = MakeValueLabel();
-            AddRow(MakeLabel("High %"), WrapTrack(_trkLevelsHigh, _lblLevelsHighVal), 42);
+            AddRow(MakeLabel("Highlights"), WrapTrack(_trkLevelsHigh, _lblLevelsHighVal), 42);
             _trkLevelsMinRange = MakeTrack(8, 200, 48);
             _lblLevelsMinRangeVal = MakeValueLabel();
-            AddRow(MakeLabel("Min range"), WrapTrack(_trkLevelsMinRange, _lblLevelsMinRangeVal), 42);
-            AddFull(MakeHint("Soft stretch of histogram. Min range skips stretch on clean digital art."), 36);
+            AddRow(MakeLabel("Skip if already strong"), WrapTrack(_trkLevelsMinRange, _lblLevelsMinRangeVal), 42);
+            AddFull(MakeHint("Gently boosts contrast. Skip if the page is already clean."), 32);
 
             // Tone: sharpen
-            AddFull(MakeSection("TONE — SHARPEN"), 20);
+            AddFull(MakeSection("SHARPEN"), 20);
             _trkSharpenAmt = MakeTrack(0, 200, 55); // 0.00–2.00
             _lblSharpenAmtVal = MakeValueLabel();
             AddRow(MakeLabel("Amount"), WrapTrack(_trkSharpenAmt, _lblSharpenAmtVal), 42);
             _trkSharpenPasses = MakeTrack(0, 4, 1);
             _lblSharpenPassesVal = MakeValueLabel();
             AddRow(MakeLabel("Passes"), WrapTrack(_trkSharpenPasses, _lblSharpenPassesVal), 42);
-            AddFull(MakeHint("0 amount or 0 passes = off. Heavy unsharp fringes comic ink."), 36);
+            AddFull(MakeHint("0 = off. Too much can fringe black lettering."), 28);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -335,7 +331,7 @@ namespace SpeakRect
             previewPanel.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "PREVIEW — live stage (follows the control you adjust)",
+                Text = "PREVIEW — updates as you change settings",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -407,7 +403,7 @@ namespace SpeakRect
             _lblStatus = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Image prep.",
+                Text = "Picture cleanup.",
                 ForeColor = UiTheme.Ok,
                 TextAlign = ContentAlignment.MiddleLeft,
                 AutoEllipsis = true,
@@ -611,9 +607,9 @@ namespace SpeakRect
 
                 _lblStatus.Text = HasSource
                     ? (DevCaptureCache.IsSample
-                        ? "Sample panel loaded — Open image… for your own capture."
-                        : "Image prep — adjust controls for live preview.")
-                    : "Load an image to enable controls.";
+                        ? "Sample page loaded — Open image… for your own capture."
+                        : "Change a setting to update the preview.")
+                    : "Open an image to get started.";
                 _lblStatus.ForeColor = HasSource ? UiTheme.Ok : UiTheme.Warn;
             }
             finally
@@ -758,7 +754,7 @@ namespace SpeakRect
             Persist(writeDiskNow: false);
             if (_sourceImage != null)
             {
-                _lblStatus.Text = "Live preview — full pipeline…";
+                _lblStatus.Text = "Updating preview…";
                 _lblStatus.ForeColor = UiTheme.Ok;
                 ScheduleLivePreview();
             }
@@ -834,7 +830,7 @@ namespace SpeakRect
             AppSettings.Current.ResetImagePrepSettingsToDefaults();
             LoadFromSettings();
             Persist(writeDiskNow: true);
-            _lblStatus.Text = "Restored built-in image prep defaults.";
+            _lblStatus.Text = "Restored defaults.";
             _lblStatus.ForeColor = UiTheme.Ok;
         }
 
@@ -918,7 +914,7 @@ namespace SpeakRect
                 // Raw source (same as Open / Use last); full pipe via Preview path.
                 SetSourceImage(bmp, "region snap");
                 RunPipelinePreview(fromLive: false);
-                _lblStatus.Text = "Region snap loaded — full prep preview.";
+                _lblStatus.Text = "Region loaded — preview updated.";
                 _lblStatus.ForeColor = UiTheme.Ok;
             }
             catch (Exception ex)
@@ -1074,14 +1070,11 @@ namespace SpeakRect
 
                 _txtDetail.Text = UiTheme.SanitizeUiEngineNames(detail);
                 _lblPreviewStatus.Text =
-                    $"Source: {_sourceLabel}  ·  {stageName}  ·  " +
-                    $"prep={(prepOn ? "on" : "off")} gray={(grayOn ? "on" : "off")}  ·  " +
-                    $"{w}×{h}" +
-                    (fromLive ? "  ·  live" : "");
+                    $"{_sourceLabel}  ·  {stageName}  ·  " +
+                    $"cleanup={(prepOn ? "on" : "off")} gray={(grayOn ? "on" : "off")}  ·  " +
+                    $"{w}×{h}";
                 _lblPreviewStatus.ForeColor = UiTheme.Ok;
-                _lblStatus.Text = fromLive
-                    ? $"Live {stageName} preview."
-                    : $"{stageName} preview.";
+                _lblStatus.Text = $"{stageName} preview.";
                 _lblStatus.ForeColor = UiTheme.Ok;
             }
             catch (Exception ex)

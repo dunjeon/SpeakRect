@@ -164,8 +164,8 @@ namespace SpeakRect
                 BackColor = UiTheme.BgInput,
                 ForeColor = UiTheme.Fg,
             };
-            _cmbEngine.Items.Add(new EngineItem("Windows", "Windows (UWP / OneCore) — default"));
-            _cmbEngine.Items.Add(new EngineItem("Sapi", "SAPI 5 (classic + adapters) — optional"));
+            _cmbEngine.Items.Add(new EngineItem("Windows", "Windows (default)"));
+            _cmbEngine.Items.Add(new EngineItem("Sapi", "SAPI 5 (optional)"));
             AddRow(MakeLabel("Engine"), _cmbEngine, 34);
 
             _cmbVoice = new ComboBox
@@ -181,8 +181,8 @@ namespace SpeakRect
             AddRow(MakeLabel("Voice"), _cmbVoice, 34);
 
             _lblVoiceHint = MakeHint(
-                "Default Windows works out of the box. SAPI 5 is optional — install a SAPI engine first (see README).");
-            AddFull(_lblVoiceHint, 48);
+                "Windows works out of the box. SAPI 5 needs a separate install (see README).");
+            AddFull(_lblVoiceHint, 40);
 
             // ---- Rate / Pitch / Volume ----
             AddFull(MakeSection("OPTIONS"), 22);
@@ -200,8 +200,8 @@ namespace SpeakRect
             AddRow(MakeLabel("Volume"), WrapTrack(_trkVolume, _lblVolumeVal), 48);
 
             _lblOptionsHint = MakeHint(
-                "Rate 0.5–6.0 · Pitch 0.0–2.0 · Volume 0.0–1.0  (mapped for SAPI Rate / Volume / SSML pitch)");
-            AddFull(_lblOptionsHint, 36);
+                "How fast, high, and loud the voice is.");
+            AddFull(_lblOptionsHint, 28);
 
             // ---- Silence ----
             AddFull(MakeSection("SILENCE"), 22);
@@ -213,15 +213,15 @@ namespace SpeakRect
             AddRow(MakeLabel("Punctuation"), _cmbPunctuationSilence, 34);
 
             _lblSilenceHint = MakeHint(
-                "Default ≈ normal pauses. Min reduces trailing / punctuation silence. (Windows engine only.)");
-            AddFull(_lblSilenceHint, 48);
+                "How much quiet space after speech and around punctuation (Windows voice only).");
+            AddFull(_lblSilenceHint, 40);
 
             // ---- Speak-unit pauses (engine-agnostic Task.Delay between units) ----
             AddFull(MakeSection("SPEAK PAUSES"), 22);
 
             _chkCustomPauseEncodings = new CheckBox
             {
-                Text = "Custom pause encoding",
+                Text = "Use custom pauses",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.FgMuted,
                 BackColor = UiTheme.Bg,
@@ -231,7 +231,7 @@ namespace SpeakRect
                 Padding = new Padding(0, 2, 0, 0),
                 Cursor = Cursors.Hand,
             };
-            AddRow(MakeLabel("Encode"), _chkCustomPauseEncodings, 32);
+            AddRow(MakeLabel("Pauses"), _chkCustomPauseEncodings, 32);
 
             _trkCommaPause = MakeTrack(
                 AppSettings.MinSpeakPauseMs, AppSettings.MaxSpeakPauseMs,
@@ -262,8 +262,8 @@ namespace SpeakRect
             AddRow(_lblBubblePause, WrapTrack(_trkBubblePause, _lblBubblePauseVal), 48);
 
             _lblPauseHint = MakeHint(
-                "On: typed pause marks + gaps after each speak unit (0–3.00 s). Off: keep punctuation for TTS; ignore the sliders. Both engines.");
-            AddFull(_lblPauseHint, 48);
+                "On: wait after commas, sentences, and balloons. Off: ignore the sliders.");
+            AddFull(_lblPauseHint, 36);
 
             // Keep body as wide as the viewport (minus scrollbar) so Dock=Fill hints wrap fully.
             void SyncBodyWidth()

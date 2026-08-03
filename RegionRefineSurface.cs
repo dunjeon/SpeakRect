@@ -401,8 +401,8 @@ namespace SpeakRect
         {
             var s = AppSettings.Current;
             if (s.ComicPoiAutoStack)
-                return "Edit map · multi · Speak = orange island VL ×N (not this page)";
-            return "Edit map · multi · Speak = tone crop VL per island (not full-page)";
+                return "Edit only · each balloon is read separately";
+            return "Edit only · each balloon is read as its own crop";
         }
 
         /// <summary>
