@@ -106,6 +106,31 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Dynamic_fog_global_pick_includes_baseline_zero()
+    {
+        // 0 baseline beats climb peak → choose none.
+        var scores = new Dictionary<float, long>
+        {
+            [0f] = 20000,
+            [0.25f] = 18000,
+            [0.30f] = 17000,
+        };
+        Assert.Equal(0f, OcrProcessor.SmokeSelectDynamicFogBestAmount(scores));
+
+        // Fog peak larger → choose fog (climb still worth it).
+        scores[0.30f] = 25000;
+        Assert.Equal(0.30f, OcrProcessor.SmokeSelectDynamicFogBestAmount(scores));
+
+        // Exact tie with fog → lower amount wins (prefer none).
+        scores = new Dictionary<float, long>
+        {
+            [0f] = 15000,
+            [0.25f] = 15000,
+        };
+        Assert.Equal(0f, OcrProcessor.SmokeSelectDynamicFogBestAmount(scores));
+    }
+
+    [Fact]
     public void Dyn_fog_island_crop_empty_nukes()
     {
         // Ghost island: crop re-OCR empty / junk → drop.

@@ -403,7 +403,7 @@ namespace SpeakRect
 
             _chkDynamicFog = new CheckBox
             {
-                Text = "Dynamic fog (auto — floor 0.25, climb to best)",
+                Text = "Dynamic fog (auto — score 0, climb from 0.25)",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -418,9 +418,9 @@ namespace SpeakRect
             };
             AddFull(_chkDynamicFog, 28);
             AddFull(MakeHint(
-                "On (default): ignore Fog strength — start at floor (~0.25) and raise fog until " +
-                "island area shrinks; keep the peak. Merge-overlap is off during the search, " +
-                "then restored. Same pipe for live + preview."),
+                "On (default): ignore Fog strength — always score no-fog (0), then climb from " +
+                "floor (~0.25) until island area shrinks; keep the peak (none can win). " +
+                "Merge-overlap is off during the search, then restored. Same pipe for live + preview."),
                 56);
 
             _trkFogAmount = MakeTrack(0, 100, 35);
@@ -2093,7 +2093,9 @@ namespace SpeakRect
                 if (!_chkFog.Checked)
                     fogStatus = "fog=off";
                 else if (dynFog)
-                    fogStatus = $"dyn-fog auto {fogStart:0.00}→{fogUsed:0.00}";
+                    fogStatus = fogUsed <= 0.001f
+                        ? "dyn-fog auto → 0.00 (none)"
+                        : $"dyn-fog auto {fogStart:0.00}→{fogUsed:0.00}";
                 else
                     fogStatus = $"fog={fogUsed:0.00}";
 

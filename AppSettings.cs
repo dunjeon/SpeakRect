@@ -202,8 +202,9 @@ namespace SpeakRect
         public float ComicDetectFogAmount { get; set; } = DefaultComicDetectFogAmount;
 
         /// <summary>
-        /// Auto fog for OCR detect: start at floor (see OcrProcessor.DynamicFogSearchFloor,
-        /// stock 0.25), climb until island total area shrinks; keep the peak.
+        /// Auto fog for OCR detect: score amount=0 (no fog) as baseline, then climb from
+        /// floor (see OcrProcessor.DynamicFogSearchFloor, stock 0.25) until island total
+        /// area shrinks; keep the peak (none can win on ties / better area).
         /// Merge-overlap is off during the search, then restored for the final detect.
         /// Shared by live + Balloons preview. User fog slider is not used while this is on.
         /// </summary>
@@ -2490,9 +2491,10 @@ namespace SpeakRect
                 sb.AppendLine("; StackBeefExtra=0 (stock: no extra canvas). Pad only — both POI + crop stacks.");
                 sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
                 sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
-                sb.AppendLine("; DynamicFog=true: auto fog — start floor (~0.25), climb until island area shrinks;");
+                sb.AppendLine("; DynamicFog=true: auto fog — score 0 (no fog), climb from floor (~0.25);");
+                sb.AppendLine(";   stop when island area shrinks; keep peak (none can win);");
                 sb.AppendLine(";   then crop re-OCR each island; empty/junk → drop (fog ghost islands).");
-                sb.AppendLine(";   keep peak area (merge off during search). DetectFogAmount unused while dyn on.");
+                sb.AppendLine(";   merge off during search. DetectFogAmount unused while dyn on.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicDynamicFog={ComicDynamicFog.ToString().ToLowerInvariant()}");

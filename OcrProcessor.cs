@@ -60,6 +60,20 @@ namespace SpeakRect
         public string Detail { get; init; } = "";
         public bool Unreadable { get; init; }
         public IReadOnlyList<OcrResultImage> Images { get; init; } = Array.Empty<OcrResultImage>();
+
+        /// <summary>
+        /// Detect fog amount used for this run (after dynamic search when enabled).
+        /// 0 when fog is off or dyn chose no fog.
+        /// </summary>
+        public float FogAmountUsed { get; init; }
+
+        /// <summary>True when dynamic fog search ran (not fixed amount / fog off).</summary>
+        public bool DynamicFogSearched { get; init; }
+
+        /// <summary>
+        /// Dyn search low end (0 baseline when dyn runs); else same as used / 0 when off.
+        /// </summary>
+        public float FogAmountStart { get; init; }
     }
 
     /// <summary>
@@ -1060,6 +1074,11 @@ namespace SpeakRect
         /// <summary>In-flight image list for the current CaptureAndRecognizeAsync run.</summary>
         private List<OcrResultImage>? _runImages;
 
+        /// <summary>Detect fog knobs for the current run (published into <see cref="OcrLastResult"/>).</summary>
+        private float _runFogAmountUsed;
+        private bool _runDynamicFogSearched;
+        private float _runFogAmountStart;
+
         /// <summary>Create debug_images/ — Debug builds only (no-op in Release/publish).</summary>
         private static void EnsureDebugFolder()
         {
@@ -1272,7 +1291,7 @@ namespace SpeakRect
                 $" gray={(EnablePipelineGrayscale ? "on" : "off")}" +
                 $" fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
+                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on baseline=0 climb={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
@@ -1458,7 +1477,7 @@ namespace SpeakRect
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on floor={DynamicFogSearchFloor:0.##}" : "off")}" +
+                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on baseline=0 climb={DynamicFogSearchFloor:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
@@ -1487,6 +1506,7 @@ namespace SpeakRect
 
             // Analytics: same publish path as live (was a silent no-op before).
             _runImages = new List<OcrResultImage>(16);
+            ClearRunFogAnalytics();
 
             try
             {
@@ -1573,6 +1593,7 @@ namespace SpeakRect
                         }
                     }
                     detectImage = fogOwned ?? toneOwned;
+                    SetRunFogAnalytics(fogUsed, dynSearched: false, fogStart: fogUsed);
 
                     sw.Restart();
                     regions = RegionsFromOverride(regionOverride!, pipeW, pipeH);
@@ -1599,6 +1620,7 @@ namespace SpeakRect
                     if (ownsDet)
                         fogOwned = detImg;
                     detectImage = detImg;
+                    SetRunFogAnalytics(fogUsed, dynSearched, fogStart);
                     pipeTimer.Mark(
                         $"winocr-detect+regions (dyn={dynSearched} fog={fogUsed:0.00})",
                         sw);
@@ -2161,6 +2183,7 @@ namespace SpeakRect
             using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
             // Fresh analytics image list for this run (published via WriteLastOcrDebug).
             _runImages = new List<OcrResultImage>(16);
+            ClearRunFogAnalytics();
             try
             {
                 // -------------------------------------------------------------
@@ -2305,6 +2328,7 @@ namespace SpeakRect
                         fogUsedLive = fogAmt;
                         dynFogLive = dyn;
                         fogStartLive = fogStart;
+                        SetRunFogAnalytics(fogUsedLive, dynFogLive, fogStartLive);
                     }
                     pipeTimer.Mark(
                         $"detect-fog+regions (dyn={dynFogLive} fog={fogUsedLive:0.00}" +
@@ -2934,7 +2958,7 @@ namespace SpeakRect
                 $", orphans={ActiveMaxOrphanWinOcrPasses}" +
                 $", fog={(detectUsesFog ? "on" : "off")}" +
                 (detectUsesFog && SpeakRunSettings.GetComicDynamicFog()
-                    ? $", dynFog=on floor={DynamicFogSearchFloor:0.###} (climb to peak)"
+                    ? $", dynFog=on baseline=0 climb-floor={DynamicFogSearchFloor:0.###}"
                     : detectUsesFog
                         ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
                         : ""));
@@ -5418,8 +5442,11 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Search floor for <see cref="AppSettings.ComicDynamicFog"/> (stock 0.25).
-        /// User slider is ignored while dyn is on — always climb from here.
+        /// Climb floor for <see cref="AppSettings.ComicDynamicFog"/> (stock 0.25).
+        /// Dyn always scores amount=0 (no fog) as a baseline first, then climbs from
+        /// here so art-bloated area at 0 cannot abort the search. Global pick includes 0
+        /// (max area; lower fog on ties → none wins when equal).
+        /// User slider is ignored while dyn is on.
         /// </summary>
         public const float DynamicFogSearchFloor = 0.25f;
 
@@ -5427,10 +5454,12 @@ namespace SpeakRect
         /// Shared detect entry for live + Balloons preview/speak.
         /// When detect fog + <see cref="AppSettings.ComicDynamicFog"/>:
         /// <list type="number">
+        /// <item>Score amount=0 (no fog) as baseline — sometimes none is best.</item>
         /// <item>Search with merge-overlap <b>off</b> (no AppSettings mutation).</item>
         /// <item>Single-pass WinOCR + grow-only; score = total island area.</item>
-        /// <item>Coarse step (0.05) until clear area shrink vs peak, then fine (0.01)
-        /// around the coarse peak. No plateau early-out (that missed late peaks ~0.5).</item>
+        /// <item>Coarse step (0.05) from floor until clear area shrink vs peak, then fine
+        /// (0.01) around the coarse peak. No plateau early-out (missed late peaks ~0.5).</item>
+        /// <item>Global pick across baseline+climb (max area; lower fog on ties).</item>
         /// <item>Final full detect at best fog with user's merge setting.</item>
         /// <item>Crop re-OCR each island; empty/junk text → nuke (fog ghosts).</item>
         /// </list>
@@ -5481,11 +5510,15 @@ namespace SpeakRect
                 }
             }
 
-            // --- Dynamic fog: coarse climb until shrink → fine around peak ---
+            // --- Dynamic fog: baseline 0 → coarse climb until shrink → fine around peak ---
+            // Always score amount=0 (no fog): some pages are better without any veil.
+            // Climb still starts at floor so art-bloated area at 0 does not abort search.
             // Coarse 0.05 samples mid/high peaks (e.g. 0.51) without 0.01×90 grind.
             // No plateau early-out: flat-then-late-peak pages need the climb.
             // Fine 0.01 around coarse peak restores old resolution near the best.
+            // Global pick includes 0 (max area; lower fog on ties → none can win).
             float start = DynamicFogSearchFloor;
+            const float baselineZero = 0f;
             const float coarseStep = 0.05f;
             const float fineStep = 0.01f;
             const float maxFog = 0.95f;
@@ -5493,8 +5526,8 @@ namespace SpeakRect
 
             bool userMerge = EnableMergeOverlappingIslands;
             detail.AppendLine(
-                $"dyn-fog SEARCH: floor={start:0.00} coarse={coarseStep:0.00} " +
-                $"fine={fineStep:0.00} max={maxFog:0.00} " +
+                $"dyn-fog SEARCH: baseline=0.00 climb-floor={start:0.00} " +
+                $"coarse={coarseStep:0.00} fine={fineStep:0.00} max={maxFog:0.00} " +
                 $"(stop=shrink×{shrinkVsPeak:0.00} only, no plateau; " +
                 $"score=single-pass+grow-only area; merge OFF during search; " +
                 $"user merge will restore={userMerge})");
@@ -5519,6 +5552,15 @@ namespace SpeakRect
                 detail.AppendLine(
                     $"  dyn-fog {phase} amount={fogAmt:0.00} islands={islands} " +
                     $"areaSum={score}" + (isPeak ? " *peak*" : ""));
+            }
+
+            // ---- Phase 0: no-fog baseline (not part of climb; included in global pick) ----
+            {
+                token.ThrowIfCancellationRequested();
+                var (zScore, zIslands) = await ScoreDynamicFogTrialAsync(
+                    toneImage, baselineZero, pipeW, pipeH, token).ConfigureAwait(false);
+                scored[baselineZero] = (zScore, zIslands);
+                LogTry("baseline", baselineZero, zScore, zIslands, isPeak: true);
             }
 
             // ---- Phase 1: coarse climb until clear shrink vs peak ----
@@ -5599,8 +5641,9 @@ namespace SpeakRect
                     isPeak || (score == bestScore && Math.Abs(fogAmt - bestFog) < 1e-6f));
             }
 
-            // Global best across every scored amount (strict max; lower fog on ties).
-            bestFog = start;
+            // Global best across every scored amount (incl. baseline 0).
+            // OrderBy amount ascending + only replace on strict > → lower fog on ties.
+            bestFog = baselineZero;
             bestScore = -1;
             foreach (var kv in scored.OrderBy(k => k.Key))
             {
@@ -5612,14 +5655,18 @@ namespace SpeakRect
             }
 
             int trialsRun = scored.Count;
+            long zeroScore = scored.TryGetValue(baselineZero, out var zHit) ? zHit.Score : -1;
             detail.AppendLine(
                 $"dyn-fog CHOSEN: amount={bestFog:0.00} areaSum={bestScore} " +
-                $"trials={trialsRun} (unique OCR) floor={start:0.00} " +
-                $"(merge OFF during search only)");
+                $"trials={trialsRun} (unique OCR) baseline0={zeroScore} " +
+                $"climb-floor={start:0.00} " +
+                $"(merge OFF during search only)" +
+                (bestFog <= 0.001f ? " → no fog" : ""));
             detail.AppendLine(
                 $"dyn-fog FINAL detect @ {bestFog:0.00} with merge-overlap={userMerge}");
 
             // Final full pipeline at best fog — merge follows user setting (not mutated).
+            // amount=0 → ApplyGrayFog clones tone (no veil).
             Bitmap finalFog = ApplyGrayFog(toneImage, bestFog, WinOcrDetectGrayFogLevel);
             try
             {
@@ -5629,8 +5676,10 @@ namespace SpeakRect
                 // Crop re-OCR on the chosen fog view; empty/junk → drop before speak/POI.
                 regions = await VerifyDynFogIslandsWinOcrAsync(
                     finalFog, regions, detail, token).ConfigureAwait(false);
+                // FogAmountStart=0: search always includes no-fog baseline.
                 return (regions, detection, fragmented, finalFog, OwnsDetectImage: true,
-                    FogAmountUsed: bestFog, DynamicFogSearched: true, FogAmountStart: start);
+                    FogAmountUsed: bestFog, DynamicFogSearched: true,
+                    FogAmountStart: baselineZero);
             }
             catch
             {
@@ -5894,6 +5943,29 @@ namespace SpeakRect
             long score = areaScores[i];
 
             return best > 0 && score < best * shrinkVsPeak && bestIdx < i;
+        }
+
+        /// <summary>
+        /// Global dyn-fog pick across scored amounts (incl. baseline 0): max areaSum,
+        /// lower amount on exact ties. Pure helper for unit tests.
+        /// </summary>
+        public static float SmokeSelectDynamicFogBestAmount(
+            IReadOnlyDictionary<float, long> amountToScore)
+        {
+            if (amountToScore == null || amountToScore.Count == 0)
+                return 0f;
+
+            float bestAmt = 0f;
+            long bestScore = -1;
+            foreach (var kv in amountToScore.OrderBy(k => k.Key))
+            {
+                if (kv.Value > bestScore)
+                {
+                    bestScore = kv.Value;
+                    bestAmt = kv.Key;
+                }
+            }
+            return bestAmt;
         }
 
         /// <summary>
@@ -9251,6 +9323,20 @@ namespace SpeakRect
             }
         }
 
+        private void ClearRunFogAnalytics()
+        {
+            _runFogAmountUsed = 0f;
+            _runDynamicFogSearched = false;
+            _runFogAmountStart = 0f;
+        }
+
+        private void SetRunFogAnalytics(float fogUsed, bool dynSearched, float fogStart)
+        {
+            _runFogAmountUsed = fogUsed;
+            _runDynamicFogSearched = dynSearched;
+            _runFogAmountStart = fogStart;
+        }
+
         /// <summary>
         /// Publish analytics snapshot (always) and write last_ocr.txt (Debug builds only).
         /// Called for the speak plan (pre-TTS) and again after timings so Analytics stays current.
@@ -9285,6 +9371,9 @@ namespace SpeakRect
                 Detail = detail?.ToString() ?? "",
                 Unreadable = unreadable,
                 Images = images,
+                FogAmountUsed = _runFogAmountUsed,
+                DynamicFogSearched = _runDynamicFogSearched,
+                FogAmountStart = _runFogAmountStart,
             };
             lock (LastResultLock)
                 LastResult = snapshot;
