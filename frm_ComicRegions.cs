@@ -34,6 +34,12 @@ namespace SpeakRect
         private readonly TrackBar _trkFogAmount;
         private readonly Label _lblFogAmount;
         private readonly Label _lblFogAmountVal;
+        private readonly TrackBar _trkDynFogMin;
+        private readonly Label _lblDynFogMin;
+        private readonly Label _lblDynFogMinVal;
+        private readonly TrackBar _trkDynFogMax;
+        private readonly Label _lblDynFogMax;
+        private readonly Label _lblDynFogMaxVal;
 
         private readonly TrackBar _trkClusterX;
         private readonly Label _lblClusterXVal;
@@ -403,7 +409,7 @@ namespace SpeakRect
 
             _chkDynamicFog = new CheckBox
             {
-                Text = "Dynamic fog (auto — score 0, climb from 0.25)",
+                Text = "Dynamic fog (auto — full 0.01 grind)",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -418,10 +424,26 @@ namespace SpeakRect
             };
             AddFull(_chkDynamicFog, 28);
             AddFull(MakeHint(
-                "On (default): ignore Fog strength — always score no-fog (0), then climb from " +
-                "floor (~0.25) until island area shrinks; keep the peak (none can win). " +
-                "Merge-overlap is off during the search, then restored. Same pipe for live + preview."),
-                56);
+                "On (default): ignore Fog strength. Start at Search floor, walk up by 0.01 " +
+                "to Search ceiling (stock 0.00…1.00). At each step run real multipass balloon " +
+                "detect and measure island count + total box size. Sweet spot = most islands, " +
+                "then largest area — final detect goes back to that amount. Slow but does " +
+                "not skip peaks. Raise floor / lower ceiling to save CPU."),
+                80);
+
+            _trkDynFogMin = MakeTrack(0, 100, 0);
+            _lblDynFogMin = MakeLabel("Search floor");
+            _lblDynFogMinVal = MakeValueLabel();
+            AddRow(_lblDynFogMin, WrapTrack(_trkDynFogMin, _lblDynFogMinVal), 42);
+
+            _trkDynFogMax = MakeTrack(0, 100, 100);
+            _lblDynFogMax = MakeLabel("Search ceiling");
+            _lblDynFogMaxVal = MakeValueLabel();
+            AddRow(_lblDynFogMax, WrapTrack(_trkDynFogMax, _lblDynFogMaxVal), 42);
+            AddFull(MakeHint(
+                "Dyn range only. Stock 0.00…1.00 (~101 trials). Raise floor / lower ceiling " +
+                "to save CPU when you know best fog lives in a band."),
+                40);
 
             _trkFogAmount = MakeTrack(0, 100, 35);
             _lblFogAmount = MakeLabel("Fog strength");
@@ -747,13 +769,19 @@ namespace SpeakRect
             // Track change handlers
             foreach (var t in new[]
             {
-                _trkFogAmount, _trkClusterX, _trkClusterY,
+                _trkFogAmount, _trkDynFogMin, _trkDynFogMax,
+                _trkClusterX, _trkClusterY,
                 _trkInflateX, _trkInflateY, _trkPadding,
                 _trkDenseCount, _trkOrphan, _trkMinAlnum,
             })
             {
                 t.ValueChanged += (_, _) =>
                 {
+                    // Keep floor ≤ ceiling while the user drags either dyn range slider.
+                    if (t == _trkDynFogMin && _trkDynFogMin.Value > _trkDynFogMax.Value)
+                        _trkDynFogMax.Value = _trkDynFogMin.Value;
+                    else if (t == _trkDynFogMax && _trkDynFogMax.Value < _trkDynFogMin.Value)
+                        _trkDynFogMin.Value = _trkDynFogMax.Value;
                     RefreshValueLabels();
                     OnFieldChanged();
                 };
@@ -827,6 +855,8 @@ namespace SpeakRect
             // 1) Detect fog
             Next(_chkFog);
             Next(_chkDynamicFog);
+            Next(_trkDynFogMin);
+            Next(_trkDynFogMax);
             Next(_trkFogAmount);
             // 2) Line merge
             Next(_trkClusterX);
@@ -985,6 +1015,8 @@ namespace SpeakRect
                 s.ComicDetectFog ? "1" : "0",
                 s.ComicDynamicFog ? "1" : "0",
                 s.ComicDetectFogAmount.ToString("0.###", inv),
+                s.ComicDynamicFogMin.ToString("0.###", inv),
+                s.ComicDynamicFogMax.ToString("0.###", inv),
                 s.ComicClusterGapX.ToString("0.###", inv),
                 s.ComicClusterGapY.ToString("0.###", inv),
                 s.ComicInflateFracX.ToString("0.###", inv),
@@ -1123,6 +1155,8 @@ namespace SpeakRect
                     _trkPoiStackBottomPad.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
                 _chkDynamicFog.Checked = s.ComicDynamicFog;
+                _trkDynFogMin.Value = FogToTick(s.ComicDynamicFogMin);
+                _trkDynFogMax.Value = FogToTick(s.ComicDynamicFogMax);
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
                 _trkClusterX.Value = GapToTick(s.ComicClusterGapX);
                 _trkClusterY.Value = GapToTick(s.ComicClusterGapY);
@@ -1296,13 +1330,20 @@ namespace SpeakRect
             _lblPoiStackBottomPadVal.Enabled = stackOn;
             _chkFog.Enabled = ready;
             _chkDynamicFog.Enabled = ready && _chkFog.Checked;
-            // Dyn auto-search ignores the slider — keep it off while dyn is on.
+            bool dynOn = ready && _chkFog.Checked && _chkDynamicFog.Checked;
+            // Dyn range sliders only while dyn is on; fixed strength only while dyn is off.
             bool fogSliderOn = ready && _chkFog.Checked && !_chkDynamicFog.Checked;
+            _trkDynFogMin.Enabled = dynOn;
+            _lblDynFogMin.Enabled = dynOn;
+            _lblDynFogMinVal.Enabled = dynOn;
+            _trkDynFogMax.Enabled = dynOn;
+            _lblDynFogMax.Enabled = dynOn;
+            _lblDynFogMaxVal.Enabled = dynOn;
             _trkFogAmount.Enabled = fogSliderOn;
             _lblFogAmount.Enabled = fogSliderOn;
             _lblFogAmountVal.Enabled = fogSliderOn;
-            _lblFogAmount.Text = (ready && _chkFog.Checked && _chkDynamicFog.Checked)
-                ? "Fog strength (auto)"
+            _lblFogAmount.Text = dynOn
+                ? "Fog strength (unused — dyn)"
                 : "Fog strength";
             _trkClusterX.Enabled = ready;
             _trkClusterY.Enabled = ready;
@@ -1422,6 +1463,8 @@ namespace SpeakRect
             s.ComicDetectFog = _chkFog.Checked;
             s.ComicDynamicFog = _chkDynamicFog.Checked;
             s.ComicDetectFogAmount = TickToFog(_trkFogAmount.Value);
+            s.ComicDynamicFogMin = TickToFog(_trkDynFogMin.Value);
+            s.ComicDynamicFogMax = TickToFog(_trkDynFogMax.Value);
             s.ComicClusterGapX = TickToGap(_trkClusterX.Value);
             s.ComicClusterGapY = TickToGap(_trkClusterY.Value);
             s.ComicInflateFracX = TickToInflate(_trkInflateX.Value);
@@ -1705,13 +1748,21 @@ namespace SpeakRect
             bool ready = HasSource && !_speakBusy;
             bool fogOn = ready && _chkFog.Checked;
             bool dynOn = fogOn && _chkDynamicFog.Checked;
-            // Dyn ignores the slider — disable so it is not a fake control.
             _chkDynamicFog.Enabled = fogOn;
+            // Dyn range active only when dyn is on; fixed strength only when dyn is off.
+            _trkDynFogMin.Enabled = dynOn;
+            _lblDynFogMin.Enabled = dynOn;
+            _lblDynFogMinVal.Enabled = dynOn;
+            _trkDynFogMin.TabStop = dynOn;
+            _trkDynFogMax.Enabled = dynOn;
+            _lblDynFogMax.Enabled = dynOn;
+            _lblDynFogMaxVal.Enabled = dynOn;
+            _trkDynFogMax.TabStop = dynOn;
             _trkFogAmount.Enabled = fogOn && !dynOn;
             _lblFogAmount.Enabled = _trkFogAmount.Enabled;
             _lblFogAmountVal.Enabled = _trkFogAmount.Enabled;
             _trkFogAmount.TabStop = _trkFogAmount.Enabled;
-            _lblFogAmount.Text = dynOn ? "Fog strength (auto)" : "Fog strength";
+            _lblFogAmount.Text = dynOn ? "Fog strength (unused — dyn)" : "Fog strength";
         }
 
         private void ResetDefaults()
@@ -2317,6 +2368,8 @@ namespace SpeakRect
         {
             var inv = CultureInfo.InvariantCulture;
             _lblFogAmountVal.Text = TickToFog(_trkFogAmount.Value).ToString("0.00", inv);
+            _lblDynFogMinVal.Text = TickToFog(_trkDynFogMin.Value).ToString("0.00", inv);
+            _lblDynFogMaxVal.Text = TickToFog(_trkDynFogMax.Value).ToString("0.00", inv);
             _lblClusterXVal.Text = TickToGap(_trkClusterX.Value).ToString("0.00", inv);
             _lblClusterYVal.Text = TickToGap(_trkClusterY.Value).ToString("0.00", inv);
             _lblInflateXVal.Text = TickToInflate(_trkInflateX.Value).ToString("0.00", inv);

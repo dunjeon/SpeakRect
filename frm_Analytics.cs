@@ -807,11 +807,11 @@ namespace SpeakRect
             Section(sb, "DETECT FOG");
             if (result.DynamicFogSearched)
             {
-                Row(sb, "Mode", "dynamic (auto)");
-                Row(sb, "Baseline", "0.00 (no fog always scored)");
-                Row(sb, "Climb floor",
-                    OcrProcessor.DynamicFogSearchFloor.ToString("0.00"));
-                Row(sb, "Start", result.FogAmountStart.ToString("0.00"));
+                Row(sb, "Mode", "dynamic (linear 0.01 grind)");
+                Row(sb, "Search range",
+                    $"{result.FogAmountStart:0.00}…{AppSettings.Current.ComicDynamicFogMax:0.00}");
+                Row(sb, "Step",
+                    OcrProcessor.DynamicFogSearchStep.ToString("0.00"));
                 Row(sb, "Chosen",
                     result.FogAmountUsed <= 0.001f
                         ? "0.00 (no fog)"

@@ -146,6 +146,144 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Dyn_fog_keep_prior_text_when_crop_empty()
+    {
+        // Cuff-page miss: full-frame saw "...USE..." but crop re-OCR returned empty.
+        // Must keep — not a fog ghost.
+        Assert.True(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("...USE.„"));
+        Assert.True(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("USE"));
+        Assert.True(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("…USE… ME…"));
+        Assert.True(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("No!"));
+        Assert.True(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("we don't have a weapon"));
+
+        // True ghosts / junk prior → still nuke on empty crop.
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop(null));
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop(""));
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("   "));
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("!"));
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("a"));
+        Assert.False(OcrProcessor.SmokeDynFogKeepOnEmptyCrop("123"));
+    }
+
+    [Fact]
+    public void Dynamic_fog_global_pick_still_prefers_zero_on_tie()
+    {
+        // Baseline 0 remains a strong play: equal area → none wins.
+        // (Island-verify skip/prior-keep is what saves tiny balloons at 0,
+        //  not forcing climb-floor over an equal baseline.)
+        var scores = new Dictionary<float, long>
+        {
+            [0f] = 42224,
+            [0.25f] = 42224,
+            [0.30f] = 42224,
+        };
+        Assert.Equal(0f, OcrProcessor.SmokeSelectDynamicFogBestAmount(scores));
+    }
+
+    [Fact]
+    public void Dynamic_fog_linear_grind_defaults()
+    {
+        // Full 0.01 grind stock range 0.00…1.00 (user can shrink with floor/ceiling).
+        Assert.Equal(0.01f, OcrProcessor.DynamicFogSearchStep);
+        Assert.Equal(0f, OcrProcessor.DynamicFogSearchFloor);
+        Assert.Equal(1f, OcrProcessor.DynamicFogSearchMax);
+        Assert.Equal(0f, AppSettings.DefaultComicDynamicFogMin);
+        Assert.Equal(1f, AppSettings.DefaultComicDynamicFogMax);
+
+        AppSettings.Current.ResetComicRegionSettingsToDefaults();
+        Assert.Equal(0f, AppSettings.Current.ComicDynamicFogMin);
+        Assert.Equal(1f, AppSettings.Current.ComicDynamicFogMax);
+    }
+
+    [Fact]
+    public void Dynamic_fog_min_max_normalize_swaps_when_inverted()
+    {
+        var s = AppSettings.Current;
+        try
+        {
+            s.ComicDynamicFogMin = 0.80f;
+            s.ComicDynamicFogMax = 0.20f;
+            s.NormalizeComicRegionSettings();
+            Assert.Equal(0.20f, s.ComicDynamicFogMin);
+            Assert.Equal(0.80f, s.ComicDynamicFogMax);
+        }
+        finally
+        {
+            s.ResetComicRegionSettingsToDefaults();
+        }
+    }
+
+    [Fact]
+    public void Dynamic_fog_global_pick_prefers_mid_range_peak()
+    {
+        // Same island counts: largest area wins (0.55).
+        var scores = new Dictionary<float, long>
+        {
+            [0f] = 40000,
+            [0.25f] = 40000,
+            [0.30f] = 39800,
+            [0.50f] = 41000,
+            [0.55f] = 45000,
+            [0.60f] = 42000,
+            [1.00f] = 10000,
+        };
+        Assert.Equal(0.55f, OcrProcessor.SmokeSelectDynamicFogBestAmount(scores));
+    }
+
+    [Fact]
+    public void Dynamic_fog_pick_more_islands_beats_larger_area()
+    {
+        // Peak rule: MOST boxes first, then largest. 3 smaller balloons beat 1 mega blob.
+        var scores = new Dictionary<float, long>
+        {
+            [0f] = 50000,
+            [0.55f] = 30000,
+        };
+        var islands = new Dictionary<float, int>
+        {
+            [0f] = 1,
+            [0.55f] = 3,
+        };
+        Assert.Equal(
+            0.55f,
+            OcrProcessor.SmokeSelectDynamicFogBestAmount(scores, islands));
+    }
+
+    [Fact]
+    public void Dynamic_fog_pick_same_islands_prefers_larger_area()
+    {
+        var scores = new Dictionary<float, long>
+        {
+            [0.30f] = 20000,
+            [0.55f] = 35000,
+            [0.70f] = 25000,
+        };
+        var islands = new Dictionary<float, int>
+        {
+            [0.30f] = 2,
+            [0.55f] = 2,
+            [0.70f] = 2,
+        };
+        Assert.Equal(
+            0.55f,
+            OcrProcessor.SmokeSelectDynamicFogBestAmount(scores, islands));
+    }
+
+    [Fact]
+    public void Dynamic_fog_coverage_is_better_matches_climb_rule()
+    {
+        // More islands always better.
+        Assert.True(OcrProcessor.SmokeDynFogCoverageIsBetter(3, 100, 2, 99999));
+        // Fewer islands never better even if huge area.
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(1, 99999, 2, 100));
+        // Same islands: larger area better.
+        Assert.True(OcrProcessor.SmokeDynFogCoverageIsBetter(2, 500, 2, 400));
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(2, 400, 2, 500));
+        // Equal: not better (keep lower fog / earlier peak).
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(2, 500, 2, 500));
+    }
+
+    [Fact]
     public void Real_dialogue_token_accepts_short_callouts()
     {
         Assert.True(ComicBestOfFusion.LooksLikeRealDialogueToken("SORRY"));

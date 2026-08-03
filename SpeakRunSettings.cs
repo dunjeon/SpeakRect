@@ -32,6 +32,8 @@ namespace SpeakRect
         public bool ComicDetectFog { get; init; }
         public float ComicDetectFogAmount { get; init; }
         public bool ComicDynamicFog { get; init; }
+        public float ComicDynamicFogMin { get; init; }
+        public float ComicDynamicFogMax { get; init; }
         public double ComicClusterGapX { get; init; }
         public double ComicClusterGapY { get; init; }
         public double ComicInflateFracX { get; init; }
@@ -115,6 +117,8 @@ namespace SpeakRect
                 ComicDetectFog = s.ComicDetectFog,
                 ComicDetectFogAmount = s.ComicDetectFogAmount,
                 ComicDynamicFog = s.ComicDynamicFog,
+                ComicDynamicFogMin = s.ComicDynamicFogMin,
+                ComicDynamicFogMax = s.ComicDynamicFogMax,
                 ComicClusterGapX = s.ComicClusterGapX,
                 ComicClusterGapY = s.ComicClusterGapY,
                 ComicInflateFracX = s.ComicInflateFracX,
@@ -236,6 +240,12 @@ namespace SpeakRect
 
         public static bool GetComicDynamicFog() =>
             Active?.ComicDynamicFog ?? AppSettings.Current.ComicDynamicFog;
+
+        public static float GetComicDynamicFogMin() =>
+            Active?.ComicDynamicFogMin ?? AppSettings.Current.ComicDynamicFogMin;
+
+        public static float GetComicDynamicFogMax() =>
+            Active?.ComicDynamicFogMax ?? AppSettings.Current.ComicDynamicFogMax;
 
         public static double GetComicClusterGapX() =>
             Active?.ComicClusterGapX ?? AppSettings.Current.ComicClusterGapX;
