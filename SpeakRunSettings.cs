@@ -28,19 +28,12 @@ namespace SpeakRect
         public int ComicPoiAutoStackMarginPx { get; init; }
         public double ComicPoiStackBeefExtra { get; init; }
         public double ComicPoiStackBottomPadShare { get; init; }
-        public bool ComicSequentialRegions { get; init; }
         public bool ComicDetectFog { get; init; }
         public float ComicDetectFogAmount { get; init; }
-        public double ComicClusterGapX { get; init; }
-        public double ComicClusterGapY { get; init; }
         public double ComicInflateFracX { get; init; }
         public double ComicInflateFracY { get; init; }
         public int ComicRegionPadding { get; init; }
-        public int ComicDenseIslandCount { get; init; }
-        public bool ComicSplitLargeRegions { get; init; }
         public bool ComicMergeOverlappingIslands { get; init; }
-        public int ComicOrphanRecoverPasses { get; init; }
-        public int ComicMinIslandAlnum { get; init; }
 
         // ---- Image prep ----
         public bool ImagePrepEnabled { get; init; }
@@ -110,19 +103,12 @@ namespace SpeakRect
                 ComicPoiAutoStackMarginPx = s.ComicPoiAutoStackMarginPx,
                 ComicPoiStackBeefExtra = s.ComicPoiStackBeefExtra,
                 ComicPoiStackBottomPadShare = s.ComicPoiStackBottomPadShare,
-                ComicSequentialRegions = s.ComicSequentialRegions,
                 ComicDetectFog = s.ComicDetectFog,
                 ComicDetectFogAmount = s.ComicDetectFogAmount,
-                ComicClusterGapX = s.ComicClusterGapX,
-                ComicClusterGapY = s.ComicClusterGapY,
                 ComicInflateFracX = s.ComicInflateFracX,
                 ComicInflateFracY = s.ComicInflateFracY,
                 ComicRegionPadding = s.ComicRegionPadding,
-                ComicDenseIslandCount = s.ComicDenseIslandCount,
-                ComicSplitLargeRegions = s.ComicSplitLargeRegions,
                 ComicMergeOverlappingIslands = s.ComicMergeOverlappingIslands,
-                ComicOrphanRecoverPasses = s.ComicOrphanRecoverPasses,
-                ComicMinIslandAlnum = s.ComicMinIslandAlnum,
 
                 ImagePrepEnabled = s.ImagePrepEnabled,
                 ImageLetterbox = s.ImageLetterbox,
@@ -223,20 +209,11 @@ namespace SpeakRect
             Active?.ComicPoiStackBottomPadShare ??
             AppSettings.Current.ComicPoiStackBottomPadShare;
 
-        public static bool GetComicSequentialRegions() =>
-            Active?.ComicSequentialRegions ?? AppSettings.Current.ComicSequentialRegions;
-
         public static bool GetComicDetectFog() =>
             Active?.ComicDetectFog ?? AppSettings.Current.ComicDetectFog;
 
         public static float GetComicDetectFogAmount() =>
             Active?.ComicDetectFogAmount ?? AppSettings.Current.ComicDetectFogAmount;
-
-        public static double GetComicClusterGapX() =>
-            Active?.ComicClusterGapX ?? AppSettings.Current.ComicClusterGapX;
-
-        public static double GetComicClusterGapY() =>
-            Active?.ComicClusterGapY ?? AppSettings.Current.ComicClusterGapY;
 
         public static double GetComicInflateFracX() =>
             Active?.ComicInflateFracX ?? AppSettings.Current.ComicInflateFracX;
@@ -247,21 +224,9 @@ namespace SpeakRect
         public static int GetComicRegionPadding() =>
             Active?.ComicRegionPadding ?? AppSettings.Current.ComicRegionPadding;
 
-        public static int GetComicDenseIslandCount() =>
-            Active?.ComicDenseIslandCount ?? AppSettings.Current.ComicDenseIslandCount;
-
-        public static bool GetComicSplitLargeRegions() =>
-            Active?.ComicSplitLargeRegions ?? AppSettings.Current.ComicSplitLargeRegions;
-
         public static bool GetComicMergeOverlappingIslands() =>
             Active?.ComicMergeOverlappingIslands ??
             AppSettings.Current.ComicMergeOverlappingIslands;
-
-        public static int GetComicOrphanRecoverPasses() =>
-            Active?.ComicOrphanRecoverPasses ?? AppSettings.Current.ComicOrphanRecoverPasses;
-
-        public static int GetComicMinIslandAlnum() =>
-            Active?.ComicMinIslandAlnum ?? AppSettings.Current.ComicMinIslandAlnum;
 
         public static bool GetImagePrepEnabled() =>
             Active?.ImagePrepEnabled ?? AppSettings.Current.ImagePrepEnabled;

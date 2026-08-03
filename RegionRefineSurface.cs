@@ -402,9 +402,7 @@ namespace SpeakRect
             var s = AppSettings.Current;
             if (s.ComicPoiAutoStack)
                 return "POI map · multi · Speak = orange island VL ×N (not this page)";
-            if (s.ComicSequentialRegions)
-                return "POI map · multi · Speak = sequential per island";
-            return "POI map · multi · Speak = crop-stack best-of";
+            return "POI map · multi · Speak = per-island on tone";
         }
 
         /// <summary>

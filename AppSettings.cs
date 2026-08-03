@@ -184,15 +184,9 @@ namespace SpeakRect
         // -----------------------------------------------------------------------
 
         public const float DefaultComicDetectFogAmount = 0.35f;
-        public const double DefaultComicClusterGapX = 1.05;
-        public const double DefaultComicClusterGapY = 1.15;
         public const double DefaultComicInflateFracX = 0.22;
         public const double DefaultComicInflateFracY = 0.28;
         public const int DefaultComicRegionPadding = 16;
-        /// <summary>0 = dense-page milder pad off for all modes (user can enable in Balloons).</summary>
-        public const int DefaultComicDenseIslandCount = 0;
-        public const int DefaultComicOrphanRecoverPasses = 6;
-        public const int DefaultComicMinIslandAlnum = 4;
 
         /// <summary>Gray fog on the image OCR uses for balloon detect (Local-LLM reads clear tone).</summary>
         public bool ComicDetectFog { get; set; } = true;
@@ -200,18 +194,6 @@ namespace SpeakRect
         /// <summary>Fog blend 0..1 (default 0.35). Higher softens art so ink plates stand out
         /// for WinOCR balloon detect. Local-LLM still reads the clear tone image.</summary>
         public float ComicDetectFogAmount { get; set; } = DefaultComicDetectFogAmount;
-
-        /// <summary>
-        /// Line-cluster horizontal gap factor (median line height × this).
-        /// Lower = keep side-by-side balloons separate; higher = glue more lines.
-        /// </summary>
-        public double ComicClusterGapX { get; set; } = DefaultComicClusterGapX;
-
-        /// <summary>
-        /// Line-cluster vertical gap factor. Lower = keep stacked balloons separate;
-        /// higher = merge multi-line speech into one island.
-        /// </summary>
-        public double ComicClusterGapY { get; set; } = DefaultComicClusterGapY;
 
         /// <summary>Grow each island by this fraction of its width (each side).</summary>
         public double ComicInflateFracX { get; set; } = DefaultComicInflateFracX;
@@ -223,17 +205,6 @@ namespace SpeakRect
         public int ComicRegionPadding { get; set; } = DefaultComicRegionPadding;
 
         /// <summary>
-        /// When detect finds this many islands (or more), use milder pad so dense
-        /// pages stay separable. 0 = never switch to dense pad.
-        /// </summary>
-        public int ComicDenseIslandCount { get; set; } = DefaultComicDenseIslandCount;
-
-        /// <summary>
-        /// Re-detect inside huge full-width / large-area islands (caption + row globs).
-        /// </summary>
-        public bool ComicSplitLargeRegions { get; set; } = true;
-
-        /// <summary>
         /// When true (default): after Grow X/Y and Crop pad, any islands whose
         /// effective boxes overlap are merged into one union rectangle (covers all
         /// text; no crop cutoff). Helps dense OCR island scenes where close
@@ -243,31 +214,10 @@ namespace SpeakRect
         public bool ComicMergeOverlappingIslands { get; set; } = true;
 
         /// <summary>
-        /// Max bright-blob orphan balloons to re-OCR after full-frame detect misses.
-        /// 0 = no orphan recovery.
-        /// </summary>
-        public int ComicOrphanRecoverPasses { get; set; } = DefaultComicOrphanRecoverPasses;
-
-        /// <summary>
-        /// Drop detect islands with fewer alphanumeric characters than this
-        /// (costume art, scrap glyphs). <b>0 = off</b> (do not filter by letter count).
-        /// </summary>
-        public int ComicMinIslandAlnum { get; set; } = DefaultComicMinIslandAlnum;
-
-        /// <summary>
-        /// When true: OCR each balloon alone, speak it, wait for TTS, then the
-        /// next region. Isolates balloons so cross-region word reuse never hits
-        /// global speak-dedupe (e.g. "Really?" after "it's really…").
-        /// When false: vertical crop-stack (one OCR image) + global unit plan.
-        /// Balloons §9 · SPEAK PATH — on by default for all modes.
-        /// </summary>
-        public bool ComicSequentialRegions { get; set; } = true;
-
-        /// <summary>
         /// Comic Book alternate: tone + green region boxes (± outside fog map).
         /// Stock: <see cref="ComicPoiAutoStack"/> on → each island orange canvas VL
-        /// one at a time. Stack off/fail multi → §9 sequential or crop-stack.
-        /// 1 island + stack off → full-page guide VL. Forces Comic Book on.
+        /// one at a time (not multi-strip stack). Stack off/fail multi → per-island
+        /// VL on tone. 1 island + stack off → full-page guide VL. Forces Comic Book on.
         /// Preview is full-page edit map (not always VL input).
         /// Product Default mode / fresh ini: off. Comic Book starting defaults
         /// (first MODE enter, Balloons reset while in Comic Book): on.
@@ -321,15 +271,9 @@ namespace SpeakRect
         public void NormalizeComicRegionSettings()
         {
             ComicDetectFogAmount = Math.Clamp(ComicDetectFogAmount, 0f, 1f);
-            ComicClusterGapX = Math.Clamp(ComicClusterGapX, 0.25, 3.0);
-            ComicClusterGapY = Math.Clamp(ComicClusterGapY, 0.25, 3.0);
             ComicInflateFracX = Math.Clamp(ComicInflateFracX, 0.0, 0.80);
             ComicInflateFracY = Math.Clamp(ComicInflateFracY, 0.0, 0.80);
             ComicRegionPadding = Math.Clamp(ComicRegionPadding, 0, 64);
-            ComicDenseIslandCount = Math.Clamp(ComicDenseIslandCount, 0, 20);
-            ComicOrphanRecoverPasses = Math.Clamp(ComicOrphanRecoverPasses, 0, 16);
-            // 0 = disabled (keep all non-junk islands regardless of alnum count)
-            ComicMinIslandAlnum = Math.Clamp(ComicMinIslandAlnum, 0, 40);
             ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 64);
             ComicPoiAutoStackMarginPx = Math.Clamp(ComicPoiAutoStackMarginPx, 0, 64);
             ComicPoiStackBeefExtra = Math.Clamp(ComicPoiStackBeefExtra, 0.0, 1.5);
@@ -352,17 +296,10 @@ namespace SpeakRect
         {
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
-            ComicClusterGapX = DefaultComicClusterGapX;
-            ComicClusterGapY = DefaultComicClusterGapY;
             ComicInflateFracX = DefaultComicInflateFracX;
             ComicInflateFracY = DefaultComicInflateFracY;
             ComicRegionPadding = DefaultComicRegionPadding;
-            ComicDenseIslandCount = DefaultComicDenseIslandCount;
-            ComicSplitLargeRegions = true;
             ComicMergeOverlappingIslands = true;
-            ComicOrphanRecoverPasses = DefaultComicOrphanRecoverPasses;
-            ComicMinIslandAlnum = DefaultComicMinIslandAlnum;
-            ComicSequentialRegions = true;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
@@ -1207,7 +1144,7 @@ namespace SpeakRect
         /// Same POI/Comic Book stock as
         /// <see cref="ResetComicRegionSettingsToDefaults"/>(asComicBookMode: true)
         /// for feature flags (POI on); does not force every detect numeric knob so
-        /// a MODE toggle does not wipe user-tuned cluster/pad values.
+        /// a MODE toggle does not wipe user-tuned grow/pad values.
         /// </summary>
         public void ApplyComicBookModeStartingDefaults()
         {
@@ -1226,8 +1163,6 @@ namespace SpeakRect
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
             ComicMergeOverlappingIslands = true;
-            ComicSplitLargeRegions = true;
-            ComicSequentialRegions = true;
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
@@ -1566,15 +1501,9 @@ namespace SpeakRect
                 float.TryParse(fogAmtRaw, System.Globalization.NumberStyles.Float, inv, out float fogAmt))
                 ComicDetectFogAmount = fogAmt;
 
-            // Legacy ComicDynamicFog / Min / Max keys ignored (feature removed).
-
-            if (map.TryGetValue("ComicClusterGapX", out string? gapXRaw) &&
-                double.TryParse(gapXRaw, System.Globalization.NumberStyles.Float, inv, out double gapX))
-                ComicClusterGapX = gapX;
-
-            if (map.TryGetValue("ComicClusterGapY", out string? gapYRaw) &&
-                double.TryParse(gapYRaw, System.Globalization.NumberStyles.Float, inv, out double gapY))
-                ComicClusterGapY = gapY;
+            // Legacy keys ignored (features removed): ComicDynamicFog*, ClusterGap*,
+            // DenseIslandCount, SplitLargeRegions, OrphanRecoverPasses, MinIslandAlnum,
+            // SequentialRegions.
 
             if (map.TryGetValue("ComicInflateFracX", out string? infXRaw) &&
                 double.TryParse(infXRaw, System.Globalization.NumberStyles.Float, inv, out double infX))
@@ -1588,29 +1517,9 @@ namespace SpeakRect
                 int.TryParse(padRaw, System.Globalization.NumberStyles.Integer, inv, out int pad))
                 ComicRegionPadding = pad;
 
-            if (map.TryGetValue("ComicDenseIslandCount", out string? denseRaw) &&
-                int.TryParse(denseRaw, System.Globalization.NumberStyles.Integer, inv, out int dense))
-                ComicDenseIslandCount = dense;
-
-            if (map.TryGetValue("ComicSplitLargeRegions", out string? splitRaw) &&
-                TryParseBool(splitRaw, out bool split))
-                ComicSplitLargeRegions = split;
-
             if (map.TryGetValue("ComicMergeOverlappingIslands", out string? mergeRaw) &&
                 TryParseBool(mergeRaw, out bool merge))
                 ComicMergeOverlappingIslands = merge;
-
-            if (map.TryGetValue("ComicOrphanRecoverPasses", out string? orphanRaw) &&
-                int.TryParse(orphanRaw, System.Globalization.NumberStyles.Integer, inv, out int orphan))
-                ComicOrphanRecoverPasses = orphan;
-
-            if (map.TryGetValue("ComicMinIslandAlnum", out string? minAlnumRaw) &&
-                int.TryParse(minAlnumRaw, System.Globalization.NumberStyles.Integer, inv, out int minAlnum))
-                ComicMinIslandAlnum = minAlnum;
-
-            if (map.TryGetValue("ComicSequentialRegions", out string? seqRaw) &&
-                TryParseBool(seqRaw, out bool seq))
-                ComicSequentialRegions = seq;
 
             if (map.TryGetValue("ComicPoiMarkers", out string? poiRaw) &&
                 TryParseBool(poiRaw, out bool poi))
@@ -2455,43 +2364,24 @@ namespace SpeakRect
                 sb.AppendLine();
                 NormalizeComicRegionSettings();
                 sb.AppendLine("[COMIC_REGIONS]");
-                sb.AppendLine("; Comic Book mode only — balloon / OCR region detect tuning.");
+                sb.AppendLine("; Comic Book mode only — balloon detect + POI island canvases.");
                 sb.AppendLine("; DetectFog softens art for OCR detect; Local-LLM still reads the clear tone image.");
-                sb.AppendLine("; ClusterGap* = line-merge distance (lower = separate balloons).");
                 sb.AppendLine("; InflateFrac* / RegionPadding = box pad around islands.");
-                sb.AppendLine("; DenseIslandCount = use milder pad when this many islands (0 = off, stock).");
-                sb.AppendLine("; SplitLargeRegions = re-detect inside mega caption/row globs.");
-                sb.AppendLine("; MergeOverlappingIslands=true (default): union any islands whose boxes");
-                sb.AppendLine(";   would overlap after Grow + Crop pad (covers all text).");
+                sb.AppendLine("; MergeOverlappingIslands=true (default): union islands that overlap after Grow + pad.");
                 sb.AppendLine(";   false = nudge grow-overlaps apart instead.");
-                sb.AppendLine("; OrphanRecoverPasses = max missed balloon re-OCR attempts.");
-                sb.AppendLine("; MinIslandAlnum = drop scrap islands below this letter count (0 = off).");
-                sb.AppendLine("; SequentialRegions=true (default, Balloons §9): OCR+speak each balloon alone.");
-                sb.AppendLine("; SequentialRegions=false: vertical crop-stack + global plan.");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
-                sb.AppendLine(";   AutoStack on (stock): per-island orange canvas VL ×N (preview = full-page map only).");
-                sb.AppendLine(";   AutoStack off + multi: §9 Sequential or crop-stack. 1 island + stack off: full-page VL.");
-                sb.AppendLine("; PoiFogOutside=true: thick gray fog outside island boxes on the tone map canvas.");
-                sb.AppendLine("; PoiAutoStack=true: each island → own orange canvas → Local-LLM one at a time");
-                sb.AppendLine(";   (preview stays on full page for editing). Not one multi-strip image.");
-                sb.AppendLine(";   Margin=outer pad on each canvas. Gap used by multi-strip crop-stack only.");
-                sb.AppendLine("; StackBeefExtra=0 (stock: no extra canvas). Pad only — both POI + crop stacks.");
-                sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
-                sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
+                sb.AppendLine("; PoiAutoStack=true (stock): each island → own orange canvas → Local-LLM one at a time.");
+                sb.AppendLine(";   Not multi-strip stack. Preview stays full page. Stack off/fail multi → per-island VL.");
+                sb.AppendLine(";   1 island + stack off → full-page guide VL.");
+                sb.AppendLine("; PoiFogOutside=true: thick gray fog outside boxes on the full-page map (not VL when canvases on).");
+                sb.AppendLine("; PoiAutoStackMarginPx=12 (outer pad per canvas). Gap/beef for canvas compose A/B.");
                 sb.AppendLine("; DetectFog=true + DetectFogAmount: fixed gray fog for WinOCR balloon detect.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");
-                sb.AppendLine($"ComicClusterGapX={ComicClusterGapX.ToString("0.###", inv)}");
-                sb.AppendLine($"ComicClusterGapY={ComicClusterGapY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicInflateFracX={ComicInflateFracX.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicInflateFracY={ComicInflateFracY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicRegionPadding={ComicRegionPadding}");
-                sb.AppendLine($"ComicDenseIslandCount={ComicDenseIslandCount}");
-                sb.AppendLine($"ComicSplitLargeRegions={ComicSplitLargeRegions.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicMergeOverlappingIslands={ComicMergeOverlappingIslands.ToString().ToLowerInvariant()}");
-                sb.AppendLine($"ComicOrphanRecoverPasses={ComicOrphanRecoverPasses}");
-                sb.AppendLine($"ComicMinIslandAlnum={ComicMinIslandAlnum}");
-                sb.AppendLine($"ComicSequentialRegions={ComicSequentialRegions.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiMarkers={ComicPoiMarkers.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
@@ -2744,12 +2634,8 @@ namespace SpeakRect
                 or "AppendedSilence" or "PunctuationSilence"
                 or "UseCustomPauseEncodings"
                 or "CommaPauseMs" or "SentencePauseMs" or "OtherPauseMs" or "BubblePauseMs"
-                or "ComicClusterGapX" or "ComicClusterGapY"
                 or "ComicInflateFracX" or "ComicInflateFracY"
-                or "ComicRegionPadding" or "ComicDenseIslandCount"
-                or "ComicSplitLargeRegions" or "ComicMergeOverlappingIslands"
-                or "ComicOrphanRecoverPasses"
-                or "ComicMinIslandAlnum" or "ComicSequentialRegions"
+                or "ComicRegionPadding" or "ComicMergeOverlappingIslands"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
                 or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
                 or "ComicPoiStackBeefExtra" or "ComicPoiStackBottomPadShare"

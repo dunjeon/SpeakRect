@@ -815,8 +815,8 @@ Console.WriteLine("--- Speech cleaner ---");
             megaEcho.Count == 1 &&
             megaEcho[0].Contains("north", StringComparison.Ordinal),
             $"mega=[{string.Join(" | ", megaEcho)}]");
-        Check("ComicSequentialRegions defaults on (Balloons §9)",
-            AppSettings.Current.ComicSequentialRegions);
+        Check("Comic POI AutoStack defaults on (island canvases)",
+            AppSettings.Current.ComicPoiAutoStack || !AppSettings.Current.ComicBook);
     }
     Check("Bare 'no' (no punct) is usable OCR",
         OcrProcessor.SmokeIsUsableOcrText("no"));

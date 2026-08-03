@@ -80,11 +80,11 @@ Optional OCR fallback for very short text on busy art (settings-dependent).
 
 ```
 shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads tone)
-  → BalloonOcrDetect multi-pass / cluster
-  → ComicRegionGeometry merge/sort/pad
+  → BalloonOcrDetect multi-pass / line group
+  → grow/pad/merge/sort
   → [if ComicPoiMarkers] RunComicPoiGuideAsync (see POI below)
-  → else [if ComicSequentialRegions] sequential per island
-  → else crop-stack best-of (RunFullAndCropsBestOfAsync)
+  → else per-island OCR+TTS when islands found
+  → else crop-stack best-of (empty / no islands)
   → SpeechCleaner → TTS
 ```
 
@@ -92,10 +92,10 @@ shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads t
 Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**
 - **Canvas is always TONE** (detect fog is WinOCR-only; never POI base).  
 - Preview seeds **tone** when POI is on; display boxes = grow + crop pad (final). Full-page green guide always published for analytics/preview (`poi_guide`).  
-- **`ComicPoiAutoStack` on (stock):** each island → its own orange canvas (`BuildVerticalStack` one box) → **one VL call per island** (`comic-poi-stack`). Preview stays full-page map for editing (not VL input).  
-- **Stack off/fail + multi-island:** honor Balloons §9 — Sequential **on** → per-island OCR+TTS; Sequential **off** → crop-stack best-of on tone.  
-- **1 island + stack off/fail:** full-page guide VL.  
-- Stack compose: orange + beef/bottom-pad; hard long-edge **2560** (even if Image downscale is off). Image-tab downscale default **off**.  
+- **`ComicPoiAutoStack` on (stock):** each island → its own orange canvas (`BuildVerticalStack` one box) → **one VL call per island** (`comic-poi-stack`). Preview stays full-page map for editing (not VL input). **Not multi-strip stack.**  
+- **Island-canvas off/fail + multi-island:** per-island OCR+TTS on tone.  
+- **1 island + canvas off/fail:** full-page guide VL.  
+- Canvas compose: orange + beef/bottom-pad; hard long-edge **2560** (even if Image downscale is off). Image-tab downscale default **off**.  
 - Balloons Speak publishes Analytics (`_runImages`) without clearing refine session.  
 - Analytics `regions` = WinOCR detect paint; `poi_guide` = full-page map; `llm_island_*` = actual VL send.
 

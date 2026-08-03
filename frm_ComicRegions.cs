@@ -34,11 +34,6 @@ namespace SpeakRect
         private readonly Label _lblFogAmount;
         private readonly Label _lblFogAmountVal;
 
-        private readonly TrackBar _trkClusterX;
-        private readonly Label _lblClusterXVal;
-        private readonly TrackBar _trkClusterY;
-        private readonly Label _lblClusterYVal;
-
         private readonly TrackBar _trkInflateX;
         private readonly Label _lblInflateXVal;
         private readonly TrackBar _trkInflateY;
@@ -46,19 +41,7 @@ namespace SpeakRect
         private readonly TrackBar _trkPadding;
         private readonly Label _lblPaddingVal;
 
-        private readonly TrackBar _trkDenseCount;
-        private readonly Label _lblDenseCountVal;
-
-        private readonly CheckBox _chkSplitLarge;
         private readonly CheckBox _chkMergeOverlap;
-
-        private readonly TrackBar _trkOrphan;
-        private readonly Label _lblOrphanVal;
-
-        private readonly TrackBar _trkMinAlnum;
-        private readonly Label _lblMinAlnumVal;
-
-        private readonly CheckBox _chkSequential;
 
         private readonly RegionRefineSurface _refine;
         private readonly Label _lblPreviewHeader;
@@ -105,7 +88,7 @@ namespace SpeakRect
         private bool _detectViewOnly;
 
         /// <summary>
-        /// Detect-knob signature baked into the current refine seed (grow, pad, cluster, …).
+        /// Detect-knob signature baked into the current refine seed (fog, grow, pad, merge, …).
         /// When this drifts and boxes are not user-edited, Speak re-detects so solid
         /// green boxes match the knobs.
         /// </summary>
@@ -113,12 +96,8 @@ namespace SpeakRect
 
         // Track scales (integer) ↔ real values
         // Fog amount: 0..100 → 0.00..1.00
-        // Cluster: 25..300 → 0.25..3.00
         // Inflate: 0..80 → 0.00..0.80
         // Pad: 0..64 px
-        // Dense: 0..20
-        // Orphan: 0..16
-        // Min alnum: 0..40 (0 = off)
 
         public frm_ComicRegions(
             bool embedded = false,
@@ -265,10 +244,10 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "On: switches to Comic Book mode (sidebar MODE updates). OCR finds text islands, " +
                 "draws bright green boxes on the gray prep (same as this preview), optional fog " +
-                "outside them. Speak: with Stack on (stock) → each island on its own orange " +
-                "canvas to Local-LLM one at a time; Stack off/fail multi → §9 Sequential or " +
-                "crop-stack; 1 island → full-page guide. " +
-                "OCR prompt is under Speech → Prompts (one for all paths). Grow / crop pad size the islands."),
+                "outside them. Speak: with Island canvases on (stock) → each island on its own orange " +
+                "canvas to Local-LLM one at a time (not multi-strip stack); canvases off/fail multi → " +
+                "per-island on tone; 1 island → full-page guide. " +
+                "OCR prompt is under Speech → Prompts. Grow / crop pad size the islands."),
                 72);
 
             _chkPoiFogOutside = new CheckBox
@@ -374,9 +353,9 @@ namespace SpeakRect
                 42);
             AddFull(MakeHint(
                 "On (default): Speak crops each green island onto its own orange canvas " +
-                "(beef knobs + margin), sends to Local-LLM one island at a time. " +
-                "Preview stays full page for edit. Same canvas rules apply to non-POI " +
-                "crop-stack (multi-strip) and to POI multi when this is off and §9 is off. " +
+                "(beef knobs + margin), sends to Local-LLM one island at a time " +
+                "(not multi-strip stack). Preview stays full page for edit. " +
+                "Off/fail multi → per-island on tone; 1 island → full-page guide. " +
                 "Stock: beef 0%, bottom pad 0%, between=10px, margin=12px. " +
                 "Compose hard-caps canvas long edge at 2560; Image-tab downscale is separate (off)."),
                 72);
@@ -410,18 +389,8 @@ namespace SpeakRect
                 "Preview shows the fog used; speech OCR still reads the clear tone image."),
                 40);
 
-            // 2) Line merge
-            AddFull(MakeSection("2 · LINE MERGE"), 20);
-            _trkClusterX = MakeTrack(25, 300, 105);
-            _lblClusterXVal = MakeValueLabel();
-            AddRow(MakeLabel("Sideways"), WrapTrack(_trkClusterX, _lblClusterXVal), 42);
-            _trkClusterY = MakeTrack(25, 300, 115);
-            _lblClusterYVal = MakeValueLabel();
-            AddRow(MakeLabel("Stacked"), WrapTrack(_trkClusterY, _lblClusterYVal), 42);
-            AddFull(MakeHint("Lower = keep balloons separate. Higher = glue multi-line text into one island."), 36);
-
-            // 3) Box pad
-            AddFull(MakeSection("3 · BOX PADDING"), 20);
+            // 2) Box pad
+            AddFull(MakeSection("2 · BOX PADDING"), 20);
             _trkInflateX = MakeTrack(0, 80, 22);
             _lblInflateXVal = MakeValueLabel();
             AddRow(MakeLabel("Grow X"), WrapTrack(_trkInflateX, _lblInflateXVal), 42);
@@ -431,14 +400,14 @@ namespace SpeakRect
             _trkPadding = MakeTrack(0, 64, 16);
             _lblPaddingVal = MakeValueLabel();
             AddRow(MakeLabel("Crop pad"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
-            // Extra row height leaves a clear gap before section 4.
+            // Extra row height leaves a clear gap before merge section.
             AddFull(MakeHint(
                 "Grow X/Y and Crop pad resize the solid green boxes (what Speak crops). " +
                 "Pad stops at neighbor islands. Live preview updates the boxes."),
                 48);
 
-            // 4) Merge overlapping (default on)
-            AddFull(MakeSection("4 · MERGE OVERLAPPING ISLANDS"), 20);
+            // 3) Merge overlapping (default on)
+            AddFull(MakeSection("3 · MERGE OVERLAPPING ISLANDS"), 20);
             _chkMergeOverlap = new CheckBox
             {
                 Text = "Merge overlapping islands",
@@ -450,72 +419,12 @@ namespace SpeakRect
             };
             _chkMergeOverlap.CheckedChanged += (_, _) => OnFieldChanged();
             AddFull(_chkMergeOverlap, 28);
-            // Tall enough for 3-line wrap + gap before the next section header.
             AddFull(MakeHint(
                 "On (default): after Grow X/Y and Crop pad, any islands whose boxes " +
                 "would overlap become one union rectangle large enough to cover all " +
                 "text — good for busy pages where OCR splits close balloons. " +
                 "Off: nudge grow-overlaps apart instead."),
                 68);
-
-            // 5) Dense-page pad
-            AddFull(MakeSection("5 · DENSE PAGE PAD"), 20);
-            _trkDenseCount = MakeTrack(0, 20, AppSettings.DefaultComicDenseIslandCount);
-            _lblDenseCountVal = MakeValueLabel();
-            AddRow(MakeLabel("When ≥ N"), WrapTrack(_trkDenseCount, _lblDenseCountVal), 42);
-            AddFull(MakeHint("Use milder pad when this many islands found. 0 = always use full pad."), 36);
-
-            // 6) Split large
-            AddFull(MakeSection("6 · SPLIT LARGE REGIONS"), 20);
-            _chkSplitLarge = new CheckBox
-            {
-                Text = "Re-detect inside mega caption / row islands",
-                Dock = DockStyle.Fill,
-                ForeColor = UiTheme.Fg,
-                BackColor = UiTheme.Bg,
-                AutoSize = false,
-                Checked = true,
-            };
-            _chkSplitLarge.CheckedChanged += (_, _) => OnFieldChanged();
-            AddFull(_chkSplitLarge, 28);
-            AddFull(MakeHint("On when one huge box swallows several balloons."), 32);
-
-            // 7) Orphan recover
-            AddFull(MakeSection("7 · RECOVER MISSED BALLOONS"), 20);
-            _trkOrphan = MakeTrack(0, 16, 6);
-            _lblOrphanVal = MakeValueLabel();
-            AddRow(MakeLabel("Orphan passes"), WrapTrack(_trkOrphan, _lblOrphanVal), 42);
-            AddFull(MakeHint(
-                "Bright empty plates re-OCR’d after a miss on Speak / live Comic Book. " +
-                "0 = off. Detect-only preview does not run orphan fill."),
-                44);
-
-            // 8) Drop weak (0 = off)
-            AddFull(MakeSection("8 · DROP WEAK ISLANDS"), 20);
-            _trkMinAlnum = MakeTrack(0, 40, 4);
-            _lblMinAlnumVal = MakeValueLabel();
-            AddRow(MakeLabel("Min letters"), WrapTrack(_trkMinAlnum, _lblMinAlnumVal), 42);
-            AddFull(MakeHint("Drop islands below this letter count. 0 = off (keep all non-junk islands)."), 36);
-
-            // 9) Speak path — sequential isolates balloons from global dedupe
-            AddFull(MakeSection("9 · SPEAK PATH"), 20);
-            _chkSequential = new CheckBox
-            {
-                Text = "Sequential regions (OCR + speak each balloon.)  ·  default on",
-                Dock = DockStyle.Fill,
-                ForeColor = UiTheme.Fg,
-                BackColor = UiTheme.Bg,
-                AutoSize = false,
-                Checked = true,
-            };
-            _chkSequential.CheckedChanged += (_, _) => OnFieldChanged();
-            AddFull(_chkSequential, 28);
-            AddFull(MakeHint(
-                "On (default): OCR+speak each balloon alone (isolates short replies like " +
-                "\"Really?\" from global speak-dedupe). Off: crop-stack (one stacked OCR + global " +
-                "speak plan) when not using POI AutoStack. Under POI: used when AutoStack is off " +
-                "or the stack VL fails on multi-island pages."),
-                56);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -726,9 +635,7 @@ namespace SpeakRect
             foreach (var t in new[]
             {
                 _trkFogAmount,
-                _trkClusterX, _trkClusterY,
                 _trkInflateX, _trkInflateY, _trkPadding,
-                _trkDenseCount, _trkOrphan, _trkMinAlnum,
             })
             {
                 t.ValueChanged += (_, _) =>
@@ -806,25 +713,12 @@ namespace SpeakRect
             // 1) Detect fog
             Next(_chkFog);
             Next(_trkFogAmount);
-            // 2) Line merge
-            Next(_trkClusterX);
-            Next(_trkClusterY);
-            // 3) Box pad
+            // 2) Box pad
             Next(_trkInflateX);
             Next(_trkInflateY);
             Next(_trkPadding);
-            // 4) Merge overlap
+            // 3) Merge overlap
             Next(_chkMergeOverlap);
-            // 5) Dense
-            Next(_trkDenseCount);
-            // 6) Split
-            Next(_chkSplitLarge);
-            // 7) Orphan
-            Next(_trkOrphan);
-            // 8) Min letters
-            Next(_trkMinAlnum);
-            // 9) Speak path
-            Next(_chkSequential);
             // Actions (left → right for user)
             Next(_btnOpenImage);
             Next(_btnUseLast);
@@ -847,14 +741,9 @@ namespace SpeakRect
             _lblStatus.TabStop = false;
             _lblPreviewStatus.TabStop = false;
             _lblFogAmountVal.TabStop = false;
-            _lblClusterXVal.TabStop = false;
-            _lblClusterYVal.TabStop = false;
             _lblInflateXVal.TabStop = false;
             _lblInflateYVal.TabStop = false;
             _lblPaddingVal.TabStop = false;
-            _lblDenseCountVal.TabStop = false;
-            _lblOrphanVal.TabStop = false;
-            _lblMinAlnumVal.TabStop = false;
         }
 
         /// <summary>Push control values into <see cref="AppSettings"/> before profile save.</summary>
@@ -951,7 +840,7 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Settings that change solid green box size (grow, crop pad, cluster, …).
+        /// Settings that change solid green box size (fog, grow, crop pad, merge, …).
         /// </summary>
         private static string BuildDetectSettingsSignature()
         {
@@ -962,16 +851,10 @@ namespace SpeakRect
             return string.Join('|',
                 s.ComicDetectFog ? "1" : "0",
                 s.ComicDetectFogAmount.ToString("0.###", inv),
-                s.ComicClusterGapX.ToString("0.###", inv),
-                s.ComicClusterGapY.ToString("0.###", inv),
                 s.ComicInflateFracX.ToString("0.###", inv),
                 s.ComicInflateFracY.ToString("0.###", inv),
                 s.ComicRegionPadding.ToString(inv),
-                s.ComicDenseIslandCount.ToString(inv),
                 s.ComicMergeOverlappingIslands ? "1" : "0",
-                s.ComicSplitLargeRegions ? "1" : "0",
-                s.ComicOrphanRecoverPasses.ToString(inv),
-                s.ComicMinIslandAlnum.ToString(inv),
                 DevCaptureCache.PrepSettingsSignature());
         }
 
@@ -981,7 +864,7 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// True when grow / cluster / merge / prep etc. changed since the last seed
+        /// True when fog / grow / pad / merge / prep etc. changed since the last seed
         /// and the user has not locked geometry by editing boxes.
         /// </summary>
         private bool DetectKnobsChangedSinceSeed()
@@ -1100,17 +983,10 @@ namespace SpeakRect
                     _trkPoiStackBottomPad.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
-                _trkClusterX.Value = GapToTick(s.ComicClusterGapX);
-                _trkClusterY.Value = GapToTick(s.ComicClusterGapY);
                 _trkInflateX.Value = InflateToTick(s.ComicInflateFracX);
                 _trkInflateY.Value = InflateToTick(s.ComicInflateFracY);
                 _trkPadding.Value = Math.Clamp(s.ComicRegionPadding, _trkPadding.Minimum, _trkPadding.Maximum);
-                _trkDenseCount.Value = Math.Clamp(s.ComicDenseIslandCount, _trkDenseCount.Minimum, _trkDenseCount.Maximum);
                 _chkMergeOverlap.Checked = s.ComicMergeOverlappingIslands;
-                _chkSplitLarge.Checked = s.ComicSplitLargeRegions;
-                _trkOrphan.Value = Math.Clamp(s.ComicOrphanRecoverPasses, _trkOrphan.Minimum, _trkOrphan.Maximum);
-                _trkMinAlnum.Value = Math.Clamp(s.ComicMinIslandAlnum, _trkMinAlnum.Minimum, _trkMinAlnum.Maximum);
-                _chkSequential.Checked = s.ComicSequentialRegions;
 
                 RefreshValueLabels();
                 ApplyFogUiState();
@@ -1254,8 +1130,6 @@ namespace SpeakRect
         private void ApplyControlsEnabled()
         {
             bool ready = HasSource && !_speakBusy;
-            // §9 Sequential: non-POI speak path, and POI multi fallback when stack off/fail.
-            bool sequentialOk = ready;
 
             bool poiOn = ready && _chkPoiMarkers.Checked;
             _chkPoiMarkers.Enabled = ready;
@@ -1276,18 +1150,11 @@ namespace SpeakRect
             _lblFogAmount.Enabled = fogSliderOn;
             _lblFogAmountVal.Enabled = fogSliderOn;
             _lblFogAmount.Text = "Fog strength";
-            _trkClusterX.Enabled = ready;
-            _trkClusterY.Enabled = ready;
             _trkInflateX.Enabled = ready;
             _trkInflateY.Enabled = ready;
-            // Crop pad / dense pad still size islands for POI (green boxes + outside fog).
+            // Crop pad sizes islands for POI (green boxes + outside fog).
             _trkPadding.Enabled = ready;
-            _trkDenseCount.Enabled = ready;
             _chkMergeOverlap.Enabled = ready;
-            _chkSplitLarge.Enabled = ready;
-            _trkOrphan.Enabled = ready;
-            _trkMinAlnum.Enabled = ready;
-            _chkSequential.Enabled = sequentialOk;
 
             _btnPreview.Enabled = ready && !_snapBusy;
             _btnSpeak.Enabled = ready && !_snapBusy;
@@ -1335,12 +1202,9 @@ namespace SpeakRect
             {
                 if (_refine.RegionCount >= 2)
                 {
-                    if (_chkPoiAutoStack.Checked)
-                        poiNote = "  ·  POI map on tone (Speak = orange island VL ×N)";
-                    else if (_chkSequential.Checked)
-                        poiNote = "  ·  POI map on tone (Speak multi = sequential)";
-                    else
-                        poiNote = "  ·  POI map on tone (Speak multi = crop-stack)";
+                    poiNote = _chkPoiAutoStack.Checked
+                        ? "  ·  POI map on tone (Speak = orange island VL ×N)"
+                        : "  ·  POI map on tone (Speak multi = per-island)";
                 }
                 else if (_chkPoiAutoStack.Checked)
                 {
@@ -1393,17 +1257,10 @@ namespace SpeakRect
                 s.ComicBook = true;
             s.ComicDetectFog = _chkFog.Checked;
             s.ComicDetectFogAmount = TickToFog(_trkFogAmount.Value);
-            s.ComicClusterGapX = TickToGap(_trkClusterX.Value);
-            s.ComicClusterGapY = TickToGap(_trkClusterY.Value);
             s.ComicInflateFracX = TickToInflate(_trkInflateX.Value);
             s.ComicInflateFracY = TickToInflate(_trkInflateY.Value);
             s.ComicRegionPadding = _trkPadding.Value;
-            s.ComicDenseIslandCount = _trkDenseCount.Value;
             s.ComicMergeOverlappingIslands = _chkMergeOverlap.Checked;
-            s.ComicSplitLargeRegions = _chkSplitLarge.Checked;
-            s.ComicOrphanRecoverPasses = _trkOrphan.Value;
-            s.ComicMinIslandAlnum = _trkMinAlnum.Value;
-            s.ComicSequentialRegions = _chkSequential.Checked;
             s.NormalizeComicRegionSettings();
             // If user left Comic Book (POI suspended), do not let a stale checkbox
             // rewrite POI on via Persist before Reload — honor mode.
@@ -1475,9 +1332,8 @@ namespace SpeakRect
                 }
                 else if (poi && _refine.RegionCount >= 2)
                 {
-                    _lblPreviewHeader.Text = _chkSequential.Checked
-                        ? "PREVIEW — POI map on TONE (Speak multi = sequential)  ·  drag / resize / add"
-                        : "PREVIEW — POI map on TONE (Speak multi = crop-stack)  ·  drag / resize / add";
+                    _lblPreviewHeader.Text =
+                        "PREVIEW — POI map on TONE (Speak multi = per-island)  ·  drag / resize / add";
                 }
                 else if (poi && outside)
                 {
@@ -2271,20 +2127,9 @@ namespace SpeakRect
         {
             var inv = CultureInfo.InvariantCulture;
             _lblFogAmountVal.Text = TickToFog(_trkFogAmount.Value).ToString("0.00", inv);
-            _lblClusterXVal.Text = TickToGap(_trkClusterX.Value).ToString("0.00", inv);
-            _lblClusterYVal.Text = TickToGap(_trkClusterY.Value).ToString("0.00", inv);
             _lblInflateXVal.Text = TickToInflate(_trkInflateX.Value).ToString("0.00", inv);
             _lblInflateYVal.Text = TickToInflate(_trkInflateY.Value).ToString("0.00", inv);
             _lblPaddingVal.Text = $"{_trkPadding.Value}px";
-            _lblDenseCountVal.Text = _trkDenseCount.Value == 0
-                ? "off"
-                : $"{_trkDenseCount.Value}+";
-            _lblOrphanVal.Text = _trkOrphan.Value == 0
-                ? "off"
-                : _trkOrphan.Value.ToString(inv);
-            _lblMinAlnumVal.Text = _trkMinAlnum.Value == 0
-                ? "off"
-                : _trkMinAlnum.Value.ToString(inv);
             _lblPoiAutoStackGapVal.Text = $"{_trkPoiAutoStackGap.Value}px";
             _lblPoiAutoStackMarginVal.Text = $"{_trkPoiAutoStackMargin.Value}px";
             _lblPoiStackBeefVal.Text = $"+{_trkPoiStackBeef.Value}%";
@@ -2294,10 +2139,6 @@ namespace SpeakRect
         private static int FogToTick(float v) =>
             Math.Clamp((int)Math.Round(v * 100f), 0, 100);
         private static float TickToFog(int t) => t / 100f;
-
-        private static int GapToTick(double v) =>
-            Math.Clamp((int)Math.Round(v * 100.0), 25, 300);
-        private static double TickToGap(int t) => t / 100.0;
 
         private static int InflateToTick(double v) =>
             Math.Clamp((int)Math.Round(v * 100.0), 0, 80);

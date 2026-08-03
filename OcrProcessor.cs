@@ -710,30 +710,6 @@ namespace SpeakRect
         private const double WinOcrDetectScaleRetry = 1.5;
 
         /// <summary>
-        /// Orphan balloon blobs: max tight WinOCR re-detects (largest first).
-        /// From <see cref="AppSettings.ComicOrphanRecoverPasses"/>.
-        /// </summary>
-        private static int MaxOrphanWinOcrPasses =>
-            SpeakRunSettings.GetComicOrphanRecoverPasses();
-
-        private static int ActiveMaxOrphanWinOcrPasses => MaxOrphanWinOcrPasses;
-
-        /// <summary>Scale for orphan crop WinOCR (pipeline already large).</summary>
-        private const double OrphanWinOcrScale = 1.5;
-
-        /// <summary>
-        /// Mega-island split: full-width / large area boxes often swallowed multiple
-        /// balloons (caption strip + row). Re-run WinOCR inside and recluster.
-        /// </summary>
-        private const double MegaIslandWidthFrac = 0.70;
-        private const double MegaIslandHeightFrac = 0.22;
-        private const double MegaIslandWideStripWidthFrac = 0.85;
-        private const double MegaIslandWideStripHeightFrac = 0.15;
-        private const double MegaIslandAreaFrac = 0.16;
-        private const double MegaIslandSplitScale = 1.5;
-        private const int MegaIslandSplitPad = 8;
-
-        /// <summary>
         /// ComicBook panel long-edge after letterbox.
         /// From <see cref="AppSettings.ImageUpscaleLongSide"/>.
         /// </summary>
@@ -810,10 +786,6 @@ namespace SpeakRect
         /// <summary>Gray level for the fog (128 = mid gray).</summary>
         private const byte WinOcrDetectGrayFogLevel = 128;
 
-        /// <summary>Mega-island re-detect (caption+row globs). Settings toggle.</summary>
-        private static bool EnableMegaIslandSplit =>
-            SpeakRunSettings.GetComicSplitLargeRegions();
-
         /// <summary>
         /// Union overlapping inflated islands instead of nudging them apart.
         /// From <see cref="AppSettings.ComicMergeOverlappingIslands"/> (default on).
@@ -877,14 +849,6 @@ namespace SpeakRect
         private const double WideStripMinAspect = 2.0;
         private const int WideStripMaxWordsBeforeSplit = 12;
 
-        /// <summary>Minimum alnum chars in a WinOCR line/cluster to keep (drops sky noise).</summary>
-        /// <summary>
-        /// Dead-island filter: WinOCR scraps below this alnum (or single weak token)
-        /// are dropped before crop-Kobold. From <see cref="AppSettings.ComicMinIslandAlnum"/>.
-        /// </summary>
-        private static int MinIslandAlnumChars =>
-            SpeakRunSettings.GetComicMinIslandAlnum();
-
         /// <summary>
         /// Minimum words for a speak unit to survive full-order / crop-primary merge.
         /// 1 keeps short openers and one-word balloons; SpeechCleaner.IsUnusableOcrText
@@ -901,27 +865,10 @@ namespace SpeakRect
         private static double RegionInflateFractionX =>
             SpeakRunSettings.GetComicInflateFracX();
         /// <summary>
-        /// Below this max-side (px), non-dense islands with non-zero grow get a 2px
+        /// Below this max-side (px), islands with non-zero grow get a 2px
         /// minimum pad so lettering is not crop-starved. No hard 16px floor.
         /// </summary>
         private const int RegionInflateSmallMaxSide = 280;
-        /// <summary>
-        /// When detect already found this many islands, use milder pad so dense
-        /// comic balloons stay separable after inflate. 0 = never use dense pad.
-        /// </summary>
-        private static int RegionInflateDenseIslandCount =>
-            SpeakRunSettings.GetComicDenseIslandCount();
-        private const double RegionInflateDenseFractionY = 0.18;
-        private const double RegionInflateDenseFractionX = 0.14;
-
-        /// <summary>
-        /// Line-cluster gaps (multi-line text inside one balloon → one island).
-        /// From <see cref="AppSettings.ComicClusterGapX"/> / <see cref="AppSettings.ComicClusterGapY"/>.
-        /// </summary>
-        private static double ClusterGapXFactor =>
-            SpeakRunSettings.GetComicClusterGapX();
-        private static double ClusterGapYFactor =>
-            SpeakRunSettings.GetComicClusterGapY();
 
         /// <summary>
         /// Wide/tall captures with this few regions are treated as low-confidence
@@ -1277,14 +1224,9 @@ namespace SpeakRect
                 $" gray={(EnablePipelineGrayscale ? "on" : "off")}" +
                 $" fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
-                $" dense≥{RegionInflateDenseIslandCount}" +
-                $" megaSplit={(EnableMegaIslandSplit ? "on" : "off")}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}" +
-                $" orphans={ActiveMaxOrphanWinOcrPasses}" +
-                $" minAlnum={(MinIslandAlnumChars <= 0 ? "off" : MinIslandAlnumChars.ToString())}");
+                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
 
             ImagePrepStages? prepStages = null;
@@ -1457,15 +1399,9 @@ namespace SpeakRect
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
-                $" dense≥{RegionInflateDenseIslandCount}" +
-                $" megaSplit={(EnableMegaIslandSplit ? "on" : "off")}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}" +
-                $" orphans={ActiveMaxOrphanWinOcrPasses}" +
-                $" minAlnum={(MinIslandAlnumChars <= 0 ? "off" : MinIslandAlnumChars.ToString())}" +
-                $" sequential={(SpeakRunSettings.GetComicSequentialRegions() ? "on" : "off")}");
+                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
             bool useOverride = regionOverride != null && regionOverride.Count > 0;
             if (useOverride)
@@ -1637,14 +1573,12 @@ namespace SpeakRect
                 var spokenParts = new List<string>();
                 string chosenTag;
 
-                // Same strategy switch as live CaptureAndRecognizeAsync (POI / sequential / stack).
+                // Same strategy as live: POI (island canvases) or per-island speak.
                 bool usePoi =
                     SpeakRunSettings.GetComicPoiMarkers() &&
                     regions.Count > 0;
-                bool useSequential =
-                    !usePoi &&
-                    SpeakRunSettings.GetComicSequentialRegions() &&
-                    regions.Count > 0;
+                // Non-POI multi: per-island VL+TTS (no §9 toggle / crop-stack mode).
+                bool usePerIsland = !usePoi && regions.Count > 0;
 
                 if (usePoi)
                 {
@@ -1660,7 +1594,7 @@ namespace SpeakRect
                     detail.AppendLine(
                         $"speak-plan units={spokenParts.Count} tag={chosenTag}");
                 }
-                else if (useSequential)
+                else if (usePerIsland)
                 {
                     var (seqParts, seqTag, seqDucked) =
                         await RunSequentialRegionsSpeakAsync(
@@ -2429,20 +2363,15 @@ namespace SpeakRect
                             bool usePoi =
                                 SpeakRunSettings.GetComicPoiMarkers() &&
                                 regions.Count > 0;
-
-                            // Non-POI only: §9 sequential. Under POI, multi-island
-                            // fallback after stack uses §9 inside RunComicPoiGuideAsync.
-                            bool useSequential =
-                                !usePoi &&
-                                SpeakRunSettings.GetComicSequentialRegions() &&
-                                regions.Count > 0;
+                            // Non-POI: per-island VL+TTS when detect found boxes.
+                            bool usePerIsland = !usePoi && regions.Count > 0;
 
                             string strategyHint = usePoi
                                 ? (SpeakRunSettings.GetComicPoiAutoStack()
-                                    ? "detect+poi-stack (per-island canvas VL; multi fail → §9)"
-                                    : "detect+poi (no AutoStack; multi → §9 seq or crop-stack)")
-                                : useSequential
-                                    ? "detect+sequential"
+                                    ? "detect+poi-canvas (per-island orange VL; multi fail → per-island)"
+                                    : "detect+poi (no island-canvas; multi → per-island; 1 → full-page)")
+                                : usePerIsland
+                                    ? "detect+per-island"
                                     : "detect+crop-stack";
                             detail.AppendLine(
                                 $"strategy={strategyHint} " +
@@ -2468,8 +2397,7 @@ namespace SpeakRect
                                 ducked = poiDucked;
 
                                 // POI always speaks inside RunComicPoiGuideAsync when
-                                // speakNow:true (1-island full-page OR multi sequential).
-                                // Must publish + skip the second TTS block below.
+                                // speakNow:true. Must publish + skip the second TTS below.
                                 if (spokenParts.Count > 0 &&
                                     chosenTag.StartsWith("comic-poi", StringComparison.Ordinal))
                                 {
@@ -2482,13 +2410,13 @@ namespace SpeakRect
                                     WriteLastOcrDebug(poiJoined, detail);
                                 }
                             }
-                            else if (useSequential)
+                            else if (usePerIsland)
                             {
                                 detail.AppendLine(
-                                    $"strategy=sequential-regions " +
+                                    $"strategy=per-island " +
                                     $"(ComicBook; regions={regions.Count})");
                                 Debug.WriteLine(
-                                    $"[OCR] ComicBook sequential regions " +
+                                    $"[OCR] ComicBook per-island regions " +
                                     $"(count={regions.Count})");
 
                                 var (seqParts, seqTag, seqDucked) =
@@ -2910,14 +2838,13 @@ namespace SpeakRect
 
             bool poi = SpeakRunSettings.GetComicPoiMarkers();
             bool autoStack = SpeakRunSettings.GetComicPoiAutoStack();
-            bool sequential = SpeakRunSettings.GetComicSequentialRegions();
             sb.AppendLine(
                 poi
                     ? "profile=full+poi (ComicBook: detect → POI guide; " +
                       (autoStack
-                          ? "AutoStack=per-island orange canvas VL one-at-a-time; " +
-                            "multi stack-fail → §9 seq or crop-stack"
-                          : "AutoStack off; multi → §9 seq or crop-stack; " +
+                          ? "island-canvas=per-island orange VL one-at-a-time; " +
+                            "multi fail → per-island on tone"
+                          : "island-canvas off; multi → per-island; " +
                             "1 island → full-page guide") +
                       " — live=Balloons)"
                     : "profile=full (ComicBook ON)");
@@ -2926,7 +2853,6 @@ namespace SpeakRect
             sb.AppendLine("  tone=denoise+levels+sharpen");
             sb.AppendLine(
                 $"  winocr detect=pass1+pass2" +
-                $", orphans={ActiveMaxOrphanWinOcrPasses}" +
                 $", fog={(detectUsesFog ? "on" : "off")}" +
                 (detectUsesFog
                     ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
@@ -2942,7 +2868,7 @@ namespace SpeakRect
                 if (autoStack)
                 {
                     sb.AppendLine(
-                        $"  poi Local-LLM stack=on (per-island canvas VL, one at a time) " +
+                        $"  poi island-canvas=on (per-island VL, one at a time) " +
                         $"(margin={SpeakRunSettings.GetComicPoiAutoStackMarginPx()}px " +
                         $"beef+{SpeakRunSettings.GetComicPoiStackBeefExtra():0.###}; " +
                         "preview stays full page; compose long-edge cap 2560)");
@@ -2950,9 +2876,7 @@ namespace SpeakRect
                 else
                 {
                     sb.AppendLine(
-                        sequential
-                            ? "  poi Local-LLM stack=off (multi → sequential; 1 → full-page)"
-                            : "  poi Local-LLM stack=off (multi → crop-stack; 1 → full-page)");
+                        "  poi island-canvas=off (multi → per-island; 1 → full-page)");
                 }
                 if (SpeakRunSettings.GetImageLlmSendDownscale())
                 {
@@ -2963,7 +2887,7 @@ namespace SpeakRect
                 {
                     sb.AppendLine(
                         "  Local-LLM send downscale=off " +
-                        "(stack compose still caps long-edge at 2560)");
+                        "(canvas compose still caps long-edge at 2560)");
                 }
             }
             sb.AppendLine(
@@ -2980,18 +2904,13 @@ namespace SpeakRect
             {
                 sb.AppendLine(
                     autoStack
-                        ? "  speak=poi-stack per-island canvas VL (one island at a time); " +
-                          "else multi uses §9 (seq on / crop-stack off)"
-                        : sequential
-                            ? "  sequential-regions=on under POI multi (stack off)"
-                            : "  crop-stack under POI multi (stack off, §9 off)");
+                        ? "  speak=poi per-island orange canvas VL (one at a time)"
+                        : "  speak=per-island on tone when multi; full-page guide when 1 island");
             }
             else
             {
                 sb.AppendLine(
-                    sequential
-                        ? "  sequential-regions=on (OCR+TTS per balloon; no global dedupe bag)"
-                        : "  crop-stack=on when detect finds islands (global speak plan)");
+                    "  speak=per-island OCR+TTS when detect finds islands");
             }
             sb.AppendLine();
             return sb.ToString();
@@ -3399,7 +3318,7 @@ namespace SpeakRect
         /// order, stacked, and sent as one Kobold image (no second-pass crop
         /// upscale/tone). Per-region crop Kobold remains a last-resort fallback
         /// if the stack fails.
-        /// Used when <see cref="AppSettings.ComicSequentialRegions"/> is false.
+        /// Used when detect finds no islands (or as recovery), not the primary POI path.
         /// </summary>
         private async Task<(List<string> Chosen, string Tag)> RunFullAndCropsBestOfAsync(
             Bitmap pipelineImage,
@@ -3580,9 +3499,7 @@ namespace SpeakRect
         /// <item>Full-page green guide always published for analytics/preview map.</item>
         /// <item><see cref="AppSettings.ComicPoiAutoStack"/> on (stock): each island →
         /// its own orange canvas → VL (+ TTS) one at a time (<c>comic-poi-stack</c>).</item>
-        /// <item>Stack off/fail + multi-island: honor Balloons §9 —
-        /// <see cref="AppSettings.ComicSequentialRegions"/> on → sequential per-island;
-        /// off → crop-stack best-of on tone.</item>
+        /// <item>Stack off/fail + multi-island: per-island VL+TTS on tone.</item>
         /// <item>1 island + stack off/fail: full-page guide VL.</item>
         /// </list>
         /// </summary>
@@ -3847,86 +3764,25 @@ namespace SpeakRect
                     // Fall through only when every island empty/failed (no partial).
                 }
 
-                // Multi-island (stack off or stack failed empty): honor Balloons §9.
+                // Multi-island (island-canvas off or failed empty): per-island on tone.
                 if (boxes.Count >= 2)
                 {
-                    if (SpeakRunSettings.GetComicSequentialRegions())
-                    {
-                        detail.AppendLine(
-                            "poi-speak: sequential per-island on tone " +
-                            "(§9 on; stack off/fail)");
-                        Debug.WriteLine(
-                            $"[OCR] ComicBook POI multi → sequential islands={boxes.Count}");
-                        var (seqParts, seqTag, seqDucked) =
-                            await RunSequentialRegionsSpeakAsync(
-                                toneImage, regions, detail, pipeTimer, token,
-                                speakNow: speakNow, alreadyDucked: alreadyDucked)
-                            .ConfigureAwait(false);
-                        string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
-                            ? "comic-poi-seq"
-                            : $"comic-poi-seq/{seqTag}";
-                        detail.AppendLine(
-                            $"winner={tag} parts={seqParts.Count} " +
-                            $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
-                        return (seqParts, tag, seqDucked);
-                    }
-
-                    // §9 off (stock): same crop-stack best-of as non-POI Comic Book.
                     detail.AppendLine(
-                        "poi-speak: crop-stack best-of on tone " +
-                        "(§9 off; stack off/fail)");
+                        "poi-speak: per-island on tone (island-canvas off/fail)");
                     Debug.WriteLine(
-                        $"[OCR] ComicBook POI multi → crop-stack islands={boxes.Count}");
-                    bool solidPoi = HasWellSeparatedSolidIslands(
-                        regions, toneImage.Width, toneImage.Height);
-                    bool scrapPoi = LooksLikeScrapDetect(
-                        regions, toneImage.Width, toneImage.Height, fragmented: false);
-                    var (cropChosen, cropTag) = await RunFullAndCropsBestOfAsync(
-                        toneImage, regions, scrapPoi, solidPoi,
-                        detail, pipeTimer, token).ConfigureAwait(false);
-                    var cropParts = cropChosen
-                        .Where(p => !SpeechCleaner.IsUnusableOcrText(p))
-                        .ToList();
-                    string poiCropTag = cropTag.StartsWith("crop", StringComparison.Ordinal)
-                        ? "comic-poi-crop-stack"
-                        : $"comic-poi-crop-stack/{cropTag}";
+                        $"[OCR] ComicBook POI multi → per-island islands={boxes.Count}");
+                    var (seqParts, seqTag, seqDucked) =
+                        await RunSequentialRegionsSpeakAsync(
+                            toneImage, regions, detail, pipeTimer, token,
+                            speakNow: speakNow, alreadyDucked: alreadyDucked)
+                        .ConfigureAwait(false);
+                    string tag = seqTag.StartsWith("sequential", StringComparison.Ordinal)
+                        ? "comic-poi-seq"
+                        : $"comic-poi-seq/{seqTag}";
                     detail.AppendLine(
-                        $"winner={poiCropTag} parts={cropParts.Count} " +
-                        $"words={cropParts.Sum(ComicRegionGeometry.CountWords)}");
-
-                    bool duckedCrop = alreadyDucked;
-                    if (speakNow && cropParts.Count > 0)
-                    {
-                        var speakPieces = SpeechCleaner.ExpandToSpeakPieces(cropParts);
-                        speakPieces = ApplySpeakDedupeCoalesce(
-                            speakPieces, detail, poiCropTag);
-                        if (speakPieces.Count > 0)
-                        {
-                            if (!duckedCrop)
-                            {
-                                DuckOtherAudio();
-                                duckedCrop = true;
-                            }
-                            var spoken = new List<string>();
-                            for (int pi = 0; pi < speakPieces.Count; pi++)
-                            {
-                                token.ThrowIfCancellationRequested();
-                                string unit = speakPieces[pi].Text;
-                                spoken.Add(unit);
-                                detail.AppendLine(
-                                    $"speak[{poiCropTag} {pi + 1}/{speakPieces.Count}]: {unit}");
-                                sw.Restart();
-                                await SpeakWithSystemAsync(unit, token)
-                                    .ConfigureAwait(false);
-                                pipeTimer.Mark($"tts {poiCropTag}[{pi + 1}]", sw);
-                                int pauseMs = speakPieces[pi].PauseAfterMs;
-                                if (pauseMs > 0)
-                                    await Task.Delay(pauseMs, token).ConfigureAwait(false);
-                            }
-                            return (spoken, poiCropTag, duckedCrop);
-                        }
-                    }
-                    return (cropParts, poiCropTag, duckedCrop);
+                        $"winner={tag} parts={seqParts.Count} " +
+                        $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
+                    return (seqParts, tag, seqDucked);
                 }
 
                 // Single island fallback: VL input = full-page guideBmp.
@@ -5439,26 +5295,16 @@ namespace SpeakRect
                 }
             }
 
-            int beforeMega = regions.Count;
-            regions = await SplitMegaReadingIslandsAsync(
-                detectImage, regions, detail, token).ConfigureAwait(false);
-            if (regions.Count != beforeMega)
-            {
-                detail.AppendLine(
-                    $"mega-split islands {beforeMega} → {regions.Count}");
-            }
-
             regions = ApplyMergeOverlappingIslandsIfEnabled(
                 regions, pipeW, pipeH, detail);
 
-            // Late scrap (mega-split pieces / merge leftovers) can reappear after the
-            // early dead-island pass — filter again.
+            // Late scrap after merge can reappear — filter again.
             int beforeDead2 = regions.Count;
             regions = FilterDeadDetectRegions(regions, detectImage, detail);
             if (regions.Count != beforeDead2)
             {
                 detail.AppendLine(
-                    $"dead-island filter (post-split): {beforeDead2} → {regions.Count}");
+                    $"dead-island filter (post-merge): {beforeDead2} → {regions.Count}");
             }
 
             regions = SortComicReadingOrderRegions(regions);
@@ -5491,11 +5337,10 @@ namespace SpeakRect
             try
             {
                 var log = new StringBuilder();
-                int orphanBudget = ActiveMaxOrphanWinOcrPasses;
                 log.AppendLine(
                     $"detect plan: 2 full-frame passes " +
-                    $"(scale {WinOcrDetectScale} + {WinOcrDetectScaleRetry}) " +
-                    $"+ orphan fill (max {orphanBudget} WinOCR)");
+                    $"(scale {WinOcrDetectScale} + {WinOcrDetectScaleRetry}); " +
+                    "no orphan recover");
 
                 // -- Pass 1 --------------------------------------------------
                 var first = await RunWinOcrPassAsync(
@@ -5562,7 +5407,7 @@ namespace SpeakRect
                         $"pass pick: {pick} (score {Math.Max(score1, score2)}, " +
                         $"regions={best.Count})");
 
-                    // -- Orphan balloon fill --------------------------------------
+                    // Zero-region rescue only (orphan recover feature removed).
                     if (best.Count == 0)
                     {
                         log.AppendLine("zero-region rescue…");
@@ -5578,33 +5423,6 @@ namespace SpeakRect
                         {
                             log.AppendLine("zero-region rescue empty");
                         }
-                    }
-                    else if (orphanBudget > 0)
-                    {
-                        var filled = await FillOrphanBalloonBlobsAsync(
-                            engine, capture, best, token, log);
-                        token.ThrowIfCancellationRequested();
-                        // Coverage-first: accept fill if it adds text OR more balloon
-                        // boxes for Kobold. Never reject a recovery set solely because
-                        // a score preferred fewer islands.
-                        if (PreferDetectionForCoverage(filled, best))
-                        {
-                            log.AppendLine(
-                                $"partial-miss fill: {best.Count} ? {filled.Count} " +
-                                $"(score {ScoreDetection(best)}?{ScoreDetection(filled)}, " +
-                                $"coverage-first)");
-                            best = filled;
-                        }
-                        else if (filled.Count != best.Count)
-                        {
-                            log.AppendLine(
-                                $"partial-miss rejected: {best.Count} ? {filled.Count} " +
-                                $"(no coverage gain)");
-                        }
-                    }
-                    else
-                    {
-                        log.AppendLine("orphan fill skipped (budget=0)");
                     }
 
                     if (best.Count > MaxTextRegions)
@@ -5895,7 +5713,22 @@ namespace SpeakRect
         /// tight WinOCR pass runs and finds no letters, do <b>not</b> keep empty
         /// geometry (faces look balloon-sized but OCR-empty).
         /// </summary>
+        // Orphan recover removed from Balloons — method kept only if any debug path
+        // still references the name; always returns existing islands.
         private static async Task<List<DetectedTextRegion>> FillOrphanBalloonBlobsAsync(
+            OcrEngine engine,
+            Bitmap capture,
+            List<DetectedTextRegion> existing,
+            CancellationToken token,
+            StringBuilder log)
+        {
+            await Task.CompletedTask.ConfigureAwait(false);
+            _ = (engine, capture, token, log);
+            return existing;
+        }
+
+#if false // orphan recover removed
+        private static async Task<List<DetectedTextRegion>> FillOrphanBalloonBlobsAsync_Removed(
             OcrEngine engine,
             Bitmap capture,
             List<DetectedTextRegion> existing,
@@ -6064,6 +5897,7 @@ namespace SpeakRect
             log.AppendLine($"  partial-miss added {added} island(s)");
             return SortComicReadingOrderRegions(merged);
         }
+#endif
 
         /// <summary>
         /// True when an existing OCR island substantially overlaps a bright-blob
@@ -6825,8 +6659,6 @@ namespace SpeakRect
                 capture,
                 requestedScale,
                 BuildWinOcrDetectBitmapPair,
-                ClusterGapXFactor,
-                ClusterGapYFactor,
                 token,
                 log,
                 debug).ConfigureAwait(false);
@@ -7409,8 +7241,7 @@ namespace SpeakRect
             List<(Rectangle Box, string Text)> lines,
             int captureW,
             int captureH)
-            => BalloonOcrDetect.ClusterTextBoxesWithText(
-                lines, captureW, captureH, ClusterGapXFactor, ClusterGapYFactor);
+            => BalloonOcrDetect.ClusterTextBoxesWithText(lines, captureW, captureH);
 
         /// <summary>
         /// Grow each island for crop padding (background-agnostic). Coalescing of
@@ -7423,14 +7254,12 @@ namespace SpeakRect
         /// </list>
         /// <para>
         /// Uses live <see cref="RegionInflateFractionX"/> / Y from Settings → Balloons
-        /// (Grow X / Grow Y). Dense panels scale fracs down so neighbors stay separable.
-        /// Zero grow means zero inflate (no hard 16px floor masking the slider).
+        /// (Grow X / Grow Y). Zero grow means zero inflate.
         /// Merge also honors <see cref="TextRegionPadding"/> when testing overlap.
         /// </para>
         /// </summary>
         /// <param name="growOnlyNoMergeNoNudge">
-        /// Dynamic-fog search: inflate only — do not merge or nudge. Area scores must
-        /// reflect OCR coverage under fog, not merge topology.
+        /// Inflate only — do not merge or nudge (legacy trial path).
         /// </param>
         private static List<DetectedTextRegion> ImproveDetectedRegions(
             List<DetectedTextRegion> regions,
@@ -7441,18 +7270,8 @@ namespace SpeakRect
             if (regions.Count == 0)
                 return regions;
 
-            // Dense multi-balloon panels: milder pad so neighbors do not glue
-            // into one mega-box before coalesce.
-            int denseThreshold = RegionInflateDenseIslandCount;
-            bool dense = denseThreshold > 0 && regions.Count >= denseThreshold;
-            // Always honor user Grow X/Y; dense only scales them down (never ignores).
             double fracX = RegionInflateFractionX;
             double fracY = RegionInflateFractionY;
-            if (dense)
-            {
-                fracX = Math.Min(fracX, RegionInflateDenseFractionX);
-                fracY = Math.Min(fracY, RegionInflateDenseFractionY);
-            }
 
             var cores = new List<Rectangle>(regions.Count);
             var inflated = new List<DetectedTextRegion>(regions.Count);
@@ -7469,7 +7288,7 @@ namespace SpeakRect
                 int minX = 0;
                 int minY = 0;
                 int maxSide = Math.Max(core.Width, core.Height);
-                if (!dense && maxSide > 0 && maxSide <= RegionInflateSmallMaxSide)
+                if (maxSide > 0 && maxSide <= RegionInflateSmallMaxSide)
                 {
                     if (fracX > 0.001)
                         minX = 2;
@@ -7585,34 +7404,25 @@ namespace SpeakRect
             return result.Count > 0 ? result : regions;
         }
 
-        /// <summary>
-        /// True when a reading island is large enough to likely contain multiple
-        /// balloons (full-width strip or large panel fraction). Geometry only.
-        /// </summary>
+        // Mega-island split removed from Balloons — no-op.
+        private static Task<List<DetectedTextRegion>> SplitMegaReadingIslandsAsync(
+            Bitmap pipelineImage,
+            List<DetectedTextRegion> regions,
+            StringBuilder detail,
+            CancellationToken token)
+        {
+            _ = (pipelineImage, detail, token);
+            return Task.FromResult(regions);
+        }
+
+#if false // mega-split removed
         private static bool IsMegaReadingIsland(Rectangle b, int capW, int capH)
         {
-            if (capW < 8 || capH < 8)
-                return false;
-
-            double wFrac = b.Width / (double)capW;
-            double hFrac = b.Height / (double)capH;
-            double aFrac = (b.Width * (double)b.Height) / (capW * (double)capH);
-
-            if (wFrac >= MegaIslandWidthFrac && hFrac >= MegaIslandHeightFrac)
-                return true;
-            if (wFrac >= MegaIslandWideStripWidthFrac && hFrac >= MegaIslandWideStripHeightFrac)
-                return true;
-            if (aFrac >= MegaIslandAreaFrac)
-                return true;
-
+            _ = (b, capW, capH);
             return false;
         }
 
-        /// <summary>
-        /// Re-detect inside mega islands and replace each with scrap-only reclustered
-        /// pieces when WinOCR finds 2+ real islands. Fixes caption+row mega crops.
-        /// </summary>
-        private static async Task<List<DetectedTextRegion>> SplitMegaReadingIslandsAsync(
+        private static async Task<List<DetectedTextRegion>> SplitMegaReadingIslandsAsync_Removed(
             Bitmap pipelineImage,
             List<DetectedTextRegion> regions,
             StringBuilder detail,
@@ -7621,9 +7431,9 @@ namespace SpeakRect
             if (regions.Count == 0 || pipelineImage == null)
                 return regions;
 
-            if (!EnableMegaIslandSplit)
+            if (true)
             {
-                detail.AppendLine("mega-split: disabled (ComicSplitLargeRegions=false)");
+                detail.AppendLine("mega-split: removed");
                 return regions;
             }
 
@@ -7762,6 +7572,7 @@ namespace SpeakRect
 
             return SortComicReadingOrderRegions(result);
         }
+#endif
 
         /// <summary>
         /// Merge WinOCR <b>line scraps of the same balloon</b> only.
@@ -8597,12 +8408,8 @@ namespace SpeakRect
                 // only when other checks pass (esp. balloon-fill for single tokens).
                 bool realWordIsland = LooksLikeRealDialogueToken(r.WinOcrText);
 
-                // Weak / junk OCR text - but not real dialogue words.
-                // MinIslandAlnumChars == 0 → letter-count filter off (still drop junk).
-                bool belowMinAlnum =
-                    MinIslandAlnumChars > 0 && alnum < MinIslandAlnumChars;
-                if (!realWordIsland &&
-                    (belowMinAlnum || IsJunkWinOcrText(r.WinOcrText)))
+                // Junk OCR text - but not real dialogue words.
+                if (!realWordIsland && IsJunkWinOcrText(r.WinOcrText))
                 {
                     detail.AppendLine(
                         $"  dead-island drop weak-ocr alnum={alnum} words={words} " +

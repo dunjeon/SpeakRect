@@ -28,6 +28,13 @@ namespace SpeakRect
         public const int MinWinOcrAlnumChars = 2;
         public const int MaxRawLineLogEntries = 16;
 
+        /// <summary>
+        /// Internal WinOCR line-group factors (median line height × this).
+        /// Not a user setting — multi-line speech must group into one island.
+        /// </summary>
+        private const double LineGroupGapXFactor = 1.05;
+        private const double LineGroupGapYFactor = 1.15;
+
         private static OcrEngine? _engine;
         private static bool _tried;
 
@@ -106,13 +113,12 @@ namespace SpeakRect
         /// <summary>
         /// Cluster nearby WinOCR lines into one island (multi-line balloon).
         /// Does not intentionally join separate speech balloons — gaps are modest.
+        /// Internal engine step only (no Balloons line-merge knobs).
         /// </summary>
         public static List<DetectedTextRegion> ClusterTextBoxesWithText(
             List<(Rectangle Box, string Text)> lines,
             int captureW,
-            int captureH,
-            double clusterGapXFactor,
-            double clusterGapYFactor)
+            int captureH)
         {
             if (lines.Count == 0)
                 return new List<DetectedTextRegion>();
@@ -121,8 +127,8 @@ namespace SpeakRect
                 .Select(l => l.Box.Height)
                 .OrderBy(h => h)
                 .ElementAt(lines.Count / 2);
-            int gapX = Math.Max(12, (int)(medianH * clusterGapXFactor));
-            int gapY = Math.Max(10, (int)(medianH * clusterGapYFactor));
+            int gapX = Math.Max(12, (int)(medianH * LineGroupGapXFactor));
+            int gapY = Math.Max(10, (int)(medianH * LineGroupGapYFactor));
 
             int n = lines.Count;
             var parent = Enumerable.Range(0, n).ToArray();
@@ -266,8 +272,6 @@ namespace SpeakRect
             Bitmap capture,
             double requestedScale,
             Func<Bitmap, double, (Bitmap DetectBmp, double UsedScale)> buildDetectBitmap,
-            double clusterGapXFactor,
-            double clusterGapYFactor,
             CancellationToken token,
             StringBuilder log,
             Action<Bitmap>? onDebugDetectBmp = null)
@@ -353,8 +357,7 @@ namespace SpeakRect
                   .ToList();
 
                 var clusters = ClusterTextBoxesWithText(
-                    mapped, capture.Width, capture.Height,
-                    clusterGapXFactor, clusterGapYFactor);
+                    mapped, capture.Width, capture.Height);
                 return ComicRegionGeometry.SortComicReadingOrderRegions(clusters);
             }
         }
