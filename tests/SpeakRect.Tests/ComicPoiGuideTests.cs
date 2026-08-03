@@ -89,11 +89,14 @@ public class ComicPoiGuideTests
     }
 
     [Fact]
-    public void Default_prompt_names_green_rectangles()
+    public void Default_prompt_is_sole_ocr_instruction()
     {
-        Assert.Contains("green", ComicPoiGuide.DefaultPrompt,
+        Assert.Equal(AppSettings.DefaultOcrPrompt, ComicPoiGuide.DefaultPrompt);
+        Assert.Contains("english text", ComicPoiGuide.DefaultPrompt,
             System.StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("rectangle", ComicPoiGuide.DefaultPrompt,
+        Assert.Contains("html", ComicPoiGuide.DefaultPrompt,
+            System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("markdown", ComicPoiGuide.DefaultPrompt,
             System.StringComparison.OrdinalIgnoreCase);
     }
 

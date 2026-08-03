@@ -223,7 +223,7 @@ Console.WriteLine("--- Speech cleaner ---");
                 r.Id.Equals("abbrev-max", StringComparison.OrdinalIgnoreCase)));
     }
 
-    // Force lowercase toggle (Settings → Speech). Default off keeps OCR casing;
+    // Force lowercase toggle (Settings → Speech). Default on; off keeps OCR casing;
     // on normalizes ALL CAPS; Abbrev stage still expands Mr. case-insensitively.
     {
         bool savedForce = AppSettings.Current.SpeechForceLowercase;
@@ -234,7 +234,7 @@ Console.WriteLine("--- Speech cleaner ---");
             AppSettings.Current.SpeechForceLowercase = false;
             string lowerOff = OcrProcessor.SmokeCleanForSpeech(
                 "Hey, Max. Mr. Smith said hi.", true);
-            Check("Force lowercase OFF (default) preserves Hey / Max casing",
+            Check("Force lowercase OFF preserves Hey / Max casing",
                 Regex.IsMatch(lowerOff, @"\bHey\b") &&
                 Regex.IsMatch(lowerOff, @"\bMax\b"),
                 $"clean={TruncateForSmoke(lowerOff, 100)}");
@@ -988,28 +988,26 @@ Console.WriteLine("--- Speech cleaner ---");
             AppSettings.Current.SpeechTextRules.Count >= 50);
         AppSettings.Current.SetSpeechTextRules(snap);
 
-        // Prompt resolve still works (editable from Speech → Prompts).
-        Check("Full prompt resolve non-empty",
-            !string.IsNullOrWhiteSpace(AppSettings.Current.ResolveFullPrompt()));
-        Check("Simple prompt resolve non-empty",
-            !string.IsNullOrWhiteSpace(AppSettings.Current.ResolveSimplePrompt()));
-        string prevFull = AppSettings.Current.FullPrompt;
+        // Sole OCR prompt resolve (editable from Speech → Prompts).
+        Check("OCR prompt resolve non-empty",
+            !string.IsNullOrWhiteSpace(AppSettings.Current.ResolveOcrPrompt()));
+        string prevOcr = AppSettings.Current.OcrPrompt;
         try
         {
-            AppSettings.Current.SetPromptByKey("FullPrompt", "CUSTOM_TEST_PROMPT_ONLY_XYZ");
-            Check("Custom FullPrompt is resolved",
-                AppSettings.Current.ResolveFullPrompt().Contains("CUSTOM_TEST_PROMPT_ONLY_XYZ", StringComparison.Ordinal));
-            AppSettings.Current.SetPromptByKey("FullPrompt", "");
-            Check("Blank FullPrompt falls back to default",
-                AppSettings.Current.ResolveFullPrompt() == AppSettings.DefaultFullPrompt);
+            AppSettings.Current.SetOcrPrompt("CUSTOM_TEST_PROMPT_ONLY_XYZ");
+            Check("Custom OcrPrompt is resolved",
+                AppSettings.Current.ResolveOcrPrompt().Contains("CUSTOM_TEST_PROMPT_ONLY_XYZ", StringComparison.Ordinal));
+            AppSettings.Current.SetOcrPrompt("");
+            Check("Blank OcrPrompt falls back to default",
+                AppSettings.Current.ResolveOcrPrompt() == AppSettings.DefaultOcrPrompt);
             // Exact default text is stored as blank (PromptForIni)
-            AppSettings.Current.SetPromptByKey("FullPrompt", AppSettings.DefaultFullPrompt);
-            Check("Setting FullPrompt to default text stores as blank (using built-in)",
-                AppSettings.Current.IsPromptUsingDefault("FullPrompt"));
+            AppSettings.Current.SetOcrPrompt(AppSettings.DefaultOcrPrompt);
+            Check("Setting OcrPrompt to default text stores as blank (using built-in)",
+                AppSettings.Current.IsOcrPromptUsingDefault());
         }
         finally
         {
-            AppSettings.Current.FullPrompt = prevFull;
+            AppSettings.Current.OcrPrompt = prevOcr;
         }
     }
 

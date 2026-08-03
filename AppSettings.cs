@@ -66,75 +66,27 @@ namespace SpeakRect
         }
 
         // -----------------------------------------------------------------------
-        // Hard-coded prompt defaults (used when the ini key is missing or blank)
+        // Hard-coded OCR prompt default (used when the ini key is missing or blank)
         // -----------------------------------------------------------------------
 
-        public const string DefaultFullPrompt =
-            "Extract all readable text from this comic panel or image. " +
-            "Read in Western comic order: top to bottom, left to right. " +
-            "Include SFX (big sound words like BRAP! CRASH! BAM!). " +
-            "Do not stop after SFX — keep reading every balloon and caption. " +
-            "Finish each balloon fully before the next. " +
-            "Include every word. Output only the text in reading order, nothing else. " +
-            "Read in columns top to bottom if the page looks split. " +
-            "Correct the spelling of common english words. OCR";
-
-        public const string DefaultCropPrompt =
-            "Extract all readable text from this image crop. " +
-            "Include SFX (BRAP! CRASH! etc). " +
-            "Read top to bottom, left to right. " +
-            "Include every word. Output only the text, nothing else. " +
-            "Correct the spelling of common english words.";
-
         /// <summary>
-        /// ComicBook OFF: single raw snap → OCR. Keep this minimal — no comic
-        /// balloon / SFX instructions (those belong on the full comic prompts).
+        /// Single built-in VL instruction for every Local-LLM OCR path
+        /// (Default, Comic full-frame, crops, POI, recovery retries).
         /// </summary>
-        public const string DefaultSimplePrompt =
-            "As an OCR, Extract all english text. " +
-            "Correct the spelling of common english words.";
+        public const string DefaultOcrPrompt =
+            "As an OCR, Extract all english text. Do not export html or markdown.";
 
-        public const string DefaultRecoveryPrompt =
-            "OCR all text including SFX. Do not stop after the first word. " +
-            "Correct the spelling of common english words.";
-
-        /// <summary>
-        /// Comic Book + POI guide: full-frame after green region boxes on gray prep
-        /// (optional thick fog outside). Same stock as <see cref="ComicPoiGuide.DefaultPrompt"/>.
-        /// </summary>
-        public const string DefaultPoiPrompt =
-            "As an OCR, extract all English text inside each bright green rectangle. " +
-            "Green rectangles mark speech / text regions of interest. " +
-            "Read every word inside those rectangles. " +
-            "Ignore art and UI outside the green rectangles. " +
-            "Do not describe the rectangles themselves. " +
-            "Correct the spelling of common english words.";
         /// <summary>
         /// <b>OFF</b> (product default = Default mode): shared Image prep → one full-frame OCR.
         /// <b>ON</b>: Comic Book pipeline — fog detect, balloons, crops / POI / sequential.
         /// </summary>
         public bool ComicBook { get; set; } = false;
 
-        /// <summary>ComicBook ON — full panel / full-frame. Blank → hard-coded default.</summary>
-        public string FullPrompt { get; set; } = "";
-
         /// <summary>
-        /// ComicBook ON — single balloon / region crop (sequential regions +
-        /// crop-stack / per-crop fallback). Blank → hard-coded default.
-        /// </summary>
-        public string CropPrompt { get; set; } = "";
-
-        /// <summary>ComicBook OFF — plain extract on the raw snap. Blank → default.</summary>
-        public string SimplePrompt { get; set; } = "";
-
-        /// <summary>Last-ditch recovery when the primary prompt blanks. Blank → default.</summary>
-        public string RecoveryPrompt { get; set; } = "";
-
-        /// <summary>
-        /// Comic Book + POI markers full-frame. Blank → <see cref="DefaultPoiPrompt"/>.
+        /// Sole OCR prompt override. Blank → <see cref="DefaultOcrPrompt"/>.
         /// Edit under Speech → Prompts.
         /// </summary>
-        public string PoiPrompt { get; set; } = "";
+        public string OcrPrompt { get; set; } = "";
 
         // -----------------------------------------------------------------------
         // TTS voice — [VOICE] section
@@ -590,7 +542,7 @@ namespace SpeakRect
         public List<SpeechRule> SpeechRules { get; private set; } = new();
 
         private bool _speechTitleCaseAllCaps;
-        private bool _speechForceLowercase;
+        private bool _speechForceLowercase = true;
 
         /// <summary>
         /// When true, <c>CleanForSpeech</c> title-cases words that are entirely
@@ -612,9 +564,8 @@ namespace SpeakRect
 
         /// <summary>
         /// When true, <c>CleanForSpeech</c> lowercases the stream after noise
-        /// strip — useful to normalize ALL-CAPS comics. Default false: OCR casing
-        /// is preserved for speak units and the spoken preview (titles like Mr.
-        /// still expand — Abbrev stage is case-insensitive).
+        /// strip — normalizes ALL-CAPS comics for TTS. Default <c>true</c> for
+        /// all modes (titles like Mr. still expand — Abbrev stage is case-insensitive).
         /// Mutually exclusive with <see cref="SpeechTitleCaseAllCaps"/> — turning
         /// this on clears title-case ALL CAPS.
         /// </summary>
@@ -941,61 +892,25 @@ namespace SpeakRect
             SyncActiveProfileFile();
         }
 
-        /// <summary>Clear custom OCR prompts so Resolve* uses hard-coded defaults.</summary>
+        /// <summary>Clear custom OCR prompt so resolve uses the hard-coded default.</summary>
         public void ResetPromptsToDefaults()
         {
-            FullPrompt = "";
-            CropPrompt = "";
-            SimplePrompt = "";
-            RecoveryPrompt = "";
-            PoiPrompt = "";
+            OcrPrompt = "";
         }
 
-        /// <summary>Set one prompt field by key name (blank → use built-in default at resolve time).</summary>
-        public void SetPromptByKey(string key, string? value)
+        /// <summary>Set the sole OCR prompt (blank → use built-in default at resolve time).</summary>
+        public void SetOcrPrompt(string? value)
         {
-            string v = (value ?? "").Trim();
-            switch ((key ?? "").Trim())
-            {
-                case "FullPrompt":
-                    FullPrompt = PromptForIni(v, DefaultFullPrompt);
-                    break;
-                case "CropPrompt":
-                    CropPrompt = PromptForIni(v, DefaultCropPrompt);
-                    break;
-                case "SimplePrompt":
-                    SimplePrompt = PromptForIni(v, DefaultSimplePrompt);
-                    break;
-                case "RecoveryPrompt":
-                    RecoveryPrompt = PromptForIni(v, DefaultRecoveryPrompt);
-                    break;
-                case "PoiPrompt":
-                    PoiPrompt = PromptForIni(v, DefaultPoiPrompt);
-                    break;
-            }
+            OcrPrompt = PromptForIni(value, DefaultOcrPrompt);
         }
 
-        /// <summary>Resolved prompt text for UI (never blank — shows active default).</summary>
-        public string GetResolvedPromptByKey(string key) => (key ?? "").Trim() switch
-        {
-            "FullPrompt" => ResolveFullPrompt(),
-            "CropPrompt" => ResolveCropPrompt(),
-            "SimplePrompt" => ResolveSimplePrompt(),
-            "RecoveryPrompt" => ResolveRecoveryPrompt(),
-            "PoiPrompt" => ResolvePoiPrompt(),
-            _ => "",
-        };
+        /// <summary>Resolved OCR prompt text for UI / VL (never blank).</summary>
+        public string ResolveOcrPrompt() =>
+            NonEmpty(OcrPrompt) ?? DefaultOcrPrompt;
 
         /// <summary>True when the stored value is blank (using built-in default).</summary>
-        public bool IsPromptUsingDefault(string key) => (key ?? "").Trim() switch
-        {
-            "FullPrompt" => string.IsNullOrWhiteSpace(FullPrompt),
-            "CropPrompt" => string.IsNullOrWhiteSpace(CropPrompt),
-            "SimplePrompt" => string.IsNullOrWhiteSpace(SimplePrompt),
-            "RecoveryPrompt" => string.IsNullOrWhiteSpace(RecoveryPrompt),
-            "PoiPrompt" => string.IsNullOrWhiteSpace(PoiPrompt),
-            _ => true,
-        };
+        public bool IsOcrPromptUsingDefault() =>
+            string.IsNullOrWhiteSpace(OcrPrompt);
 
         /// <summary>True if any action has a non-empty gamepad binding.</summary>
         public bool HasAnyGamepadBinding()
@@ -1184,42 +1099,14 @@ namespace SpeakRect
             return null;
         }
 
-        /// <summary>Resolved full-frame prompt for the active ComicBook mode.</summary>
-        public string ActiveFullOrSimplePrompt =>
-            ComicBook ? ResolveFullPrompt() : ResolveSimplePrompt();
-
-        public string ResolveFullPrompt() =>
-            NonEmpty(FullPrompt) ?? DefaultFullPrompt;
-
-        public string ResolveCropPrompt() =>
-            NonEmpty(CropPrompt) ?? DefaultCropPrompt;
-
-        public string ResolveSimplePrompt() =>
-            NonEmpty(SimplePrompt) ?? DefaultSimplePrompt;
-
-        public string ResolveRecoveryPrompt() =>
-            NonEmpty(RecoveryPrompt) ?? DefaultRecoveryPrompt;
-
-        public string ResolvePoiPrompt() =>
-            NonEmpty(PoiPrompt) ?? DefaultPoiPrompt;
-
         /// <summary>
-        /// Prompts that may appear in model output (active + hard-coded defaults)
+        /// Prompts that may appear in model output (active + hard-coded default)
         /// so echo stripping still works if the user customized the ini.
         /// </summary>
         public IEnumerable<string> AllKnownPrompts()
         {
-            yield return ResolveFullPrompt();
-            yield return ResolveCropPrompt();
-            yield return ResolveSimplePrompt();
-            yield return ResolveRecoveryPrompt();
-            yield return ResolvePoiPrompt();
-
-            yield return DefaultFullPrompt;
-            yield return DefaultCropPrompt;
-            yield return DefaultSimplePrompt;
-            yield return DefaultRecoveryPrompt;
-            yield return DefaultPoiPrompt;
+            yield return ResolveOcrPrompt();
+            yield return DefaultOcrPrompt;
         }
 
         /// <summary>Overlay MODE rows: Default ↔ Comic Book.</summary>
@@ -1458,11 +1345,7 @@ namespace SpeakRect
 
         private void ResetToBuiltInDefaults()
         {
-            FullPrompt = "";
-            CropPrompt = "";
-            SimplePrompt = "";
-            RecoveryPrompt = "";
-            PoiPrompt = "";
+            OcrPrompt = "";
             TtsEngine = "Windows";
             VoiceId = "";
             SapiVoiceName = "";
@@ -1494,7 +1377,7 @@ namespace SpeakRect
             ClearCustomHotkeys();
             ClearSpeechRules();
             SpeechTitleCaseAllCaps = false;
-            SpeechForceLowercase = false;
+            SpeechForceLowercase = true;
             ResetSpeechTextRulesToDefaults();
             ResetPromptsToDefaults();
         }
@@ -1573,34 +1456,17 @@ namespace SpeakRect
             // (POI=true) + ComicBook=false would stash a fake "POI was on" and
             // re-enable POI on next Comic Book entry even when the file said off.
 
-            // Blank / missing / equal to hard-coded default → keep blank
-            // (Resolve* uses built-ins). Known legacy defaults cleared too.
-            // Clear known stock prompts (incl. Western-order variants) so built-ins apply.
-            string fullStored = ReadPrompt(map, "FullPrompt");
-            fullStored = MigratePromptIfLegacy(fullStored, LegacyFullPromptNoSfx);
-            fullStored = MigratePromptIfLegacy(fullStored, LegacyFullPromptWesternOrder);
-            FullPrompt = PromptForIni(fullStored, DefaultFullPrompt);
-            string cropStored = ReadPrompt(map, "CropPrompt");
-            cropStored = MigratePromptIfLegacy(cropStored, LegacyCropPromptNoSfx);
-            cropStored = MigratePromptIfLegacy(cropStored, LegacyCropPromptWesternOrder);
-            CropPrompt = PromptForIni(cropStored, DefaultCropPrompt);
-            // MarkedRegionsPrompt retired (experiment flag never shipped on).
-            // Ignore legacy ini keys so old profiles still load cleanly.
-            string simpleStored = ReadPrompt(map, "SimplePrompt");
-            simpleStored = MigratePromptIfLegacy(simpleStored, "Extract all text.");
-            simpleStored = MigratePromptIfLegacy(
-                simpleStored,
-                "Extract all text. Include SFX (BRAP! CRASH!). Do not stop after SFX.");
-            simpleStored = MigratePromptIfLegacy(
-                simpleStored, LegacySimplePromptNoSpell);
-            SimplePrompt = PromptForIni(simpleStored, DefaultSimplePrompt);
-            string recoveryStored = ReadPrompt(map, "RecoveryPrompt");
-            recoveryStored = MigratePromptIfLegacy(recoveryStored, "OCR:");
-            recoveryStored = MigratePromptIfLegacy(
-                recoveryStored, LegacyRecoveryPromptNoSpell);
-            RecoveryPrompt = PromptForIni(recoveryStored, DefaultRecoveryPrompt);
-            string poiStored = ReadPrompt(map, "PoiPrompt");
-            PoiPrompt = PromptForIni(poiStored, DefaultPoiPrompt);
+            // Single OCR prompt. Prefer OcrPrompt; else migrate SimplePrompt
+            // (closest historical default). All multi-prompt stock strings clear
+            // so ResolveOcrPrompt picks up the new built-in.
+            string ocrStored = ReadPrompt(map, "OcrPrompt");
+            if (string.IsNullOrWhiteSpace(ocrStored))
+                ocrStored = ReadPrompt(map, "SimplePrompt");
+            if (string.IsNullOrWhiteSpace(ocrStored))
+                ocrStored = ReadPrompt(map, "FullPrompt");
+            foreach (string legacy in LegacyOcrPromptDefaults)
+                ocrStored = MigratePromptIfLegacy(ocrStored, legacy);
+            OcrPrompt = PromptForIni(ocrStored, DefaultOcrPrompt);
 
             LoadHotkeysFromMap(map);
             LoadGamepadFromMap(map);
@@ -2216,9 +2082,10 @@ namespace SpeakRect
         {
             SpeechRules.Clear();
 
-            // Pipeline options (same section as name rules). Missing → default off.
-            // Mutually exclusive: if both true in the file, force-lowercase wins
-            // (older option / full fold).
+            // Pipeline options (same section as name rules).
+            // Title-case ALL CAPS: missing → off.
+            // Force lowercase: missing → on (product default for all modes).
+            // Mutually exclusive: if both true in the file, force-lowercase wins.
             bool titleCase = false;
             if (map.TryGetValue("TitleCaseAllCaps", out string? tcRaw) &&
                 TryParseBool(tcRaw, out bool tc))
@@ -2227,7 +2094,7 @@ namespace SpeakRect
                      TryParseBool(tcRaw2, out bool tc2))
                 titleCase = tc2;
 
-            bool forceLower = false;
+            bool forceLower = true;
             if (map.TryGetValue("ForceLowercase", out string? flRaw) &&
                 TryParseBool(flRaw, out bool fl))
                 forceLower = fl;
@@ -2464,20 +2331,10 @@ namespace SpeakRect
                 // Always persist a coherent MODE block (pipes imply ComicBook).
                 NormalizeModeFlags();
 
-                // Prompts: only write custom overrides. Blank = use hard-coded defaults
-                // at Resolve* time (do not dump default text into the ini).
-                string full = PromptForIni(FullPrompt, DefaultFullPrompt);
-                string crop = PromptForIni(CropPrompt, DefaultCropPrompt);
-                string simple = PromptForIni(SimplePrompt, DefaultSimplePrompt);
-                string recovery = PromptForIni(RecoveryPrompt, DefaultRecoveryPrompt);
-                string poi = PromptForIni(PoiPrompt, DefaultPoiPrompt);
-
-                // Normalize in-memory fields to match what we persist (blank = default).
-                FullPrompt = full;
-                CropPrompt = crop;
-                SimplePrompt = simple;
-                RecoveryPrompt = recovery;
-                PoiPrompt = poi;
+                // Prompt: only write a custom override. Blank = use hard-coded default
+                // at ResolveOcrPrompt time (do not dump default text into the ini).
+                string ocr = PromptForIni(OcrPrompt, DefaultOcrPrompt);
+                OcrPrompt = ocr;
 
                 string profileLabel = string.IsNullOrWhiteSpace(ActiveProfileName)
                     ? "Default"
@@ -2577,17 +2434,9 @@ namespace SpeakRect
                     sb.AppendLine($"Slot{i + 1}={RegionSlots[i].ToIniString()}");
                 sb.AppendLine();
                 sb.AppendLine("[PROMPTS]");
-                sb.AppendLine("; Leave blank to use built-in defaults. Set a value only to override.");
-                sb.AppendLine("; FullPrompt = Comic Book full-frame / panel OCR.");
-                sb.AppendLine("; CropPrompt = per-balloon crop (sequential regions + crop-stack base).");
-                sb.AppendLine("; SimplePrompt = Default mode (Comic Book off) + comic empty-retry.");
-                sb.AppendLine("; RecoveryPrompt = last-ditch ladder when the primary prompt blanks.");
-                sb.AppendLine("; PoiPrompt = Comic Book + POI green boxes (1-island full-page VL).");
-                sb.AppendLine($"FullPrompt={full}");
-                sb.AppendLine($"CropPrompt={crop}");
-                sb.AppendLine($"SimplePrompt={simple}");
-                sb.AppendLine($"RecoveryPrompt={recovery}");
-                sb.AppendLine($"PoiPrompt={poi}");
+                sb.AppendLine("; Leave blank to use the built-in default. Set a value only to override.");
+                sb.AppendLine("; OcrPrompt = sole Local-LLM OCR instruction (all modes / paths).");
+                sb.AppendLine($"OcrPrompt={ocr}");
                 sb.AppendLine();
                 NormalizeVoiceSettings();
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
@@ -2699,8 +2548,8 @@ namespace SpeakRect
                 sb.AppendLine("; User speech rules (Settings → Speech). Profile-backed.");
                 sb.AppendLine("; TitleCaseAllCaps=false (default): leave ALL CAPS words as OCR produced them.");
                 sb.AppendLine("; true = HELLO → Hello (words of 2+ uppercase letters only; mixed case kept).");
-                sb.AppendLine("; ForceLowercase=false (default): keep OCR casing for speech / preview.");
-                sb.AppendLine("; true = lowercase after noise strip (normalize ALL CAPS); Abbrev still case-insensitive.");
+                sb.AppendLine("; ForceLowercase=true (default): lowercase after noise strip (normalize ALL CAPS).");
+                sb.AppendLine("; false = keep OCR casing for speech / preview. Abbrev still case-insensitive.");
                 sb.AppendLine("; TitleCaseAllCaps and ForceLowercase are mutually exclusive (at most one true).");
                 sb.AppendLine("; Store natural text (Match=X-Men, Replace=Ex-Men).");
                 sb.AppendLine("; Engine maps Match to cleaned OCR; Replace is spoken as typed.");
@@ -2767,52 +2616,70 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Pre-SFX full prompt (shipped before comic SFX lines). Matched case-insensitive.
+        /// Known stock multi-prompt defaults from older builds. Matched on load so
+        /// <see cref="ResolveOcrPrompt"/> picks up the single built-in text.
+        /// Custom user prompts are left alone.
         /// </summary>
-        private const string LegacyFullPromptNoSfx =
+        private static readonly string[] LegacyOcrPromptDefaults =
+        {
+            // Pre-single-prompt full / crop / simple / recovery / POI stocks
             "Extract all readable text from this comic panel or image. " +
             "Read in Western comic order: top to bottom, and within each row left to right. " +
             "Finish a speech balloon or caption fully before moving to the next. " +
             "If balloons stack in a column, read that column top to bottom before jumping right. " +
-            "Include every word. Output only the text in reading order, nothing else. OCR";
+            "Include every word. Output only the text in reading order, nothing else. OCR",
 
-        private const string LegacyCropPromptNoSfx =
-            "Extract all readable text from this image crop. " +
-            "Read top to bottom, left to right within each line. " +
-            "Include every word in this crop. Output only the text, nothing else.";
-
-        /// <summary>
-        /// Stock full prompt before column-split + common-word spelling lines.
-        /// (Also matches the pre-column Western-order SFX default.)
-        /// </summary>
-        private const string LegacyFullPromptWesternOrder =
             "Extract all readable text from this comic panel or image. " +
             "Read in Western comic order: top to bottom, left to right. " +
             "Include SFX (big sound words like BRAP! CRASH! BAM!). " +
             "Do not stop after SFX — keep reading every balloon and caption. " +
             "Finish each balloon fully before the next. " +
-            "Include every word. Output only the text in reading order, nothing else. OCR";
+            "Include every word. Output only the text in reading order, nothing else. OCR",
 
-        /// <summary>
-        /// Stock crop prompt before common-word spelling line.
-        /// </summary>
-        private const string LegacyCropPromptWesternOrder =
+            "Extract all readable text from this comic panel or image. " +
+            "Read in Western comic order: top to bottom, left to right. " +
+            "Include SFX (big sound words like BRAP! CRASH! BAM!). " +
+            "Do not stop after SFX — keep reading every balloon and caption. " +
+            "Finish each balloon fully before the next. " +
+            "Include every word. Output only the text in reading order, nothing else. " +
+            "Read in columns top to bottom if the page looks split. " +
+            "Correct the spelling of common english words. OCR",
+
+            "Extract all readable text from this image crop. " +
+            "Read top to bottom, left to right within each line. " +
+            "Include every word in this crop. Output only the text, nothing else.",
+
             "Extract all readable text from this image crop. " +
             "Include SFX (BRAP! CRASH! etc). " +
             "Read top to bottom, left to right. " +
-            "Include every word. Output only the text, nothing else.";
+            "Include every word. Output only the text, nothing else.",
 
-        /// <summary>Stock simple prompt before common-word spelling line.</summary>
-        private const string LegacySimplePromptNoSpell =
-            "As an OCR, Extract all english text.";
+            "Extract all readable text from this image crop. " +
+            "Include SFX (BRAP! CRASH! etc). " +
+            "Read top to bottom, left to right. " +
+            "Include every word. Output only the text, nothing else. " +
+            "Correct the spelling of common english words.",
 
-        /// <summary>Stock recovery prompt before common-word spelling line.</summary>
-        private const string LegacyRecoveryPromptNoSpell =
-            "OCR all text including SFX. Do not stop after the first word.";
+            "Extract all text.",
+            "Extract all text. Include SFX (BRAP! CRASH!). Do not stop after SFX.",
+            "As an OCR, Extract all english text.",
+            "As an OCR, Extract all english text. Correct the spelling of common english words.",
+            "OCR:",
+            "OCR all text including SFX. Do not stop after the first word.",
+            "OCR all text including SFX. Do not stop after the first word. " +
+            "Correct the spelling of common english words.",
+
+            "As an OCR, extract all English text inside each bright green rectangle. " +
+            "Green rectangles mark speech / text regions of interest. " +
+            "Read every word inside those rectangles. " +
+            "Ignore art and UI outside the green rectangles. " +
+            "Do not describe the rectangles themselves. " +
+            "Correct the spelling of common english words.",
+        };
 
         /// <summary>
-        /// If the stored prompt is a known pre-SFX default, clear it so
-        /// <see cref="ResolveFullPrompt"/> etc. pick up the new built-in text.
+        /// If the stored prompt is a known stock default, clear it so
+        /// <see cref="ResolveOcrPrompt"/> picks up the new built-in text.
         /// Custom user prompts are left alone.
         /// </summary>
         private static string MigratePromptIfLegacy(string stored, string legacyDefault)

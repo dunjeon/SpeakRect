@@ -237,7 +237,7 @@ namespace SpeakRect
             Feature(sb, "Key Map", "Remap keyboard and gamepad; add custom actions.");
             Feature(sb, "Profiles", "Save regions, hotkeys, modes, voice, speech rules, and Follow per game.");
             Feature(sb, "Voice", "Windows TTS by default. Optional SAPI 5 for adapters (see README).");
-            Feature(sb, "Speech", "Settings \u2192 Speech: name rules, pipeline text rules (regex), and OCR prompts. Reset defaults per section. Profile-backed.");
+            Feature(sb, "Speech", "Settings \u2192 Speech: name rules, pipeline text rules (regex), and one OCR prompt. Reset defaults per section. Profile-backed.");
             Feature(sb, "Balloons", "Settings \u2192 Balloons: tune Comic Book balloon detect + live green-box preview. Profile-backed.");
             Feature(sb, "Image", "Settings \u2192 Image: letterbox / upscale / gray / tone prep with live preview. Profile-backed.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");
@@ -268,7 +268,7 @@ namespace SpeakRect
             Tip(sb, "Ctrl+click FOLLOW on the overlay to open Follow size and offset settings.");
             Tip(sb, "Sidebar REGIONS buttons 1–8 switch slots for drawing (same as region hotkeys).");
             Tip(sb, "Leave Voice engine on Windows unless you installed a SAPI adapter; full steps are in README.md.");
-            Tip(sb, "Speech \u2192 Names: X-Men \u2192 Ex-Men. Text rules: pipeline regex (abbrevs, noise) + Title-case ALL CAPS (HELLO \u2192 Hello) or Force lowercase (mutually exclusive; default both off keeps OCR casing). Prompts: OCR instructions. Use Reset for defaults.");
+            Tip(sb, "Speech \u2192 Names: X-Men \u2192 Ex-Men. Text rules: pipeline regex (abbrevs, noise) + Title-case ALL CAPS (HELLO \u2192 Hello) or Force lowercase (mutually exclusive; Force lowercase on by default for all modes). Prompt: sole Local-LLM OCR instruction (all modes). Use Reset for defaults.");
             Tip(sb, "Balloons tab: open a panel or last capture — knobs live-update green boxes. Speak (F6) runs full OCR. Min letters 0 = off. Merge overlapping islands (default on) unions grown boxes that collide.");
             Tip(sb, "Image tab: live prep preview matches what OCR receives (letterbox/scale/gray/tone; same for Default and ComicBook). Balloons uses the same prep. Detect fog is Balloons only.");
             sb.Append(@"\par ");

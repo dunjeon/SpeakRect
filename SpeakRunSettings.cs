@@ -63,12 +63,8 @@ namespace SpeakRect
         public bool ImageLlmSendDownscale { get; init; }
         public int ImageLlmSendMaxLongEdge { get; init; }
 
-        // ---- Prompts (resolved at capture) ----
-        public string FullOrSimplePrompt { get; init; } = "";
-        public string CropPrompt { get; init; } = "";
-        public string SimplePrompt { get; init; } = "";
-        public string RecoveryPrompt { get; init; } = "";
-        public string PoiPrompt { get; init; } = "";
+        // ---- Prompt (resolved at capture) ----
+        public string OcrPrompt { get; init; } = "";
         public IReadOnlyList<string> KnownPrompts { get; init; } = Array.Empty<string>();
 
         // ---- Voice / pauses ----
@@ -149,11 +145,7 @@ namespace SpeakRect
                 ImageLlmSendDownscale = s.ImageLlmSendDownscale,
                 ImageLlmSendMaxLongEdge = s.ImageLlmSendMaxLongEdge,
 
-                FullOrSimplePrompt = s.ActiveFullOrSimplePrompt,
-                CropPrompt = s.ResolveCropPrompt(),
-                SimplePrompt = s.ResolveSimplePrompt(),
-                RecoveryPrompt = s.ResolveRecoveryPrompt(),
-                PoiPrompt = s.ResolvePoiPrompt(),
+                OcrPrompt = s.ResolveOcrPrompt(),
                 KnownPrompts = s.AllKnownPrompts().ToList(),
 
                 TtsEngine = s.TtsEngine,
@@ -330,20 +322,8 @@ namespace SpeakRect
         public static int GetImageLlmSendMaxLongEdge() =>
             Active?.ImageLlmSendMaxLongEdge ?? AppSettings.Current.ImageLlmSendMaxLongEdge;
 
-        public static string GetFullOrSimplePrompt() =>
-            Active?.FullOrSimplePrompt ?? AppSettings.Current.ActiveFullOrSimplePrompt;
-
-        public static string GetCropPrompt() =>
-            Active?.CropPrompt ?? AppSettings.Current.ResolveCropPrompt();
-
-        public static string GetSimplePrompt() =>
-            Active?.SimplePrompt ?? AppSettings.Current.ResolveSimplePrompt();
-
-        public static string GetRecoveryPrompt() =>
-            Active?.RecoveryPrompt ?? AppSettings.Current.ResolveRecoveryPrompt();
-
-        public static string GetPoiPrompt() =>
-            Active?.PoiPrompt ?? AppSettings.Current.ResolvePoiPrompt();
+        public static string GetOcrPrompt() =>
+            Active?.OcrPrompt ?? AppSettings.Current.ResolveOcrPrompt();
 
         public static IEnumerable<string> GetKnownPrompts() =>
             Active?.KnownPrompts ?? AppSettings.Current.AllKnownPrompts();

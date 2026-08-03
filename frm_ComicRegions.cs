@@ -269,7 +269,7 @@ namespace SpeakRect
                 "outside them. Speak: with Stack on (stock) → each island on its own orange " +
                 "canvas to Local-LLM one at a time; Stack off/fail multi → §9 Sequential or " +
                 "crop-stack; 1 island → full-page guide. " +
-                "Edit the POI prompt under Speech → Prompts. Grow / crop pad size the islands."),
+                "OCR prompt is under Speech → Prompts (one for all paths). Grow / crop pad size the islands."),
                 72);
 
             _chkPoiFogOutside = new CheckBox

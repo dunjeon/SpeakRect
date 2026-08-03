@@ -495,7 +495,7 @@ namespace SpeakRect
 
             // Optional casing fold (Settings → Speech → Text rules). Mutually
             // exclusive toggles: title-case ALL CAPS (HELLO → Hello) vs full
-            // force-lowercase. Only one should be on; both off keeps OCR casing.
+            // force-lowercase (default on). Both off keeps OCR casing.
             if (SpeakRunSettings.GetSpeechTitleCaseAllCaps())
                 s = TitleCaseAllCapsWords(s);
             else if (SpeakRunSettings.GetSpeechForceLowercase())
@@ -837,7 +837,7 @@ namespace SpeakRect
 
             // No-space syllable / mid-word breaks from OCR that dropped the line
             // break: "SOPHISTI-CATED", "end-ing", "responsibil-ity".
-            // IgnoreCase: Force lowercase is off by default; comics are often ALL CAPS.
+            // IgnoreCase: comics are often ALL CAPS; Force lowercase is on by default.
             // Keep intentional compounds via IsIntentionalHyphenCompound.
             s = Regex.Replace(
                 s,

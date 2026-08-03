@@ -18,11 +18,11 @@ namespace SpeakRect
     public static class ComicPoiGuide
     {
         /// <summary>
-        /// Built-in default POI prompt (same text as <see cref="AppSettings.DefaultPoiPrompt"/>).
-        /// Live path uses <see cref="AppSettings.ResolvePoiPrompt"/> so Speech → Prompts
+        /// Built-in OCR prompt (same text as <see cref="AppSettings.DefaultOcrPrompt"/>).
+        /// Live path uses <see cref="AppSettings.ResolveOcrPrompt"/> so Speech → Prompts
         /// overrides apply; this constant is the stock fallback only.
         /// </summary>
-        public const string DefaultPrompt = AppSettings.DefaultPoiPrompt;
+        public const string DefaultPrompt = AppSettings.DefaultOcrPrompt;
 
         /// <summary>Bright green stroke (matches Balloons preview solid boxes).</summary>
         public static readonly Color GuideBoxGreen = Color.FromArgb(255, 40, 220, 60);

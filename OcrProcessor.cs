@@ -491,25 +491,12 @@ namespace SpeakRect
         /// </summary>
         private static string KoboldModel => LocalLlmHost.ModelApiId;
 
-        // Prompts: SpeakRect.ini [PROMPTS] if set, else hard-coded defaults in AppSettings.
-        // Live set: Full (comic full-frame), Crop (per-balloon / stack base),
-        // Simple (Default mode + comic empty-retry), Recovery (ladder / consensus).
+        // Sole OCR prompt: SpeakRect.ini [PROMPTS] OcrPrompt, else AppSettings.DefaultOcrPrompt.
+        // Same text for full-frame, crops, POI, recovery retries, and consensus passes.
 
-        /// <summary>Active full-frame / default Kobold prompt for the current mode.</summary>
+        /// <summary>Active Local-LLM OCR prompt (all modes and paths).</summary>
         private static string LocalLlmTaskPrompt =>
-            SpeakRunSettings.GetFullOrSimplePrompt();
-
-        /// <summary>Active crop prompt (ComicBook ON region crops + stack base).</summary>
-        private static string CropTaskPrompt =>
-            SpeakRunSettings.GetCropPrompt();
-
-        /// <summary>ComicBook OFF / simple-extract retry.</summary>
-        private static string SimpleExtractPrompt =>
-            SpeakRunSettings.GetSimplePrompt();
-
-        /// <summary>Last-ditch recovery when the primary prompt blanks.</summary>
-        private static string RecoveryPrompt =>
-            SpeakRunSettings.GetRecoveryPrompt();
+            SpeakRunSettings.GetOcrPrompt();
 
         /// <summary>
         /// Full-frame path only: extra scale + unsharp before Kobold.
@@ -1707,15 +1694,14 @@ namespace SpeakRect
                             toneOwned,
                             detail,
                             token,
-                            savePrep: false,
-                            promptOverride: SimpleExtractPrompt).ConfigureAwait(false);
-                        pipeTimer.Mark("full-frame-simple-retry", sw);
+                            savePrep: false).ConfigureAwait(false);
+                        pipeTimer.Mark("full-frame-retry", sw);
                         if (!SpeechCleaner.IsUnusableOcrText(offClean))
                         {
                             chosen = new List<string> { offClean! };
-                            chosenTag = "full-frame-simple-retry";
+                            chosenTag = "full-frame-retry";
                             detail.AppendLine(
-                                $"winner=full-frame-simple-retry words={ComicRegionGeometry.CountWords(offClean!)}");
+                                $"winner=full-frame-retry words={ComicRegionGeometry.CountWords(offClean!)}");
                         }
                     }
 
@@ -2550,34 +2536,33 @@ namespace SpeakRect
                     if (!alreadySpoke)
                     {
                         // Fallback ladder when primary path has nothing to speak:
-                        // 1) ComicBook was ON ? one more full-frame with simple OFF prompt
+                        // 1) ComicBook was ON → one more full-frame with the same OCR prompt
                         //    (no AppSettings flip; same pre-fog tone image)
-                        // 2) Still empty ? WinOCR text (last resort; re-detect on fog if needed)
+                        // 2) Still empty → WinOCR text (last resort; re-detect on fog if needed)
                         if (chosen.Count == 0 || chosen.All(SpeechCleaner.IsUnusableOcrText))
                         {
                             if (userComicBook)
                             {
                                 detail.AppendLine(
-                                    "comic-unreadable ? full-frame retry with simple prompt " +
-                                    $"(no settings flip; prompt=\"{SimpleExtractPrompt}\")");
+                                    "comic-unreadable → full-frame retry " +
+                                    $"(same OCR prompt; no settings flip)");
                                 Debug.WriteLine(
-                                    "[OCR] ComicBook unreadable ? simple-prompt full-frame retry");
+                                    "[OCR] ComicBook unreadable → full-frame retry");
 
                                 sw.Restart();
                                 string? offClean = await RunFullFrameKoboldOnBitmapAsync(
                                     ocrImage,
                                     detail,
                                     token,
-                                    savePrep: ActiveAnyDebugArtifacts,
-                                    promptOverride: SimpleExtractPrompt);
-                                pipeTimer.Mark("full-frame-ocr (simple-prompt retry)", sw);
+                                    savePrep: ActiveAnyDebugArtifacts);
+                                pipeTimer.Mark("full-frame-ocr (retry)", sw);
 
                                 if (!SpeechCleaner.IsUnusableOcrText(offClean))
                                 {
                                     chosen = new List<string> { offClean! };
-                                    chosenTag = "full-frame-simple-retry";
+                                    chosenTag = "full-frame-retry";
                                     detail.AppendLine(
-                                        $"winner=full-frame-simple-retry words={ComicRegionGeometry.CountWords(offClean!)}");
+                                        $"winner=full-frame-retry words={ComicRegionGeometry.CountWords(offClean!)}");
                                 }
                                 else
                                 {
@@ -3834,8 +3819,7 @@ namespace SpeakRect
                                     islandCanvas,
                                     detail,
                                     token,
-                                    savePrep: false,
-                                    promptOverride: SpeakRunSettings.GetPoiPrompt())
+                                    savePrep: false)
                                     .ConfigureAwait(false);
                                 pipeTimer.Add(
                                     $"full-frame-ocr (llm-island[{i + 1}])",
@@ -4040,8 +4024,7 @@ namespace SpeakRect
                     guideBmp,
                     detail,
                     token,
-                    savePrep: false,
-                    promptOverride: SpeakRunSettings.GetPoiPrompt())
+                    savePrep: false)
                     .ConfigureAwait(false);
                 pipeTimer.Mark("full-frame-ocr (poi)", sw);
 
@@ -4204,19 +4187,14 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// One Kobold call on the vertical balloon stack. Prompt stresses top→bottom
-        /// reading order and blank lines between balloons.
+        /// One Kobold call on the vertical balloon stack (same OCR prompt as every path).
         /// </summary>
         private async Task<string?> RunCropStackKoboldAsync(
             Bitmap stackBmp,
             StringBuilder detail,
             CancellationToken token)
         {
-            string prompt =
-                CropTaskPrompt +
-                " The image is a vertical stack of speech balloons in comic reading " +
-                "order (top band first, then lower bands). Transcribe every band " +
-                "completely. Put a blank line between balloons. Include every word.";
+            string prompt = LocalLlmTaskPrompt;
 
             detail.AppendLine(
                 $"--- crop-stack kobold {stackBmp.Width}x{stackBmp.Height} ---");
@@ -4248,7 +4226,7 @@ namespace SpeakRect
                 return cleaned;
 
             raw = await ExtractTextWithLocalLlmAsync(
-                stackBmp, RecoveryPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
+                stackBmp, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
             token.ThrowIfCancellationRequested();
             cleaned = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- crop-stack recovery ---\n{raw}");
@@ -4635,7 +4613,7 @@ namespace SpeakRect
             if (SpeechCleaner.IsUnusableOcrText(fullClean))
             {
                 fullRaw = await ExtractTextWithLocalLlmAsync(
-                    fullPrep, RecoveryPrompt, FullFrameMaxTokens);
+                    fullPrep, LocalLlmTaskPrompt, FullFrameMaxTokens);
                 token.ThrowIfCancellationRequested();
                 fullClean = SpeechCleaner.CleanForSpeech(fullRaw);
                 detail.AppendLine($"--- full-frame recovery OCR: ---\n{fullRaw}");
@@ -4670,7 +4648,7 @@ namespace SpeakRect
             string best = current;
 
             string raw = await ExtractTextWithLocalLlmAsync(
-                prep, RecoveryPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
+                prep, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
             token.ThrowIfCancellationRequested();
             string clean = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- wide longer OCR: ---\n{raw}");
@@ -4769,7 +4747,7 @@ namespace SpeakRect
                 {
                     var (cClean, _) = await RunKoboldConsensusAsync(
                         prep,
-                        CropTaskPrompt,
+                        LocalLlmTaskPrompt,
                         CropMaxTokens,
                         detail,
                         $"wide-half-{tag}",
@@ -4779,14 +4757,14 @@ namespace SpeakRect
                 else
                 {
                     string raw = await ExtractTextWithLocalLlmAsync(
-                        prep, CropTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                        prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
                     token.ThrowIfCancellationRequested();
                     clean = SpeechCleaner.CleanForSpeech(raw);
 
                     if (SpeechCleaner.IsUnusableOcrText(clean))
                     {
                         raw = await ExtractTextWithLocalLlmAsync(
-                            prep, RecoveryPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                            prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
                         token.ThrowIfCancellationRequested();
                         clean = SpeechCleaner.CleanForSpeech(raw);
                     }
@@ -5013,7 +4991,7 @@ namespace SpeakRect
                 {
                     var (cClean, cRaw) = await RunKoboldConsensusAsync(
                         prepared,
-                        CropTaskPrompt,
+                        LocalLlmTaskPrompt,
                         CropMaxTokens,
                         detail,
                         $"crop{tag}[{index}]",
@@ -5023,14 +5001,14 @@ namespace SpeakRect
 
                 // Fallback ladder if consensus disabled
                 string raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, CropTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
                 token.ThrowIfCancellationRequested();
                 string cleaned = SpeechCleaner.CleanForSpeech(raw);
                 if (!SpeechCleaner.IsUnusableOcrText(cleaned))
                     return (cleaned, raw);
 
                 raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, RecoveryPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
                 token.ThrowIfCancellationRequested();
                 cleaned = SpeechCleaner.CleanForSpeech(raw);
                 if (!SpeechCleaner.IsUnusableOcrText(cleaned))
@@ -5040,7 +5018,7 @@ namespace SpeakRect
                 }
 
                 raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, CropTaskPrompt, CropMaxTokens, KoboldRecoveryTemperature);
+                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldRecoveryTemperature);
                 token.ThrowIfCancellationRequested();
                 cleaned = SpeechCleaner.CleanForSpeech(raw);
                 detail.AppendLine(
@@ -5285,7 +5263,7 @@ namespace SpeakRect
             // C: third opinion only when needed (disagreement or either unusable)
             if (!abAgree)
             {
-                string cPrompt = (!aOk && !bOk) ? RecoveryPrompt : primaryPrompt;
+                string cPrompt = (!aOk && !bOk) ? LocalLlmTaskPrompt : primaryPrompt;
                 double cTemp = (!aOk && !bOk)
                     ? KoboldPrimaryTemperature
                     : KoboldConsensusTemperature;
@@ -5296,7 +5274,7 @@ namespace SpeakRect
                 // third primary at consensus temp. If only one failed, recovery @ T0.
                 if (aOk != bOk)
                 {
-                    cPrompt = RecoveryPrompt;
+                    cPrompt = LocalLlmTaskPrompt;
                     cTemp = KoboldPrimaryTemperature;
                     cLabel = $"C recovery T={cTemp:F0}";
                 }
@@ -5314,7 +5292,7 @@ namespace SpeakRect
             {
                 await AddPassAsync(
                     $"D recovery T={KoboldRecoveryTemperature:F1}",
-                    RecoveryPrompt,
+                    LocalLlmTaskPrompt,
                     KoboldRecoveryTemperature);
             }
 

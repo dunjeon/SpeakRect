@@ -8,7 +8,7 @@ namespace SpeakRect
 {
     /// <summary>
     /// Speech tab (Settings): user name substitutions, pipeline text rules (regex),
-    /// and OCR prompts. Profile-backed with reset-to-defaults.
+    /// and the single OCR prompt. Profile-backed with reset-to-defaults.
     /// </summary>
     public sealed class frm_SpeechRules : Form
     {
@@ -37,12 +37,10 @@ namespace SpeakRect
         private readonly Button _btnTextResetAll;
         private readonly ComboBox _cmbTextStageFilter;
 
-        // ---- Prompts ----
-        private readonly ComboBox _cmbPromptKey;
+        // ---- Prompt (single OCR instruction for all VL paths) ----
         private readonly TextBox _txtPrompt;
         private readonly Label _lblPromptDefault;
-        private readonly Button _btnPromptResetOne;
-        private readonly Button _btnPromptResetAll;
+        private readonly Button _btnPromptReset;
         private readonly Button _btnPromptSave;
         private bool _promptLoading;
         private bool _promptDirty;
@@ -64,15 +62,6 @@ namespace SpeakRect
         private string _lastPreviewSpeak = "";
         /// <summary>Full ordered text-rule list (filter only affects ListView visibility).</summary>
         private List<SpeechTextRule> _textRules = new();
-
-        private static readonly (string Key, string Label)[] PromptChoices =
-        {
-            ("FullPrompt", "Comic full panel"),
-            ("CropPrompt", "Comic balloon crop"),
-            ("SimplePrompt", "Default mode (simple)"),
-            ("PoiPrompt", "Comic Book + POI region boxes"),
-            ("RecoveryPrompt", "Recovery (fallback)"),
-        };
 
         public frm_SpeechRules(bool embedded = false, Action? onRequestClose = null)
         {
@@ -137,10 +126,9 @@ namespace SpeakRect
                 out _btnTextAdd, out _btnTextEdit, out _btnTextDelete, out _btnTextToggle,
                 out _btnTextUp, out _btnTextDown, out _btnTextResetOne, out _btnTextResetAll);
 
-            // ---- Prompts tab ----
-            BuildPromptsTab(tabPrompts, out _cmbPromptKey, out _txtPrompt,
-                out _lblPromptDefault, out _btnPromptSave, out _btnPromptResetOne,
-                out _btnPromptResetAll);
+            // ---- Prompts tab (single OCR prompt) ----
+            BuildPromptsTab(tabPrompts, out _txtPrompt, out _lblPromptDefault,
+                out _btnPromptSave, out _btnPromptReset);
 
             _innerTabs.TabPages.Add(tabNames);
             _innerTabs.TabPages.Add(tabText);
@@ -376,10 +364,10 @@ namespace SpeakRect
             chkForceLowercase = new CheckBox
             {
                 Dock = DockStyle.Fill,
-                Text = "Force lowercase for speech  (on = normalize ALL CAPS; off = keep OCR casing)",
+                Text = "Force lowercase for speech  (on = normalize ALL CAPS; off = keep OCR casing)  ·  default on",
                 ForeColor = UiTheme.FgMuted,
                 BackColor = UiTheme.Bg,
-                Checked = false,
+                Checked = true,
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(2, 0, 0, 0),
@@ -485,23 +473,20 @@ namespace SpeakRect
 
         private void BuildPromptsTab(
             TabPage tab,
-            out ComboBox cmbKey,
             out TextBox txtBody,
             out Label lblDefault,
             out Button btnSave,
-            out Button btnResetOne,
-            out Button btnResetAll)
+            out Button btnReset)
         {
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 5,
+                RowCount = 4,
                 BackColor = UiTheme.Bg,
                 Padding = new Padding(2, 2, 2, 2),
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
@@ -509,42 +494,12 @@ namespace SpeakRect
             var header = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "OCR PROMPTS — sent to the local vision model  ·  blank = built-in default",
+                Text = "OCR PROMPT — sole instruction for Local-LLM (all modes)  ·  blank = built-in default",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
             };
             root.Controls.Add(header, 0, 0);
-
-            var pickRow = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1,
-                BackColor = UiTheme.Bg,
-            };
-            pickRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 56f));
-            pickRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            var lblWhich = new Label
-            {
-                Text = "Prompt",
-                Dock = DockStyle.Fill,
-                ForeColor = UiTheme.FgMuted,
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-            cmbKey = new ComboBox
-            {
-                Dock = DockStyle.Fill,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-            };
-            UiTheme.StyleCombo(cmbKey);
-            foreach (var (_, label) in PromptChoices)
-                cmbKey.Items.Add(label);
-            cmbKey.SelectedIndex = 0;
-            cmbKey.SelectedIndexChanged += (_, _) => OnPromptKeyChanged();
-            pickRow.Controls.Add(lblWhich, 0, 0);
-            pickRow.Controls.Add(cmbKey, 1, 0);
-            root.Controls.Add(pickRow, 0, 1);
 
             lblDefault = new Label
             {
@@ -554,7 +509,7 @@ namespace SpeakRect
                 TextAlign = ContentAlignment.MiddleLeft,
                 Text = "",
             };
-            root.Controls.Add(lblDefault, 0, 2);
+            root.Controls.Add(lblDefault, 0, 1);
 
             txtBody = new TextBox
             {
@@ -571,7 +526,7 @@ namespace SpeakRect
                     return;
                 _promptDirty = true;
             };
-            root.Controls.Add(txtBody, 0, 3);
+            root.Controls.Add(txtBody, 0, 2);
 
             var buttons = new FlowLayoutPanel
             {
@@ -585,16 +540,12 @@ namespace SpeakRect
             btnSave.Width = 100;
             UiTheme.StylePrimaryButton(btnSave);
             btnSave.Click += (_, _) => SaveCurrentPrompt();
-            btnResetOne = MakeSideButton("Reset this");
-            btnResetOne.Width = 100;
-            btnResetOne.Click += (_, _) => ResetCurrentPrompt();
-            btnResetAll = MakeSideButton("Reset all prompts");
-            btnResetAll.Width = 130;
-            btnResetAll.Click += (_, _) => ResetAllPrompts();
+            btnReset = MakeSideButton("Reset to default");
+            btnReset.Width = 120;
+            btnReset.Click += (_, _) => ResetCurrentPrompt();
             buttons.Controls.Add(btnSave);
-            buttons.Controls.Add(btnResetOne);
-            buttons.Controls.Add(btnResetAll);
-            root.Controls.Add(buttons, 0, 4);
+            buttons.Controls.Add(btnReset);
+            root.Controls.Add(buttons, 0, 3);
 
             tab.Controls.Add(root);
         }
@@ -707,7 +658,7 @@ namespace SpeakRect
                 _promptDirty = false;
                 SetStatus(
                     $"{_listNames.Items.Count} name rule(s) · " +
-                    $"{AppSettings.Current.SpeechTextRules.Count} text rule(s) · prompts ready.");
+                    $"{AppSettings.Current.SpeechTextRules.Count} text rule(s) · OCR prompt ready.");
             }
             finally
             {
@@ -1199,40 +1150,20 @@ namespace SpeakRect
         }
 
         // =====================================================================
-        // Prompts
+        // Prompt (single OCR instruction)
         // =====================================================================
-
-        private string CurrentPromptKey()
-        {
-            int i = _cmbPromptKey.SelectedIndex;
-            if (i < 0 || i >= PromptChoices.Length)
-                return PromptChoices[0].Key;
-            return PromptChoices[i].Key;
-        }
-
-        private void OnPromptKeyChanged()
-        {
-            if (_promptLoading || _loading)
-            {
-                LoadPromptIntoEditor();
-                return;
-            }
-            CommitPromptIfDirty();
-            LoadPromptIntoEditor();
-        }
 
         private void LoadPromptIntoEditor()
         {
             _promptLoading = true;
             try
             {
-                string key = CurrentPromptKey();
-                string resolved = AppSettings.Current.GetResolvedPromptByKey(key);
-                bool isDefault = AppSettings.Current.IsPromptUsingDefault(key);
+                string resolved = AppSettings.Current.ResolveOcrPrompt();
+                bool isDefault = AppSettings.Current.IsOcrPromptUsingDefault();
                 _txtPrompt.Text = resolved;
                 _lblPromptDefault.Text = isDefault
                     ? "Using built-in default (edit and Apply to override)."
-                    : "Custom override (Reset this restores the built-in default).";
+                    : "Custom override (Reset restores the built-in default).";
                 _lblPromptDefault.ForeColor = isDefault ? UiTheme.FgDim : UiTheme.Warn;
                 _promptDirty = false;
             }
@@ -1251,9 +1182,8 @@ namespace SpeakRect
 
         private void SaveCurrentPrompt(bool quiet = false)
         {
-            string key = CurrentPromptKey();
             string body = _txtPrompt.Text ?? "";
-            AppSettings.Current.SetPromptByKey(key, body);
+            AppSettings.Current.SetOcrPrompt(body);
             try
             {
                 AppSettings.Current.PersistSpeechRules();
@@ -1267,35 +1197,11 @@ namespace SpeakRect
             }
             LoadPromptIntoEditor();
             if (!quiet)
-                SetStatus($"Prompt “{key}” saved (profile-aware).");
+                SetStatus("OCR prompt saved (profile-aware).");
         }
 
         private void ResetCurrentPrompt()
         {
-            string key = CurrentPromptKey();
-            AppSettings.Current.SetPromptByKey(key, "");
-            try
-            {
-                AppSettings.Current.PersistSpeechRules();
-                _promptDirty = false;
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"Reset failed: {ex.Message}", bad: true);
-                return;
-            }
-            LoadPromptIntoEditor();
-            SetStatus($"Prompt “{key}” reset to built-in default.");
-        }
-
-        private void ResetAllPrompts()
-        {
-            var dr = UiMessageBox.Show(GetModalOwner(),
-                "Reset ALL OCR prompts to SpeakRect built-in defaults?",
-                "Reset prompts",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (dr != DialogResult.Yes)
-                return;
             AppSettings.Current.ResetPromptsToDefaults();
             try
             {
@@ -1308,7 +1214,7 @@ namespace SpeakRect
                 return;
             }
             LoadPromptIntoEditor();
-            SetStatus("All prompts reset to built-in defaults.");
+            SetStatus("OCR prompt reset to built-in default.");
         }
 
         // =====================================================================
