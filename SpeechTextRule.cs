@@ -300,13 +300,6 @@ namespace SpeakRect
                 @"(?m)^\s*[\d\s,.\-\[\]\(\)]+\s*$",
                 " ", ignoreCase: false);
 
-            // VL/model programming-type junk (unsigned char etc. — not comic dialogue).
-            // Archive 2026-07-29: mega-crop invented "uchar" and TTS spoke it alone.
-            Add(list, "noise-c-type-uchar", "C type uchar / unsigned char",
-                SpeechTextRuleStage.Noise,
-                @"\b(?:unsigned\s+char|u\s*char|uchar)\b",
-                " ", ignoreCase: true);
-
             // Model attach-image junk
             Add(list, "noise-attach-images-paren", "Attach images (paren)",
                 SpeechTextRuleStage.Noise,
@@ -595,6 +588,8 @@ namespace SpeakRect
             {
                 "abbrev-max",
                 "abbrev-min",
+                // One-token VL invention gate — removed (kill-list P1); not a category fix.
+                "noise-c-type-uchar",
                 // HTML tag / entity strips: ate comic <WHERE ARE YOU…> as fake tags.
                 "noise-md-html",
                 "noise-entity-nbsp",

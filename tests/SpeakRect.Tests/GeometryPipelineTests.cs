@@ -71,50 +71,37 @@ public class GeometryPipelineTests
     }
 
     [Fact]
-    public void Dead_island_drops_art_logo_token()
+    public void Dead_island_keeps_multiword_on_balloon()
     {
-        // cream-style single token on non-balloon fill (ModeSmoke parity)
         using var bmp = new Bitmap(200, 200);
         using (var g = Graphics.FromImage(bmp))
         {
-            g.Clear(Color.FromArgb(255, 40, 40, 40)); // dark art
-            // light plate only in a strip (speech balloon-ish)
+            g.Clear(Color.FromArgb(255, 40, 40, 40));
             g.FillRectangle(Brushes.White, 20, 20, 80, 40);
         }
 
         var islands = new List<(Rectangle Bounds, string Text)>
         {
             (new Rectangle(25, 25, 60, 30), "Hello there"),
-            (new Rectangle(120, 120, 40, 20), "cream"),
         };
         var kept = OcrProcessor.SmokeFilterDeadDetectRegions(bmp, islands);
         Assert.Contains(kept, x => x.Text.Contains("Hello", StringComparison.OrdinalIgnoreCase));
-        // cream on dark art should drop when filter applies
-        Assert.DoesNotContain(kept, x =>
-            x.Text.Equals("cream", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void Dead_island_drops_coocoo_jar_gibberish()
+    public void Dead_island_drops_empty_tiny_geometry()
     {
-        // Shiny jar can pass balloon-fill; "coocoo" is repeated-syllable art OCR.
-        using var bmp = new Bitmap(400, 400);
+        using var bmp = new Bitmap(200, 200);
         using (var g = Graphics.FromImage(bmp))
-        {
-            g.Clear(Color.FromArgb(255, 50, 50, 50));
-            g.FillRectangle(Brushes.White, 20, 20, 120, 50);
-            // light metal plate that often passes balloon-fill
-            g.FillEllipse(Brushes.Silver, 150, 250, 160, 100);
-        }
+            g.Clear(Color.FromArgb(255, 40, 40, 40));
 
         var islands = new List<(Rectangle Bounds, string Text)>
         {
-            (new Rectangle(25, 25, 100, 40), "Hello there friend"),
-            (new Rectangle(160, 260, 140, 80), "coocoo"),
+            (new Rectangle(10, 10, 20, 15), ""),
+            (new Rectangle(40, 40, 100, 80), "Hello there friend"),
         };
         var kept = OcrProcessor.SmokeFilterDeadDetectRegions(bmp, islands);
+        Assert.DoesNotContain(kept, x => string.IsNullOrWhiteSpace(x.Text) && x.Bounds.Width < 80);
         Assert.Contains(kept, x => x.Text.Contains("Hello", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(kept, x =>
-            x.Text.Equals("coocoo", StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -31,14 +31,6 @@ public class SpeechRulesAndPauseTests
     }
 
     [Fact]
-    public void Uchar_noise_unusable_or_stripped()
-    {
-        string c = OcrProcessor.SmokeCleanForSpeech("uchar", comicBook: true);
-        Assert.True(OcrProcessor.SmokeIsUsableOcrText(c) == false ||
-                    !c.Contains("uchar", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
     public void Speech_rule_word_vs_phrase_catalog_nonempty()
     {
         Assert.NotEmpty(SpeechTextRulesCatalog.CreateDefaults());

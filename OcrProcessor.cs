@@ -903,9 +903,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Minimum words for a speak unit to survive full-order / crop-primary merge.
-        /// Was 2 (treated 1-word openers like "afternoon" / "No!" as scrap). Set to 1
-        /// to disable that short-unit scrap filter; SpeechCleaner.IsUnusableOcrText still applies.
-        /// Detect scrap islands (LooksLikeScrapDetect / FilterDead) are separate.
+        /// 1 keeps short openers and one-word balloons; SpeechCleaner.IsUnusableOcrText
+        /// still applies. Detect scrap islands are separate.
         /// </summary>
         private const int MinSpeakUnitWords = 1;
 
@@ -3113,14 +3112,6 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// True when a detect island covers most of the pipeline frame (one mega
-        /// box wrapping every balloon). Crop Kobold often starts mid-panel and
-        /// skips left captions on those; full-frame OCR matches Default mode.
-        /// </summary>
-        private static bool RegionIsNearFullFrame(Rectangle b, int imgW, int imgH) =>
-            ComicRegionGeometry.RegionIsNearFullFrame(b, imgW, imgH);
-
-        /// <summary>
         /// Local-LLM crop under-read vs OCR detect for the same island (common when one
         /// mega box holds several balloons and the model starts mid-panel).
         /// </summary>
@@ -3133,14 +3124,12 @@ namespace SpeakRect
         /// → TTS → bubble pause → next island.
         /// <para>
         /// Cross-balloon word reuse never hits a global speak-dedupe bag, so short
-        /// replies like "Really?" after "it's really good to see you" stay spoken.
+        /// replies after longer balloons that reuse a stem stay spoken.
         /// Faster time-to-first-speech than stack-then-speak-all.
         /// </para>
         /// <para>
-        /// Single near-full-frame mega islands use full-frame OCR (same idea as
-        /// Default mode) because multi-balloon crop reads often skip the left
-        /// caption. Crop results that under-read vs that island's WinOCR text are
-        /// rescued before TTS.
+        /// Crop results that under-read vs that island's WinOCR text may try a
+        /// full-frame rescue when there is only one region.
         /// </para>
         /// Returns spoken unit texts (already spoken when <paramref name="speakNow"/>
         /// is true). When every crop is empty, one full-frame fallback is tried.
@@ -3171,75 +3160,6 @@ namespace SpeakRect
 
             var sw = Stopwatch.StartNew();
             int regionSpoke = 0;
-            int imgW = pipelineImage.Width;
-            int imgH = pipelineImage.Height;
-
-            // Single mega island wrapping the whole panel → Default-style full-frame.
-            // Archive 2026-07-28 Emplate: crop consensus returned mid-panel only
-            // ("BUT EMPLATE…") while full-frame / Default got "IN THE PAST…".
-            if (regions.Count == 1 &&
-                ComicRegionGeometry.RegionIsNearFullFrame(regions[0].Bounds, imgW, imgH))
-            {
-                detail.AppendLine(
-                    "sequential-regions: single near-full-frame island → " +
-                    "full-frame OCR (avoid multi-balloon crop skip)");
-                sw.Restart();
-                var megaFull = await RunFullFrameWithWideRescueAsync(
-                    pipelineImage, detail, token).ConfigureAwait(false);
-                pipeTimer.Mark("seq-full-frame-mega", sw);
-
-                var megaPieces = SpeechCleaner.ExpandToSpeakPieces(megaFull);
-                if (megaPieces.Count >= 2)
-                    megaPieces = SpeechCleaner.DedupeSpeakPiecesForTts(megaPieces, detail);
-                if (megaPieces.Count >= 2)
-                    megaPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(megaPieces, detail);
-
-                if (megaPieces.Count > 0)
-                {
-                    detail.AppendLine(
-                        $"sequential-regions mega-fullframe units={megaPieces.Count} " +
-                        $"words={megaPieces.Sum(p => ComicRegionGeometry.CountWords(p.Text))}");
-                    if (speakNow)
-                    {
-                        if (!ducked)
-                        {
-                            DuckOtherAudio();
-                            ducked = true;
-                        }
-                        for (int pi = 0; pi < megaPieces.Count; pi++)
-                        {
-                            token.ThrowIfCancellationRequested();
-                            string unit = megaPieces[pi].Text;
-                            spokenParts.Add(unit);
-                            detail.AppendLine(
-                                $"speak[{tag}-mega-full {pi + 1}/{megaPieces.Count}]: {unit}");
-                            sw.Restart();
-                            await SpeakWithSystemAsync(unit, token)
-                                .ConfigureAwait(false);
-                            pipeTimer.Mark($"tts seq-mega-full[{pi + 1}]", sw);
-                            int pauseMs = megaPieces[pi].PauseAfterMs;
-                            if (pauseMs > 0)
-                            {
-                                detail.AppendLine($"unit-pause {pauseMs} ms");
-                                await Task.Delay(pauseMs, token).ConfigureAwait(false);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        foreach (var p in megaPieces)
-                            spokenParts.Add(p.Text);
-                    }
-
-                    detail.AppendLine(
-                        $"winner={tag}+mega-fullframe regions-spoken=1/1 " +
-                        $"units={spokenParts.Count}");
-                    return (spokenParts, tag + "+mega-fullframe", ducked);
-                }
-
-                detail.AppendLine(
-                    "sequential-regions: mega full-frame empty — fall through to crop");
-            }
 
             for (int i = 0; i < regions.Count; i++)
             {
@@ -3269,9 +3189,8 @@ namespace SpeakRect
                         $"      seq[{i + 1}]: crop under-read vs OCR " +
                         $"(local-llm={kW} ocr={wW})");
 
-                    bool tryFull =
-                        regions.Count == 1 ||
-                        ComicRegionGeometry.RegionIsNearFullFrame(region.Bounds, imgW, imgH);
+                    // Single-island under-read: try full-frame (metric-driven, not area).
+                    bool tryFull = regions.Count == 1;
 
                     if (tryFull)
                     {
@@ -3335,8 +3254,7 @@ namespace SpeakRect
 
                                 regionSpoke++;
                                 // Full-frame already covers the panel — stop more crops.
-                                if (regions.Count == 1 ||
-                                    ComicRegionGeometry.RegionIsNearFullFrame(region.Bounds, imgW, imgH))
+                                if (regions.Count == 1)
                                 {
                                     detail.AppendLine(
                                         $"winner={tag}+full-rescue " +
@@ -3391,9 +3309,8 @@ namespace SpeakRect
                 }
 
                 // Do not gate short crop tokens against OCR island text — detect often
-                // misses HUH/HM/names that Local-LLM reads on the crop. Speech noise
-                // rules + SpeechCleaner.IsUnusableOcrText handle model junk (e.g. "uchar").
-                // Archive 2026-07-29: winocr-anchor short-token gate dropped real dialogue.
+                // misses short call-outs / names that Local-LLM reads on the crop.
+                // Speech noise rules + SpeechCleaner.IsUnusableOcrText handle model junk.
 
                 if (pieces.Count == 0)
                 {
@@ -5690,9 +5607,8 @@ namespace SpeakRect
 
         /// <summary>
         /// After dynamic-fog final detect: crop each island and re-run WinOCR.
-        /// Nuke when crop text is empty/junk, pure repeated-syllable gibberish
-        /// (jar rings → "coocoo"), or a single weak token that is not real dialogue.
-        /// Real multi-word balloons keep; short real call-outs ("NO", "SORRY") keep.
+        /// Nuke when crop text is empty/junk, or a single weak token that is not
+        /// real dialogue. Real multi-word balloons keep; short real call-outs keep.
         /// Comic Book + dyn fog only (caller gates). Skips when engine missing.
         /// </summary>
         private static async Task<List<DetectedTextRegion>> VerifyDynFogIslandsWinOcrAsync(
@@ -5799,20 +5715,9 @@ namespace SpeakRect
                     continue;
                 }
 
-                // 2) Art OCR ghosts: pure repeated syllables (candy-jar "coocoo")
-                if (ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish(joined))
-                {
-                    nuked++;
-                    detail.AppendLine(
-                        $"  dyn-fog nuke gibberish-crop " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
-                        $"crop={cropPreview} was={was}");
-                    continue;
-                }
-
-                // 3) Single weak token that is not a real dialogue call-out.
+                // 2) Single weak token that is not a real dialogue call-out.
                 // Multi-word crop text is trusted as speech. One-word must look like
-                // "NO"/"SORRY"/"WATCHDOG" — not random art glyphs that balloon-fill.
+                // a letter+vowel dialogue token — not random art glyphs.
                 if (words <= 1)
                 {
                     bool realWord = LooksLikeRealDialogueToken(joined);
@@ -6045,7 +5950,7 @@ namespace SpeakRect
                 regions, pipeW, pipeH, detail);
 
             // Late scrap (mega-split pieces / merge leftovers) can reappear after the
-            // early dead-island pass — filter again so art OCR like "coocoo" dies.
+            // early dead-island pass — filter again.
             int beforeDead2 = regions.Count;
             regions = FilterDeadDetectRegions(regions, detectImage, detail);
             if (regions.Count != beforeDead2)
@@ -9204,23 +9109,8 @@ namespace SpeakRect
                     continue;
                 }
 
-                // Background logos / title lettering on art (not a speech plate).
-                // Even letter+vowel tokens like "cream" / "Feth" must sit on a light
-                // balloon; real one-word dialogue ("NO", "SORRY", "WATCHDOG") does.
-                // Live ComicBook spoke "cream" from a mid-panel logo while Balloons
-                // preview never boxed it (2026-07-29).
-                if (words <= 1 &&
-                    !LooksLikeSpeechBalloonFill(capture, r.Bounds))
-                {
-                    detail.AppendLine(
-                        $"  dead-island drop non-balloon-token alnum={alnum} " +
-                        $"\"{Truncate(r.WinOcrText, 24)}\" " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height}");
-                    continue;
-                }
-
                 // Single token on a large box: drop only scrap (digits, no vowels, tiny)
-                // Keep letter-words ≥4 with a vowel even if alone (balloon fragments).
+                // Keep letter-words with a vowel even if alone (balloon fragments).
                 if (words <= 1 && area >= 8000 && !realWordIsland)
                 {
                     detail.AppendLine(
@@ -9251,8 +9141,7 @@ namespace SpeakRect
 
         /// <summary>
         /// True for a short alnum token that looks like real English dialogue.
-        /// Delegates to <see cref="ComicBestOfFusion.LooksLikeRealDialogueToken"/>
-        /// (rejects repeated-syllable OCR ghosts like "coocoo").
+        /// Delegates to <see cref="ComicBestOfFusion.LooksLikeRealDialogueToken"/>.
         /// </summary>
         private static bool LooksLikeRealDialogueToken(string? text)
             => ComicBestOfFusion.LooksLikeRealDialogueToken(text);
@@ -10471,21 +10360,12 @@ namespace SpeakRect
             !SpeechCleaner.IsUnusableOcrText(text);
 
         /// <summary>
-        /// Smoke helper: near-full-frame mega island (triggers full-frame OCR
-        /// on sequential path).
-        /// </summary>
-        public static bool SmokeRegionIsNearFullFrame(
-            Rectangle bounds, int imgW, int imgH) =>
-            ComicRegionGeometry.RegionIsNearFullFrame(bounds, imgW, imgH);
-
-        /// <summary>
         /// Smoke helper: crop Kobold under-read vs WinOCR word count.
         /// </summary>
         public static bool SmokeKoboldUnderReadsWinOcr(
             string? kobold, string? winOcr) =>
             ComicRegionGeometry.KoboldUnderReadsWinOcr(kobold, winOcr);
 
-        /// <summary>
         /// <summary>
         /// Smoke helper: Western comic reading order on geometry only
         /// (L→R within row, top→bottom bands). Returns ordered copies of

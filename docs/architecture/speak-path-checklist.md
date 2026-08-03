@@ -2,7 +2,9 @@
 
 Method-level map of capture → recognize → speak. Update this file when you change the call chain.
 
-**Product:** SpeakRect 1.4.33+ · See also [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
+**Product:** SpeakRect 1.4.43+ · See also [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
+
+**One-off purge:** page-named special cases are tracked for removal in [`../dev/one-off-kill-list.md`](../dev/one-off-kill-list.md). Prefer category-level fixes; do not add new heuristics justified only by a single panel.
 
 **Legend:** ✅ intended · ⚠️ edge · 📌 regression anchor
 
@@ -100,7 +102,7 @@ Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**
 **Regression anchors (ModeSmoke):**
 
 - Balloons last capture == full-res live snap  
-- Live and Balloons share `BuildComicReadingRegionsAsync` (dead-island / cream logo)  
+- Live and Balloons share `BuildComicReadingRegionsAsync` (dead-island filter)  
 - `SmokeVerifyKoboldJsonShape` for vision JSON  
 
 ---

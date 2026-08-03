@@ -146,19 +146,12 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
-    public void Dyn_fog_rejects_candy_jar_coocoo_gibberish()
+    public void Real_dialogue_token_accepts_short_callouts()
     {
-        // last_regions island 3: jar rings OCR'd as "coocoo" (not empty — needs gibberish gate).
-        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("coocoo"));
-        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("CooCoo"));
-        Assert.True(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("lalala"));
-        // Short SFX / real dialogue must survive.
-        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("haha"));
-        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("NO"));
-        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("SORRY"));
-        Assert.False(ComicBestOfFusion.LooksLikeRepeatedSyllableGibberish("WATCHDOG"));
-        Assert.False(ComicBestOfFusion.LooksLikeRealDialogueToken("coocoo"));
         Assert.True(ComicBestOfFusion.LooksLikeRealDialogueToken("SORRY"));
+        Assert.True(ComicBestOfFusion.LooksLikeRealDialogueToken("NO"));
+        Assert.False(ComicBestOfFusion.LooksLikeRealDialogueToken(""));
+        Assert.False(ComicBestOfFusion.LooksLikeRealDialogueToken("123"));
     }
 
     [Fact]

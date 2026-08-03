@@ -154,12 +154,10 @@ namespace SpeakRect
 
 
         /// <summary>
-        /// Pre-TTS filter: drop units that are largely repeats of earlier speech.
-        /// Handles mega-crop then small-crop echo (sailors said inside unit 1, again
-        /// as unit 4) where symmetric overlap is low because one unit is much longer.
-        /// Keeps earlier wording for pure echoes; <b>never</b> drops a unit that adds
-        /// real novel content words (e.g. truncated "…wondrous" then full
-        /// "…wondrous beginning!"). Prefer replacing the earlier partial with the
+        /// Pre-TTS filter: drop units that are largely repeats of earlier speech
+        /// (crop echo after a longer unit, near-duplicate consecutive units).
+        /// Keeps earlier wording for pure echoes; never drops a unit that adds
+        /// real novel content words. Prefer replacing an earlier partial with a
         /// longer completion when appropriate.
         /// </summary>
         internal static List<string> DedupeSpeakUnitsForTts(
@@ -184,7 +182,7 @@ namespace SpeakRect
                     continue;
 
                 int words = ComicRegionGeometry.CountWords(u);
-                // Content tokens (len>=3) not yet spoken — tails like "beginning"
+                // Content tokens (len>=3) not yet spoken
                 int novelContent = 0;
                 foreach (string t in uTok)
                 {
@@ -211,7 +209,7 @@ namespace SpeakRect
                 }
 
                 // Completion: later unit extends an earlier partial (shared body +
-                // novel tail). Replace the partial so TTS gets "…beginning!".
+                // novel tail). Replace the partial so TTS gets the full wording.
                 if (bestIdx >= 0 &&
                     novelContent >= 1 &&
                     bestSingle >= 0.55 &&
@@ -233,8 +231,7 @@ namespace SpeakRect
                     continue;
                 }
 
-                // Thresholds: short echoes need high coverage; longer units need more.
-                // "two sailors-singapore" inside a fat caption dump ? cover - 0.9+.
+                // Echo when this unit is largely covered by prior speech / a prior unit.
                 bool isEcho =
                     (words <= 14 && (coverBySpoken >= 0.72 || bestSingle >= 0.72)) ||
                     (words <= 28 && (coverBySpoken >= 0.82 || bestSingle >= 0.85)) ||
@@ -248,46 +245,13 @@ namespace SpeakRect
                         isEcho = true;
                 }
 
-                // Never drop pure-echo logic when this unit still adds real words
-                // (hard case: cover 0.83 on "…wondrous beginning!" vs truncated prior).
+                // Keep when this unit still adds real content words.
                 if (isEcho && novelContent >= 1 && words >= 2)
                 {
                     detail.AppendLine(
                         $"  speak-dedupe keep-novel unit[{i + 1}] novel={novelContent} " +
                         $"coverSpoken={coverBySpoken:F2} \"{Truncate(u, 44)}\"");
                     isEcho = false;
-                }
-
-                // Short balloons often reuse a word from earlier dialogue
-                // ("Really?" after "it's really good to see you"). Token bag /
-                // bestSingle coverage is 1.0 on the shared lemma, but that is
-                // not an OCR echo of a prior unit — only drop when a prior unit
-                // of similar length actually restates the same short phrase.
-                if (isEcho && words <= 2 && kept.Count > 0)
-                {
-                    bool similarLengthPrior = false;
-                    for (int k = 0; k < kept.Count; k++)
-                    {
-                        int kw = ComicRegionGeometry.CountWords(kept[k]);
-                        if (kw > words + 2)
-                            continue;
-                        if (TokenCoverageOfAByB(u, kept[k]) >= 0.80 &&
-                            TokenCoverageOfAByB(kept[k], u) >= 0.50)
-                        {
-                            similarLengthPrior = true;
-                            break;
-                        }
-                    }
-
-                    if (!similarLengthPrior)
-                    {
-                        detail.AppendLine(
-                            $"  speak-dedupe keep-short unit[{i + 1}] words={words} " +
-                            $"coverSpoken={coverBySpoken:F2} bestSingle={bestSingle:F2}" +
-                            (bestIdx >= 0 ? $"~kept[{bestIdx + 1}]" : "") +
-                            $" \"{Truncate(u, 44)}\"");
-                        isEcho = false;
-                    }
                 }
 
                 if (isEcho)
@@ -328,11 +292,6 @@ namespace SpeakRect
             if (ComicRegionGeometry.CountWords(t) < 1 || CountAlnum(t) < 2)
                 return true;
 
-            // VL sometimes emits long non-Latin junk for hard crops (Storm dual panel
-            // right-top returned pages of Linear-B-like codepoints as "usable").
-            if (IsMostlyNonLatinLetterNoise(t))
-                return true;
-
             // VL regurgitated our task prompt (or a close variant) ? treat as failure
             // so recovery / crop / WinOCR paths can run.
             if (IsPromptEcho(t))
@@ -349,39 +308,7 @@ namespace SpeakRect
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                 return true;
 
-            // Lone C-type token (unsigned char) left after noise strip — never speak.
-            if (Regex.IsMatch(t,
-                    @"^(?:unsigned\s+char|u\s*char|uchar)[.!?]*$",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-                return true;
-
             return false;
-        }
-
-
-        /// <summary>
-        /// True when letter content is mostly outside basic Latin (English comics).
-        /// Catches private-use / exotic-script spam that still has "letters" for alnum counts.
-        /// </summary>
-        internal static bool IsMostlyNonLatinLetterNoise(string text)
-        {
-            int letters = 0;
-            int latin = 0;
-            foreach (char c in text)
-            {
-                if (!char.IsLetter(c))
-                    continue;
-                letters++;
-                // Basic Latin + Latin-1 supplement letters used in English OCR
-                if (c <= 0x024F)
-                    latin++;
-            }
-
-            if (letters < 4)
-                return false;
-
-            // Fewer than ~1/3 Latin letters → not usable English dialogue
-            return latin * 3 < letters;
         }
 
 
@@ -1223,9 +1150,9 @@ namespace SpeakRect
         /// Extract prose from model JSON wrappers. Handles:
         /// <list type="bullet">
         /// <item>Whole reply is <c>{"text":"…"}</c> (also content/ocr/result/…)</item>
-        /// <item>Plain text + trailing object (log: Adrienne. then {"text":"Something?\\n…"})</item>
-        /// <item>Loose field without braces (log: Hattie panel <c>"text": "HER NAME…"</c>) —
-        /// punctuation strip would otherwise leave a spoken word <c>text</c>.</item>
+        /// <item>Plain text + trailing object with a text-ish string field</item>
+        /// <item>Loose field without braces (<c>"text": "…"</c>) — punctuation strip
+        /// would otherwise leave a spoken word <c>text</c>.</item>
         /// </list>
         /// Non-matching braces are left alone (dialogue with literal '{').
         /// Double quotes are not kept for TTS — they only matter while unwrapping
@@ -1304,7 +1231,7 @@ namespace SpeakRect
             }
 
             // Loose "text": "…" without outer braces (common VL freestyle).
-            // Must run even when no '{' was present — that is the Hattie failure mode.
+            // Must run even when no '{' was present.
             s = UnwrapLooseJsonTextAssignments(s);
             return s.Trim();
         }
@@ -1321,7 +1248,7 @@ namespace SpeakRect
 
             string s = input;
 
-            // "text": "VALUE"  (key always quoted in the Hattie log form)
+            // "text": "VALUE" (quoted key)
             s = Regex.Replace(
                 s,
                 $@"(?is)""(?:{ModelJsonTextKeyAlternation})""\s*:\s*""((?:\\.|[^""\\])*)""",

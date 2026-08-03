@@ -1,6 +1,6 @@
 # SpeakRect architecture (as-built)
 
-**Product:** SpeakRect 1.4.33 · **License:** GPLv2 · **Platform:** Windows x64 (WinForms + WPF)
+**Product:** SpeakRect 1.4.43 · **License:** GPLv2 · **Platform:** Windows x64 (WinForms + WPF)
 
 For the full speak/capture call graph, see [`architecture/speak-path-checklist.md`](architecture/speak-path-checklist.md).  
 For build/test steps, see [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`dev/smoke-runbook.md`](dev/smoke-runbook.md).

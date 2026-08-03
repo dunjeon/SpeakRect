@@ -75,17 +75,15 @@ public class SpeechCleanerTests
     [Fact]
     public void CleanForSpeech_unwraps_loose_text_field_without_braces()
     {
-        // Hattie panel (2026-08-01): VL mixed plain balloon + freestyle
-        // "text": "…" — not a JSON object, so brace unwrap missed it and TTS
-        // spoke the word "text".
+        // VL freestyle "text": "…" without outer braces must not speak the key.
         string raw =
             "...AND SHE WASN'T ANYTHIN' LIKE YOU.\n\n" +
-            "\"text\": \"HER NAME WAS HATTIE ST. ANGE, AND SHE WAS A..." +
+            "\"text\": \"HER NAME WAS RIVER ST. CLAIR, AND SHE WAS A..." +
             "DIFFICULT WOMAN. YOU KNOW THE TYPE: TOO SMART FOR HER OWN GOOD..." +
             "HYPERSENSITIVE... TORPEDOED EVERY RELATIONSHIP SHE EVER HAD...\"";
 
         string cleaned = SpeechCleaner.CleanForSpeech(raw, comicBook: true);
-        Assert.Contains("hattie", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("river", cleaned, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("anythin", cleaned, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("text her name", cleaned, StringComparison.OrdinalIgnoreCase);
         // No spoken JSON key as its own lead-in word.

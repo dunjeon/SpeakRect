@@ -475,29 +475,14 @@ Console.WriteLine("--- Speech cleaner ---");
             $"order=[{string.Join(" | ", orderedCap.Select(r => $"{r.X},{r.Y} {r.Width}x{r.Height}"))}]");
     }
 
-    // Mega island → full-frame (Emplate archive: crop skipped left caption).
+    // Crop under-read vs WinOCR word-count metric (category rescue, not area).
     {
         Console.WriteLine();
-        Console.WriteLine("--- Mega island / coverage rescue ---");
-        // Archive region @0,57 640x242 on 640x299 pipeline (~81% height, full width).
-        var mega = new Rectangle(0, 57, 640, 242);
-        Check("Emplate-like mega region is near-full-frame",
-            OcrProcessor.SmokeRegionIsNearFullFrame(mega, 640, 299),
-            $"box={mega.Width}x{mega.Height} on 640x299");
-        var tiny = new Rectangle(100, 80, 120, 90);
-        Check("Small balloon is not near-full-frame",
-            !OcrProcessor.SmokeRegionIsNearFullFrame(tiny, 640, 299),
-            $"box={tiny.Width}x{tiny.Height}");
+        Console.WriteLine("--- Coverage under-read metric ---");
+        string shortCrop = string.Join(' ', Enumerable.Repeat("word", 29));
+        string longOcr = string.Join(' ', Enumerable.Repeat("word", 54));
         Check("Local-LLM under-read vs OCR (29 vs 54 words)",
-            OcrProcessor.SmokeKoboldUnderReadsWinOcr(
-                "BUT EMPLATEs SOLE INTEREST IN HIS GENETIC PEERS. " +
-                "IS MERELY CONSUMPTION OF THE YOUNG. HE EATS MUTANTS " +
-                "SUCKING THE VERY MARROW FROM THEIR BONES. WORSE YET HE ENJOYS IT.",
-                "IN THE PAST MANY OF THE MORE CORRUPT OF MUTANTS MAY HAVE " +
-                "DEDICATED THEIR LIVES TO THE DESTRUCTION OR CONQUEST OF THOSE " +
-                "AROUND THEM BUT EMPLATES SOLE INTEREST IN HIS GENETIC PEERS " +
-                "IS MERELY CONSUMPTION OF THE YOUNG HE EATS MUTANTS SUCKING THE " +
-                "VERY MARROW FROM THEIR BONES WORSE YET HE ENJOYS IT"),
+            OcrProcessor.SmokeKoboldUnderReadsWinOcr(shortCrop, longOcr),
             "expected under-read");
         Check("Matching word counts are not under-read",
             !OcrProcessor.SmokeKoboldUnderReadsWinOcr(
@@ -569,22 +554,10 @@ Console.WriteLine("--- Speech cleaner ---");
             $"solidPad count={solidPad.Count}");
     }
 
-    // VL/programming junk "uchar" (unsigned char) must not be spoken.
+    // Short dialogue still usable after clean (product requirement).
     {
         Console.WriteLine();
-        Console.WriteLine("--- Filter uchar (unsigned char junk) ---");
-        string withUchar = OcrProcessor.SmokeCleanForSpeech(
-            "PLUS ALL THE NORTHERN LIVES I'VE ABSORBED. uchar. " +
-            "GUESS I DON'T REALLY BELONG ANYWHERE ANYMORE.", true);
-        Check("Noise rules strip uchar from cleaned speech",
-            !withUchar.Contains("uchar", StringComparison.OrdinalIgnoreCase) &&
-            withUchar.Contains("northern", StringComparison.OrdinalIgnoreCase) &&
-            withUchar.Contains("belong", StringComparison.OrdinalIgnoreCase),
-            TruncateForSmoke(withUchar, 120));
-        Check("Lone uchar is unusable OCR (do not TTS)",
-            !OcrProcessor.SmokeIsUsableOcrText("uchar.") &&
-            !OcrProcessor.SmokeIsUsableOcrText("uchar") &&
-            !OcrProcessor.SmokeIsUsableOcrText("unsigned char"));
+        Console.WriteLine("--- Short dialogue usability ---");
         Check("Real short dialogue still usable",
             OcrProcessor.SmokeIsUsableOcrText("no!") &&
             OcrProcessor.SmokeIsUsableOcrText("AFTERNOON."));
@@ -701,47 +674,38 @@ Console.WriteLine("--- Speech cleaner ---");
         }
     }
 
-    // Dead-island: single-token logos on art must not become reading blocks
-    // (live ComicBook spoke "cream" while Balloons preview had no such region).
+    // Dead-island: keep real dialogue; drop empty tiny geometry / weak scrap.
     {
         Console.WriteLine();
-        Console.WriteLine("--- Dead-island non-balloon token ---");
+        Console.WriteLine("--- Dead-island keep dialogue / drop empty scrap ---");
         using var panel = new Bitmap(320, 280, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(panel))
         {
-            g.Clear(Color.FromArgb(95, 105, 115)); // art / mid-tone background
-            // Light speech plate + ink strokes (real one-word balloon).
+            g.Clear(Color.FromArgb(95, 105, 115));
             g.FillRectangle(Brushes.White, 30, 20, 140, 70);
             g.FillRectangle(Brushes.Black, 55, 42, 50, 10);
-            g.FillRectangle(Brushes.Black, 60, 55, 35, 8);
-            // Mid-art logo zone (no light plate) — "cream"/"Feth" style.
-            g.FillRectangle(new SolidBrush(Color.FromArgb(130, 110, 100)), 40, 140, 135, 70);
-            g.FillRectangle(new SolidBrush(Color.FromArgb(50, 40, 40)), 55, 165, 80, 14);
         }
 
         var balloonBox = new Rectangle(30, 20, 140, 70);
-        var logoBox = new Rectangle(40, 140, 135, 70);
         Check("Speech plate looks like balloon fill",
             OcrProcessor.SmokeLooksLikeSpeechBalloonFill(panel, balloonBox));
-        Check("Art logo zone is not balloon fill",
-            !OcrProcessor.SmokeLooksLikeSpeechBalloonFill(panel, logoBox));
 
         var kept = OcrProcessor.SmokeFilterDeadDetectRegions(
             panel,
             new[]
             {
                 (balloonBox, "SORRY"),
-                (logoBox, "cream"),
-                (new Rectangle(200, 20, 100, 80), "I DUMPED BRIAN WEEKS AGO FOREVER"),
+                (new Rectangle(10, 10, 20, 15), ""),
+                (new Rectangle(200, 20, 100, 80), "I LEFT TOWN WEEKS AGO FOREVER"),
             });
         Check("Dead-island keeps one-word dialogue on balloon plate",
             kept.Any(r => r.Text.Equals("SORRY", StringComparison.OrdinalIgnoreCase)),
             $"kept=[{string.Join(" | ", kept.Select(r => r.Text))}]");
-        Check("Dead-island drops single-token logo on non-balloon art (cream)",
-            !kept.Any(r => r.Text.Equals("cream", StringComparison.OrdinalIgnoreCase)),
-            $"kept=[{string.Join(" | ", kept.Select(r => r.Text))}]");
+        Check("Dead-island drops empty tiny geometry",
+            !kept.Any(r => string.IsNullOrWhiteSpace(r.Text) && r.Bounds.Width < 80),
+            $"kept=[{string.Join(" | ", kept.Select(r => $"{r.Bounds.Width}x{r.Bounds.Height}:{r.Text}"))}]");
         Check("Dead-island keeps multi-word dialogue island",
-            kept.Any(r => r.Text.Contains("DUMPED", StringComparison.OrdinalIgnoreCase)),
+            kept.Any(r => r.Text.Contains("LEFT", StringComparison.OrdinalIgnoreCase)),
             $"kept=[{string.Join(" | ", kept.Select(r => r.Text))}]");
     }
 
@@ -836,37 +800,20 @@ Console.WriteLine("--- Speech cleaner ---");
             $"clean={TruncateForSmoke(shortClean, 40)} units=[{string.Join(" | ", shortUnits)}]");
     }
 
-    // Regression (look/Bug): speak-dedupe must not drop "really?" when the
-    // word "really" already appeared inside a longer earlier balloon.
-    // Token bag coverage was 1.0 and TTS skipped region 2 entirely.
-    // Sequential regions is off by default; global dedupe still must keep
-    // short "really?" after a longer balloon that used the same stem.
+    // Speak-dedupe: drop pure echoes; keep general crop-echo collapse.
     {
-        var emmaPanel = new List<string>
-        {
-            "it's really good to see you",
-            "emma.",
-            "really?",
-            "you too",
-            "ian.",
-        };
-        var afterDedup = OcrProcessor.SmokeDedupeSpeakUnits(emmaPanel);
-        Check("Speak-dedupe keeps short 'really?' after longer 'really …' balloon",
-            afterDedup.Count == 5 &&
-            afterDedup.Any(u => u.Equals("really?", StringComparison.Ordinal)),
-            $"deduped={afterDedup.Count} [{string.Join(" | ", afterDedup)}]");
-        Check("Speak-dedupe still drops true short restatement of prior short unit",
+        Check("Speak-dedupe drops true short restatement of prior short unit",
             OcrProcessor.SmokeDedupeSpeakUnits(new[] { "really?", "really?" }).Count == 1,
             "duplicate 'really?' should collapse to one");
-        // Longer crop echo of a mega unit should still drop (existing intent).
+        // Longer crop echo of a mega unit should still drop.
         var megaEcho = OcrProcessor.SmokeDedupeSpeakUnits(new[]
         {
-            "two sailors said they were headed to singapore next week",
-            "two sailors said",
+            "the scouts said they were headed north next week",
+            "the scouts said",
         });
-        Check("Speak-dedupe still drops multi-word subset echo of mega unit",
+        Check("Speak-dedupe still drops multi-word subset echo of longer unit",
             megaEcho.Count == 1 &&
-            megaEcho[0].Contains("singapore", StringComparison.Ordinal),
+            megaEcho[0].Contains("north", StringComparison.Ordinal),
             $"mega=[{string.Join(" | ", megaEcho)}]");
         Check("ComicSequentialRegions defaults on (Balloons §9)",
             AppSettings.Current.ComicSequentialRegions);
@@ -930,8 +877,10 @@ Console.WriteLine("--- Speech cleaner ---");
             !noiseClean.Contains("attached", StringComparison.Ordinal) &&
             !noiseClean.Contains("image", StringComparison.Ordinal),
             TruncateForSmoke(noiseClean, 100));
-        Check("Speech text rules include uchar noise strip",
-            AppSettings.Current.SpeechTextRules.Any(r =>
+        Check("Retired uchar noise strip not in catalog",
+            !AppSettings.Current.SpeechTextRules.Any(r =>
+                r.Id.Equals("noise-c-type-uchar", StringComparison.OrdinalIgnoreCase)) &&
+            !SpeechTextRulesCatalog.CreateDefaults().Any(r =>
                 r.Id.Equals("noise-c-type-uchar", StringComparison.OrdinalIgnoreCase)));
 
         // Decorators: multi-dash between words → period clause
@@ -1067,12 +1016,11 @@ Console.WriteLine("--- Speech cleaner ---");
         AppSettings.Current.NormalizeVoiceSettings();
     }
 
-    // Regression: glmocr mixed plain + {"text":"…\n…"} — must not speak "text"
-    // or "n" leftovers from \n escapes (log 2026-07-25 Adrienne panel).
+    // VL freestyle JSON wrappers — must not speak field names or \n leftovers.
     const string jsonLeakRaw =
-        "Wait. You had something to do with it, Adrienne.\n\n" +
+        "Wait. You had something to do with it, Alex.\n\n" +
         "{\"text\": \"Something?\\nDarn near everything.\\n" +
-        "I got the ball rolling when I told Daddy where Dante lived.\\n" +
+        "I got the ball rolling when I told them where the target lived.\\n" +
         "H-how did you find out?\"}";
     string jsonLeakClean = OcrProcessor.SmokeCleanForSpeech(jsonLeakRaw, comicBook: false);
     var jsonLeakUnits = OcrProcessor.SmokeSpeakUnits(jsonLeakClean);
@@ -1089,7 +1037,7 @@ Console.WriteLine("--- Speech cleaner ---");
         !Regex.IsMatch(jsonLeakClean, @"\bnh how\b"),
         $"clean={TruncateForSmoke(jsonLeakClean, 200)}");
     Check("JSON wrapper: keeps plain prefix + unwrapped dialogue",
-        jsonLeakClean.Contains("adrienne", StringComparison.Ordinal) &&
+        jsonLeakClean.Contains("alex", StringComparison.Ordinal) &&
         jsonLeakClean.Contains("darn near everything", StringComparison.Ordinal) &&
         jsonLeakClean.Contains("ball rolling", StringComparison.Ordinal) &&
         jsonLeakClean.Contains("how did you find out", StringComparison.Ordinal) &&

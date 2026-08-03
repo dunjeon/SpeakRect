@@ -6,35 +6,13 @@ using System.Linq;
 namespace SpeakRect
 {
     /// <summary>
-    /// Pure comic / balloon geometry: near-full-frame heuristics, merge-overlap
-    /// (grow + crop pad), and Western reading-order sort. No WinRT OCR, no Local-LLM HTTP.
+    /// Pure comic / balloon geometry: merge-overlap (grow + crop pad) and Western
+    /// reading-order sort. No WinRT OCR, no Local-LLM HTTP.
     /// Best-of / residual fusion lives in <see cref="ComicBestOfFusion"/>;
     /// diversified-decode voting in <see cref="ComicConsensus"/>.
     /// </summary>
     public static class ComicRegionGeometry
     {
-        /// <summary>
-        /// True when a detect island covers most of the pipeline frame (one mega
-        /// box wrapping every balloon). Crop Local-LLM often starts mid-panel and
-        /// skips left captions on those; full-frame OCR matches Default mode.
-        /// </summary>
-        public static bool RegionIsNearFullFrame(Rectangle b, int imgW, int imgH)
-        {
-            if (imgW < 8 || imgH < 8 || b.Width < 1 || b.Height < 1)
-                return false;
-
-            double areaFrac =
-                (b.Width * (double)b.Height) / (imgW * (double)imgH);
-            if (areaFrac >= 0.42)
-                return true;
-
-            // Wide caption strip: full width-ish and majority of height.
-            if (b.Width >= imgW * 0.82 && b.Height >= imgH * 0.50)
-                return true;
-
-            return false;
-        }
-
         /// <summary>
         /// Local-LLM crop under-read vs OCR detect for the same island (common when one
         /// mega box holds several balloons and the model starts mid-panel).
@@ -374,9 +352,7 @@ namespace SpeakRect
         /// <list type="bullet">
         /// <item>Same-column stack: upper before lower.</item>
         /// <item>Same-row: left before right.</item>
-        /// <item>Continuity: if A stacks onto B and C sits to the right of A on A's row,
-        /// finish B before C - but only when C itself has no stack below it
-        /// (so a full 2x2 grid stays row-major: TL?TR?BL?BR).</item>
+        /// <item>Nested strip vs inner balloon: higher top first.</item>
         /// </list>
         /// </summary>
         public static List<DetectedTextRegion> ApplyLightStackPreference(
@@ -415,8 +391,7 @@ namespace SpeakRect
             {
                 for (int j = i + 1; j < n; j++)
                 {
-                    // Nested strip vs inner balloon: higher top always first
-                    // (fixes full-width caption before left call-out).
+                    // Nested strip vs inner balloon: higher top always first.
                     if (BoxesNestedOrMostlyContained(boxes[i], boxes[j]))
                     {
                         if (boxes[i].Top + topSlack / 2 < boxes[j].Top)
@@ -462,32 +437,7 @@ namespace SpeakRect
                 }
             }
 
-            // Stack continuity: finish a left column before a singleton right reply
-            // that shares the top balloon's row (jazzed-hero panel).
-            for (int a = 0; a < n; a++)
-            {
-                for (int b = 0; b < n; b++)
-                {
-                    if (a == b) continue;
-                    if (!IsVerticalStackPair(boxes[a], boxes[b], out bool aAboveB) || !aAboveB)
-                        continue;
-
-                    for (int c = 0; c < n; c++)
-                    {
-                        if (c == a || c == b) continue;
-                        // C is right-hand peer of A on roughly the same row
-                        if (!IsSameRowLeftRight(boxes[a], boxes[c], out bool aLeftOfC) || !aLeftOfC)
-                            continue;
-                        // Full parallel column under C ? keep row-major (2x2)
-                        if (HasStackPartnerBelow(boxes, c))
-                            continue;
-                        // Finish stack (B) before jumping to singleton C
-                        AddBefore(b, c);
-                    }
-                }
-            }
-
-            // Kahn topo; when several are ready, keep band order (stable L?R / top bias)
+            // Kahn topo; when several are ready, keep band order (stable L→R / top bias)
             var ready = new List<int>();
             for (int i = 0; i < n; i++)
             {
@@ -571,7 +521,6 @@ namespace SpeakRect
             aLeftOfB = false;
 
             // Nested or wide-strip-covering-short-balloon → not L/R peers.
-            // (Sailors left of full-width upper strip must not force sailors first.)
             if (BoxesNestedOrMostlyContained(a, b))
                 return false;
 
@@ -611,21 +560,6 @@ namespace SpeakRect
 
             aLeftOfB = aCx < bCx;
             return true;
-        }
-
-        /// <summary>
-        /// True when some other box sits in a vertical stack under index
-        /// <paramref name="i"/> (parallel column / full grid).
-        /// </summary>
-        public static bool HasStackPartnerBelow(Rectangle[] boxes, int i)
-        {
-            for (int j = 0; j < boxes.Length; j++)
-            {
-                if (j == i) continue;
-                if (IsVerticalStackPair(boxes[i], boxes[j], out bool iAboveJ) && iAboveJ)
-                    return true;
-            }
-            return false;
         }
     }
 }

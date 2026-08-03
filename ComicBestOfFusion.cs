@@ -549,23 +549,11 @@ namespace SpeakRect
                 }
 
                 // Prefer crop when it covers this full unit and is equal/better OCR.
-                // Also when crop is a *tight superset* of a short full unit
-                // (e.g. crop "good afternoon" vs full "afternoon") — full-frame
-                // under-read the opener; balloon crop at high scale is the truth.
-                // Old snipCoveredByFull>=0.75 blocked that and kept the short full.
-                bool cropTightSuperset =
-                    coverFull >= 0.90 &&
-                    swN > fw &&
-                    swN <= fw + 4 &&
-                    snipCoveredByFull >= 0.35 &&
-                    snipCoveredByFull < 0.75;
-
                 bool preferCrop =
                     coverFull >= 0.88 &&
                     swN >= fw - 2 &&
-                    (snipCoveredByFull >= 0.75 || cropTightSuperset) &&
-                    (cropTightSuperset ||
-                     SpeechCleaner.IsClearlyBetterOcr(snip, fu) ||
+                    snipCoveredByFull >= 0.75 &&
+                    (SpeechCleaner.IsClearlyBetterOcr(snip, fu) ||
                      PreferCropWording(snip, fu) ||
                      string.Equals(
                          ComicConsensus.NormalizeOcrCompare(snip),
@@ -579,7 +567,6 @@ namespace SpeakRect
                     detail.AppendLine(
                         $"  full-order crop-word[{fi + 1}] r{snips[bestSi].RegionIndex + 1} " +
                         $"score={bestScore:F2}" +
-                        (cropTightSuperset ? " superset" : "") +
                         $" \"{Truncate(snip, 44)}\"");
                 }
                 else
@@ -622,8 +609,7 @@ namespace SpeakRect
 
                     // Coverage vs any single unit *and* the whole spoken join.
                     // Caption scraps often sit across split full units (low per-unit
-                    // cover) but are already fully present in the join — do not re-insert
-                    // as mush ("down storm's b as the phan spear strikes ho").
+                    // cover) but are already fully present in the join — do not re-insert.
                     double alreadyUnit = 0;
                     foreach (string u in result)
                         alreadyUnit = Math.Max(alreadyUnit, SpeechCleaner.TokenCoverageOfAByB(sn, u));
@@ -1514,10 +1500,7 @@ namespace SpeakRect
 
         /// <summary>
         /// True when crop text looks like truncated VL mush that mostly restates
-        /// full-frame tokens (e.g. "the compu to monit performan the harde").
-        /// Must <b>not</b> flag real novel balloons whose words simply never
-        /// appeared in full ("can't let them hit me again" was dropped as
-        /// "stubby" because those tokens were absent from full).
+        /// full-frame tokens (many short stems that are prefixes of full-frame words).
         /// </summary>
         public static bool LooksLikeTruncatedOcrGarbage(string crop, string fullText)
         {
@@ -1533,27 +1516,6 @@ namespace SpeakRect
 
             var fullToks = SpeechCleaner.ToTokenSet(fullText ?? "");
 
-            // Real missed balloons: several complete content words full never said.
-            // Storm dual-panel right column was killed without this escape hatch.
-            int novelComplete = 0;
-            foreach (string t in cropToks)
-            {
-                if (t.Length < 4)
-                    continue;
-                if (IsWeakNovelToken(t))
-                    continue;
-                if (fullToks.Contains(t))
-                    continue;
-                if (t.IndexOfAny(new[] { 'a', 'e', 'i', 'o', 'u', 'y' }) < 0)
-                    continue;
-                // Prefix of a full word → truncated stem, not a complete novel word
-                if (IsStrictPrefixOfAny(t, fullToks))
-                    continue;
-                novelComplete++;
-            }
-            if (novelComplete >= 2)
-                return false;
-
             int stubby = 0;
             int prefixOfFull = 0;
             foreach (string t in cropToks)
@@ -1565,8 +1527,8 @@ namespace SpeakRect
                     continue;
                 }
 
-                // Token is a strict prefix of a longer full-frame word → truncation
-                // Skip stopwords ("the"⊂"there") — they are not OCR cuts.
+                // Token is a strict prefix of a longer full-frame word → truncation.
+                // Skip stopwords — they are not OCR cuts.
                 if (!IsWeakNovelToken(t) &&
                     IsStrictPrefixOfAny(t, fullToks) &&
                     t.Length <= 9)
@@ -1575,7 +1537,7 @@ namespace SpeakRect
                 }
 
                 // Stubby mid-words: only when the token looks cut mid-stem
-                // (prefix of a full word), not merely "new dialogue full missed".
+                // (prefix of a full word).
                 if (t.Length is >= 4 and <= 8 &&
                     !t.EndsWith("ing", StringComparison.Ordinal) &&
                     !t.EndsWith("ed", StringComparison.Ordinal) &&
@@ -1627,7 +1589,7 @@ namespace SpeakRect
         /// <summary>
         /// Content tokens (len≥4, has vowel, not stopword) in <paramref name="text"/>
         /// that are absent from <paramref name="knownTok"/>.
-        /// Prefixes of known tokens ("phan"⊂"phantom") do not count as novel.
+        /// Prefixes of known tokens do not count as novel.
         /// </summary>
         public static void CountNovelContentTokens(
             string text,
@@ -2232,8 +2194,7 @@ namespace SpeakRect
         /// <summary>
         /// True for a short alnum token that looks like real English dialogue
         /// (letter-only, has a vowel). Includes punchy 2-3 letter balloons
-        /// ("NO", "OK", "GO", "YES") and longer call-outs (WATCHDOG, ANGRY).
-        /// Rejects pure repeated-syllable OCR ghosts (jar "coocoo", etc.).
+        /// ("NO", "OK", "GO", "YES") and longer call-outs.
         /// </summary>
         public static bool LooksLikeRealDialogueToken(string? text)
         {
@@ -2242,8 +2203,6 @@ namespace SpeakRect
             string n = SpeechCleaner.NormalizeToken(text);
             // 2–18 letters: "no"/"ok" through multi-syllable SFX names
             if (n.Length < 2 || n.Length > 18)
-                return false;
-            if (LooksLikeRepeatedSyllableGibberish(n))
                 return false;
             foreach (char c in n)
             {
@@ -2254,43 +2213,6 @@ namespace SpeakRect
             {
                 char l = char.ToLowerInvariant(c);
                 if (l is 'a' or 'e' or 'i' or 'o' or 'u' or 'y')
-                    return true;
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Pure repeated syllable blobs from art OCR (e.g. candy-jar rings → "coocoo").
-        /// Length ≥6 so short SFX like "haha" / "mama" stay allowed.
-        /// </summary>
-        public static bool LooksLikeRepeatedSyllableGibberish(string? text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return false;
-            string n = SpeechCleaner.NormalizeToken(text);
-            if (n.Length < 6 || n.Length > 18)
-                return false;
-            for (int unit = 2; unit <= 4; unit++)
-            {
-                if (n.Length % unit != 0)
-                    continue;
-                int reps = n.Length / unit;
-                if (reps < 2)
-                    continue;
-                string u = n.Substring(0, unit);
-                bool all = true;
-                for (int i = 1; i < reps; i++)
-                {
-                    if (!string.Equals(
-                            n.Substring(i * unit, unit),
-                            u,
-                            StringComparison.Ordinal))
-                    {
-                        all = false;
-                        break;
-                    }
-                }
-                if (all)
                     return true;
             }
             return false;
