@@ -473,14 +473,6 @@ namespace SpeakRect
             // Catches fences, headings, bold, lists, "Here is the text:" preambles.
             s = StripMarkdownLlmJunk(s);
 
-            // Pipeline Noise rules (Settings → Speech → Text rules): spotting,
-            // attach-image junk, catalog markdown, HTML scaffold handler.
-            // MUST run before CollapseAdjacentPunctuation — that pass collapses
-            // ";"/quotes inside VL style"…" blobs and would glue dialogue into CSS
-            // so noise-html-scaffold can no longer separate them.
-            s = SpeechTextRulesEngine.Apply(
-                s, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Noise);
-
             // First post-OCR step: ellipsis → single period (then a normal sentence
             // pause via NormalizeSpeechPunctuation). Avoids spoken "dot dot dot"
             // and must run before CollapseAdjacentPunctuation (which would leave one .).
@@ -495,6 +487,11 @@ namespace SpeakRect
             // Skip when custom pause encoding is off (no typed marks / delays).
             if (!ComicBookOff && UseCustomPauseEncodings)
                 s = PromoteDashBalloonBoundaries(s);
+
+            // Pipeline Noise rules (Settings → Speech → Text rules): spotting,
+            // attach-image junk, markdown — formerly hard-coded regex here.
+            s = SpeechTextRulesEngine.Apply(
+                s, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Noise);
 
             // Optional casing fold (Settings → Speech → Text rules). Mutually
             // exclusive toggles: title-case ALL CAPS (HELLO → Hello) vs full
@@ -1142,9 +1139,10 @@ namespace SpeakRect
                 " ",
                 RegexOptions.CultureInvariant);
 
-            // HTML scaffolding: Settings → Speech → Text rules → noise-html-scaffold
-            // (SpeechTextRulesEngine handler). Not hard-coded here so it is visible
-            // and toggleable in the UI like every other cleaner.
+            // Do NOT strip HTML-like tags. Comic lettering often wraps dialogue in
+            // angle brackets (<WHERE ARE YOU, COUSIN?>) — </?[a-zA-Z][^>]*> would
+            // eat whole sentences. Local-LLM should not emit real HTML; residual
+            // < > are removed later as symbols (deco-strip-symbols / punct strip).
 
             // Images / links — keep visible label only.
             s = Regex.Replace(s, @"!\[([^\]]*)\]\([^)]+\)", " $1 ", RegexOptions.CultureInvariant);
@@ -1213,213 +1211,6 @@ namespace SpeakRect
             s = Regex.Replace(s, @"[ \t]{2,}", " ");
             s = Regex.Replace(s, @"\n{3,}", "\n\n");
             return s.Trim();
-        }
-
-        /// <summary>
-        /// HTML element names recognized inside <c>&lt;…&gt;</c>. Includes short tags
-        /// that must never be bare-stripped as English words (<c>a</c>, <c>i</c>, <c>p</c>).
-        /// </summary>
-        private static readonly HashSet<string> HtmlAngleTagNames =
-            new(StringComparer.OrdinalIgnoreCase)
-            {
-                "html", "head", "body", "div", "span", "p", "br", "hr", "meta", "title",
-                "style", "script", "link", "img", "a", "ul", "ol", "li", "table", "tr",
-                "td", "th", "thead", "tbody", "section", "article", "header", "footer",
-                "nav", "main", "aside", "strong", "em", "b", "i", "u", "font", "center",
-                "blockquote", "pre", "code", "form", "input", "button", "label",
-                "h1", "h2", "h3", "h4", "h5", "h6",
-            };
-
-        // Structural only — never English-common bare words (title, main, form, a, i, …).
-        // Includes table layout tags: VL often invents Q&A tables, not only div cards.
-        private const string HtmlStructuralTagAlt =
-            "html|head|body|div|span|meta|script|h[1-6]|" +
-            "table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col";
-
-        private const string HtmlCloseTagAlt =
-            "html|head|body|div|span|title|meta|script|h[1-6]|" +
-            "table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col";
-
-        // Attribute names that mark markup (not comic dialogue).
-        private const string HtmlAttrNameAlt =
-            "lang|charset|style|class|id|width|height|src|href|content|border|" +
-            "cellpadding|cellspacing|colspan|rowspan|valign|align|bgcolor|" +
-            "http-equiv|name|type|rel|role|aria-[\\w-]+|data-[\\w-]+";
-
-        // CSS property identifiers (hyphenated or camelCase after punct strip).
-        private const string CssPropertyAlt =
-            "background-?color|background|font-?family|font-?size|font-?weight|" +
-            "text-?align|text-?decoration|justify-?content|align-?items|align-?content|" +
-            "space-?between|space-?around|flex-?direction|flex-?wrap|flex|" +
-            "display|position|margin|padding|border|color|opacity|overflow|" +
-            "line-?height|letter-?spacing|white-?space|box-?sizing|min-?width|" +
-            "max-?width|min-?height|max-?height|border-?radius|z-?index|" +
-            "grid-?template|grid-?gap|column-?gap|row-?gap|" +
-            "sans-?serif|serif|monospace|utf-?8|charset";
-
-        /// <summary>
-        /// Structural HTML/CSS scaffolding strip for VL OCR — not page-specific.
-        /// Comic lettering that frames dialogue in angle brackets is kept as words;
-        /// real tags and attribute/CSS soup are removed on every page the same way.
-        /// <list type="bullet">
-        /// <item><c>&lt;WHERE ARE YOU, COUSIN?&gt;</c> → keep words (first token ≠ HTML tag)</item>
-        /// <item><c>&lt;div …&gt;</c> / <c>&lt;/div&gt;</c> → drop (first token is a tag)</item>
-        /// <item>Unbracketed soup: <c>div style"…"</c>, <c>table/tr/td</c>, CSS props → drop</item>
-        /// <item>Paired chrome: <c>title…/title</c>, <c>th…/th</c> → drop; <c>td…/td</c> keeps interior</item>
-        /// </list>
-        /// </summary>
-        public static string StripHtmlScaffolding(string? input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-                return "";
-
-            string s = input;
-
-            // ---- 1) Angle brackets: classify by first token only (works for any comic) ----
-            // HTML: <div class="x">  <br/>  </span>
-            // Lettering: <WHERE ARE YOU?>  <YOU GREW UP IN OUR WORLD>  <OK!>
-            s = Regex.Replace(
-                s,
-                @"<([^<>]+)>",
-                static m =>
-                {
-                    string inner = m.Groups[1].Value;
-                    if (LooksLikeHtmlTagInner(inner))
-                        return " ";
-                    return " " + inner.Trim() + " ";
-                },
-                RegexOptions.CultureInvariant);
-
-            // ---- 2) Paired markup wrappers without < > ----
-            // title…/title, hN…/hN, th…/th → drop whole span (chrome / column labels).
-            // td…/td → keep interior only (VL often puts balloon text in cells).
-            // Glued openers allowed: titleFilm Quotes/title
-            s = Regex.Replace(
-                s,
-                @"(?i)\btitle(?:\s+|(?=\p{L}))(.*?)\s*/title\b",
-                " ",
-                RegexOptions.CultureInvariant | RegexOptions.Singleline);
-            s = Regex.Replace(
-                s,
-                @"(?i)\bh([1-6])\b(?:\s+(?:style|class|id|align|border)(?:\s*[:=]\s*|\s+)?[""']?[^""'\n]*[""']?)*" +
-                @"(?:\s+|(?=\p{L}))(.*?)\s*/h\1\b",
-                " ",
-                RegexOptions.CultureInvariant | RegexOptions.Singleline);
-            s = Regex.Replace(
-                s,
-                @"(?i)\bth\b(?:\s+(?:style|class|id|align|colspan|rowspan|valign|width|height)" +
-                @"(?:\s*[:=]\s*|\s+)?[""']?[^""'\n]*[""']?)*(?:\s+|(?=\p{L}))(.*?)\s*/th\b",
-                " ",
-                RegexOptions.CultureInvariant | RegexOptions.Singleline);
-            s = Regex.Replace(
-                s,
-                @"(?i)\btd\b(?:\s+(?:style|class|id|align|colspan|rowspan|valign|width|height)" +
-                @"(?:\s*[:=]\s*|\s+)?[""']?[^""'\n]*[""']?)*(?:\s+|(?=\p{L}))(.*?)\s*/td\b",
-                " $1 ",
-                RegexOptions.CultureInvariant | RegexOptions.Singleline);
-
-            // ---- 3) Structural tag + one or more attributes (no brackets) ----
-            // html lang"en" · table border"1" · td style"text-align: left;"
-            // Dialogue after the attribute blob is preserved when not eaten by step 2.
-            s = Regex.Replace(
-                s,
-                $@"(?i)\b(?:{HtmlStructuralTagAlt}|title)\b" +
-                $@"(?:\s+(?:{HtmlAttrNameAlt})(?:\s*[:=]\s*|\s+)?[""']?[^""'\n<>]*[""']?)+",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // ---- 4) Closing pseudo-tags: /div /html /table /td … ----
-            s = Regex.Replace(
-                s,
-                $@"(?i)(?<!\p{{L}})/(?:{HtmlCloseTagAlt})\b",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // ---- 5) Bare structural tokens left after attr strip ----
-            s = Regex.Replace(
-                s,
-                $@"(?i)(?<!\p{{L}})(?:{HtmlStructuralTagAlt})(?!\p{{L}})",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // ---- 6) CSS property names / font-stack keywords / charset ----
-            s = Regex.Replace(
-                s,
-                $@"(?i)\b(?:{CssPropertyAlt})\b",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // Orphan CSS align/keyword values left after property strip (style" : left;").
-            s = Regex.Replace(
-                s,
-                @"(?i)(?<!\p{L})(?:left|right|center|justify|middle|top|bottom|baseline|" +
-                @"both|none|block|inline|absolute|relative|fixed|sticky|auto|inherit|" +
-                @"initial|hidden|scroll|solid|dotted|dashed)\b",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // CSS color tokens: #rgb / #rrggbb, or hex with a digit (not "added"/"face").
-            s = Regex.Replace(s, @"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", " ");
-            s = Regex.Replace(
-                s,
-                @"(?i)\b(?=[0-9a-f]*\d)[0-9a-f]{3,8}\b",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // CSS lengths: 24px, 1.5em, 100% (when unit present). Glue fix: 24pxYOU → YOU.
-            s = Regex.Replace(
-                s,
-                @"(?i)\d+(?:\.\d+)?\s*(?:px|em|rem|vh|vw|pt|%)(?=\p{L})",
-                " ",
-                RegexOptions.CultureInvariant);
-            s = Regex.Replace(
-                s,
-                @"(?i)\b\d+(?:\.\d+)?\s*(?:px|em|rem|vh|vw|pt)\b",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // rgb()/rgba() crumbs
-            s = Regex.Replace(
-                s,
-                @"(?i)\brgba?\s*\(\s*[\d\s.,%]+\s*\)",
-                " ",
-                RegexOptions.CultureInvariant);
-
-            // Stray style/class tokens and empty double-quote crumbs after attr strip.
-            // Do NOT strip ' — contractions (you're / don't) must survive.
-            s = Regex.Replace(s, @"(?i)(?<!\p{L})(?:style|class)(?!\p{L})", " ");
-            s = Regex.Replace(s, @"""+", " ");
-
-            s = Regex.Replace(s, @"[ \t]{2,}", " ");
-            s = Regex.Replace(s, @"\n{3,}", "\n\n");
-            return s.Trim();
-        }
-
-        /// <summary>
-        /// True when the interior of <c>&lt;…&gt;</c> is an HTML tag (optional attrs),
-        /// not comic dialogue lettering. Rule: first identifier is a known element name.
-        /// </summary>
-        private static bool LooksLikeHtmlTagInner(string? inner)
-        {
-            if (string.IsNullOrWhiteSpace(inner))
-                return true;
-
-            string t = inner.Trim();
-            if (t.StartsWith('/'))
-                t = t[1..].Trim();
-            if (t.EndsWith('/'))
-                t = t[..^1].Trim();
-            if (t.Length == 0)
-                return true;
-
-            // First identifier token only — "WHERE ARE YOU" → WHERE (not a tag).
-            int i = 0;
-            while (i < t.Length && (char.IsLetterOrDigit(t[i]) || t[i] is '-' or '_'))
-                i++;
-            if (i == 0)
-                return false;
-
-            return HtmlAngleTagNames.Contains(t[..i]);
         }
 
         /// <summary>

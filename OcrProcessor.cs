@@ -3863,16 +3863,6 @@ namespace SpeakRect
                                 if (speakPieces.Count == 0)
                                     continue;
 
-                                // Same pre-TTS filters as full-frame / §9 paths.
-                                // VL often emits plain dialogue + the same lines again
-                                // inside invented HTML (div/table). Without dedupe,
-                                // poi-stack speak-now double-TTS'd balloon 1 (debug
-                                // 2026-08-02 Kenuichio panel).
-                                speakPieces = ApplySpeakDedupeCoalesce(
-                                    speakPieces, detail, $"poi-stack i{i + 1}");
-                                if (speakPieces.Count == 0)
-                                    continue;
-
                                 // Balloon pause between islands (not after last).
                                 if (i < boxes.Count - 1)
                                 {
@@ -4004,7 +3994,6 @@ namespace SpeakRect
                     if (speakNow && cropParts.Count > 0)
                     {
                         var speakPieces = SpeechCleaner.ExpandToSpeakPieces(cropParts);
-                        speakPieces = ApplySpeakDedupeCoalesce(speakPieces, detail, poiCropTag);
                         if (speakPieces.Count > 0)
                         {
                             if (!duckedCrop)
@@ -4061,7 +4050,6 @@ namespace SpeakRect
                 if (speakNow && parts.Count > 0)
                 {
                     var speakPieces = SpeechCleaner.ExpandToSpeakPieces(parts);
-                    speakPieces = ApplySpeakDedupeCoalesce(speakPieces, detail, "comic-poi");
                     if (speakPieces.Count > 0)
                     {
                         if (!ducked)
@@ -10627,40 +10615,6 @@ namespace SpeakRect
         /// </summary>
         public static void SmokeClearDevCaptureCache() =>
             DevCaptureCache.Clear();
-
-        /// <summary>
-        /// Pre-TTS: drop echo units (VL plain + HTML re-copy) then glue fragments.
-        /// Shared by full-frame, §9, and POI speak-now so no path skips it.
-        /// </summary>
-        private static List<SpeechCleaner.SpeakPiece> ApplySpeakDedupeCoalesce(
-            List<SpeechCleaner.SpeakPiece> speakPieces,
-            StringBuilder detail,
-            string tag)
-        {
-            if (speakPieces == null || speakPieces.Count < 2)
-                return speakPieces ?? new List<SpeechCleaner.SpeakPiece>();
-
-            int beforeDedup = speakPieces.Count;
-            speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
-            if (speakPieces.Count != beforeDedup)
-            {
-                detail.AppendLine(
-                    $"  speak-dedupe [{tag}] {beforeDedup} → {speakPieces.Count}");
-            }
-
-            if (speakPieces.Count < 2)
-                return speakPieces;
-
-            int beforeCoal = speakPieces.Count;
-            speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(speakPieces, detail);
-            if (speakPieces.Count != beforeCoal)
-            {
-                detail.AppendLine(
-                    $"  speak-coalesce [{tag}] {beforeCoal} → {speakPieces.Count}");
-            }
-
-            return speakPieces;
-        }
 
         /// <summary>
         /// Smoke helper: pause-after ms list for each unit except the last

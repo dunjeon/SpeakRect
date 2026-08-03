@@ -1723,7 +1723,6 @@ namespace SpeakRect
                     ForeColor = UiTheme.FgMuted,
                     Font = new Font("Segoe UI", 7.5f),
                     Text = "Pattern is a .NET regular expression. Use $1 for capture groups.\n" +
-                        "Built-in multi-step cleaners use #!handler:name (do not edit the pattern).\n" +
                            "Empty Replace strips the match. Test with Preview on the Speech tab.\n" +
                            "Invalid or very expensive patterns are rejected.",
                 };

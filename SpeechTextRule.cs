@@ -192,28 +192,6 @@ namespace SpeakRect
             return true;
         }
 
-        /// <summary>
-        /// Built-in multi-step cleaners that are not a single regex. Pattern form:
-        /// <c>#!handler:name</c>. Listed in Settings → Speech → Text rules like any rule
-        /// (enable/disable/order); the engine dispatches by id/handler name.
-        /// </summary>
-        public const string HandlerPatternPrefix = "#!handler:";
-
-        public static bool IsHandlerPattern(string? pattern) =>
-            !string.IsNullOrEmpty(pattern) &&
-            pattern.StartsWith(HandlerPatternPrefix, StringComparison.Ordinal);
-
-        public static string? GetHandlerName(string? pattern)
-        {
-            if (!IsHandlerPattern(pattern))
-                return null;
-            string name = pattern![HandlerPatternPrefix.Length..].Trim();
-            return name.Length == 0 ? null : name.ToLowerInvariant();
-        }
-
-        public static bool IsKnownHandler(string? handlerName) =>
-            handlerName is "html-scaffold";
-
         public static bool TryCompile(
             string pattern,
             bool ignoreCase,
@@ -226,18 +204,6 @@ namespace SpeakRect
             {
                 error = "Pattern is empty.";
                 return false;
-            }
-
-            // Procedural cleaners (Settings → Text rules): no regex compile.
-            if (IsHandlerPattern(pattern))
-            {
-                string? h = GetHandlerName(pattern);
-                if (!IsKnownHandler(h))
-                {
-                    error = "Unknown text-rule handler: " + (h ?? "(empty)");
-                    return false;
-                }
-                return true;
             }
 
             try
@@ -410,13 +376,9 @@ namespace SpeakRect
                 @"<(https?://[^>]+|mailto:[^>]+|[^@\s>]+@[^@\s>]+\.[^@\s>]+)>",
                 "$1", ignoreCase: false);
 
-            // Structural HTML/CSS scaffold strip (multi-step C# handler — not one regex).
-            // Keeps comic <lettering>; drops real tags + unbracketed VL markup soup.
-            // Toggle/order in Settings → Speech → Text rules like every other cleaner.
-            Add(list, "noise-html-scaffold", "HTML scaffold (keep comic <lettering>)",
-                SpeechTextRuleStage.Noise,
-                SpeechTextRule.HandlerPatternPrefix + "html-scaffold",
-                "", ignoreCase: false);
+            // HTML tags / entities intentionally omitted: comic dialogue often uses
+            // <…> lettering; Local-LLM should not emit real HTML. Residual < > &
+            // fall through to deco-strip-symbols / NormalizeSpeechPunctuation.
 
             Add(list, "noise-md-heading", "Markdown headings",
                 SpeechTextRuleStage.Noise, @"(?m)^\s{0,3}#{1,6}\s+", "", ignoreCase: false);
@@ -644,22 +606,10 @@ namespace SpeakRect
             };
 
         /// <summary>
-        /// Critical cleaners injected on upgrade when a profile lacks the id.
-        /// (Normal “new catalog rows” do not auto-merge; these must ship for TTS.)
-        /// User can still disable them; deleting + save keeps them gone until Reset all
-        /// only if we stop re-injecting — we re-inject when missing so upgrades work.
-        /// </summary>
-        private static readonly string[] EnsureShippedIfMissing =
-        {
-            "noise-html-scaffold",
-            "deco-strip-symbols",
-        };
-
-        /// <summary>
         /// Load stored rules: validate, drop corrupt/duplicate rows, mark built-ins.
-        /// Null or empty → full catalog. Non-empty is authoritative for most rows
-        /// (deleted built-ins stay gone), except <see cref="EnsureShippedIfMissing"/>
-        /// which are re-inserted when absent so new cleaners reach existing profiles.
+        /// Null or empty → full catalog. Non-empty is authoritative (deleted built-ins
+        /// stay gone). Use Speech tab “Reset all” to restore the full shipped set;
+        /// new catalog entries are not auto-merged into existing profiles.
         /// Retired catalog ids are stripped even when still present in the ini.
         /// </summary>
         public static List<SpeechTextRule> MergeWithDefaults(IEnumerable<SpeechTextRule>? stored)
@@ -674,7 +624,7 @@ namespace SpeakRect
             if (storedList.Count == 0)
                 return defaults;
 
-            var result = new List<SpeechTextRule>(storedList.Count + EnsureShippedIfMissing.Length);
+            var result = new List<SpeechTextRule>(storedList.Count);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var s in storedList)
@@ -688,69 +638,21 @@ namespace SpeakRect
                     continue;
 
                 bool isBuiltIn = byId.ContainsKey(id) || s.IsBuiltIn;
-                // Built-in procedural handlers: always restore shipped pattern so
-                // old profiles cannot stick a broken regex on a handler id.
-                if (byId.TryGetValue(id, out var def) &&
-                    SpeechTextRule.IsHandlerPattern(def.Pattern))
-                {
-                    var fixedHandler = def.Clone();
-                    fixedHandler.Enabled = s.Enabled;
-                    fixedHandler.Name = string.IsNullOrWhiteSpace(s.Name) ? def.Name : s.Name.Trim();
-                    result.Add(fixedHandler);
-                    continue;
-                }
-
                 if (!SpeechTextRule.TryNormalize(
                         id, s.Name, s.Stage, s.Pattern, s.Replace,
                         s.Enabled, s.IgnoreCase, isBuiltIn,
                         out SpeechTextRule clean, out _))
                 {
                     // Fall back to default for that built-in id if pattern broke.
-                    if (byId.TryGetValue(id, out var d2))
-                        result.Add(d2.Clone());
+                    if (byId.TryGetValue(id, out var def))
+                        result.Add(def.Clone());
                     continue;
                 }
                 clean.IsBuiltIn = byId.ContainsKey(clean.Id);
                 result.Add(clean);
             }
 
-            // Upgrade path: ensure critical cleaners exist in the list (UI-visible).
-            foreach (string ensureId in EnsureShippedIfMissing)
-            {
-                if (result.Count >= SpeechTextRule.MaxRules)
-                    break;
-                if (seen.Contains(ensureId) || !byId.TryGetValue(ensureId, out var def))
-                    continue;
-                int insertAt = FindInsertIndexForShipped(result, defaults, def);
-                result.Insert(insertAt, def.Clone());
-                seen.Add(ensureId);
-            }
-
             return result.Count > 0 ? result : defaults;
-        }
-
-        /// <summary>Place a shipped rule near peers of the same stage (catalog order).</summary>
-        private static int FindInsertIndexForShipped(
-            List<SpeechTextRule> result,
-            List<SpeechTextRule> defaults,
-            SpeechTextRule def)
-        {
-            int defOrder = defaults.FindIndex(r =>
-                r.Id.Equals(def.Id, StringComparison.OrdinalIgnoreCase));
-            int insertAt = result.Count;
-            for (int i = 0; i < result.Count; i++)
-            {
-                int peer = defaults.FindIndex(r =>
-                    r.Id.Equals(result[i].Id, StringComparison.OrdinalIgnoreCase));
-                if (peer < 0)
-                    continue;
-                if (peer > defOrder)
-                {
-                    insertAt = i;
-                    break;
-                }
-            }
-            return insertAt;
         }
 
         private static void AddAbbrev(
@@ -806,14 +708,6 @@ namespace SpeakRect
 
                 try
                 {
-                    // Multi-step built-ins (Settings → Text rules, pattern #!handler:…).
-                    string? handler = SpeechTextRule.GetHandlerName(pat);
-                    if (handler != null)
-                    {
-                        s = ApplyHandler(handler, s);
-                        continue;
-                    }
-
                     // Abbrev stage is always case-insensitive so honorifics /
                     // titles match when Force lowercase is off (Mr. vs mr.).
                     bool ignoreCase = rule.IgnoreCase ||
@@ -833,13 +727,6 @@ namespace SpeakRect
 
             return s;
         }
-
-        private static string ApplyHandler(string handlerName, string input) =>
-            handlerName switch
-            {
-                "html-scaffold" => SpeechCleaner.StripHtmlScaffolding(input),
-                _ => input,
-            };
 
         /// <summary>Clear compiled regex cache (after bulk rule edits).</summary>
         public static void ClearCache()

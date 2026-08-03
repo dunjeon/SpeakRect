@@ -80,57 +80,6 @@ public class SpeechRulesAndPauseTests
     }
 
     [Fact]
-    public void Catalog_includes_html_scaffold_handler()
-    {
-        var rule = SpeechTextRulesCatalog.CreateDefaults()
-            .FirstOrDefault(r => r.Id == "noise-html-scaffold");
-        Assert.NotNull(rule);
-        Assert.Equal(SpeechTextRuleStage.Noise, rule!.Stage);
-        Assert.True(SpeechTextRule.IsHandlerPattern(rule.Pattern));
-        Assert.Equal("html-scaffold", SpeechTextRule.GetHandlerName(rule.Pattern));
-        Assert.True(rule.Enabled);
-        Assert.Contains("lettering", rule.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Merge_injects_html_scaffold_when_missing()
-    {
-        // Old profile without the rule still gets it (upgrade path).
-        var sparse = SpeechTextRulesCatalog.CreateDefaults()
-            .Where(r => r.Id != "noise-html-scaffold")
-            .Select(r => r.Clone())
-            .ToList();
-        var merged = SpeechTextRulesCatalog.MergeWithDefaults(sparse);
-        Assert.Contains(merged, r => r.Id == "noise-html-scaffold");
-    }
-
-    [Fact]
-    public void Html_scaffold_disabled_leaves_markup_tokens()
-    {
-        var rules = SpeechTextRulesCatalog.CreateDefaults();
-        foreach (var r in rules)
-        {
-            if (r.Id == "noise-html-scaffold")
-                r.Enabled = false;
-        }
-        AppSettings.Current.SetSpeechTextRules(rules);
-        try
-        {
-            string c = OcrProcessor.SmokeCleanForSpeech(
-                "HELLO html lang\"en\" div style\"color:red\" WORLD",
-                comicBook: true);
-            // With handler off, structural words can survive into the stream
-            // (symbol strip may remove quotes/punctuation only).
-            Assert.Contains("hello", c, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("world", c, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            AppSettings.Current.ResetSpeechTextRulesToDefaults();
-        }
-    }
-
-    [Fact]
     public void Angle_bracket_dialogue_not_eaten_as_html()
     {
         // Comic radio/phone lettering: <WHERE ARE YOU, COUSIN?>
