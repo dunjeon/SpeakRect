@@ -523,19 +523,19 @@ namespace SpeakRect
             AddFull(MakeSection("9 · SPEAK PATH"), 20);
             _chkSequential = new CheckBox
             {
-                Text = "Sequential regions (OCR + speak each balloon.)",
+                Text = "Sequential regions (OCR + speak each balloon.)  ·  default on",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
                 AutoSize = false,
-                Checked = false,
+                Checked = true,
             };
             _chkSequential.CheckedChanged += (_, _) => OnFieldChanged();
             AddFull(_chkSequential, 28);
             AddFull(MakeHint(
-                "Off (default): crop-stack (one stacked OCR + global speak plan) when not using " +
-                "POI AutoStack. On: OCR+speak each balloon alone (isolates short replies like " +
-                "\"Really?\" from global speak-dedupe). Under POI: used when AutoStack is off " +
+                "On (default): OCR+speak each balloon alone (isolates short replies like " +
+                "\"Really?\" from global speak-dedupe). Off: crop-stack (one stacked OCR + global " +
+                "speak plan) when not using POI AutoStack. Under POI: used when AutoStack is off " +
                 "or the stack VL fails on multi-island pages."),
                 56);
 

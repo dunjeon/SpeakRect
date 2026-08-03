@@ -868,8 +868,8 @@ Console.WriteLine("--- Speech cleaner ---");
             megaEcho.Count == 1 &&
             megaEcho[0].Contains("singapore", StringComparison.Ordinal),
             $"mega=[{string.Join(" | ", megaEcho)}]");
-        Check("ComicSequentialRegions defaults off (Balloons §9)",
-            !AppSettings.Current.ComicSequentialRegions);
+        Check("ComicSequentialRegions defaults on (Balloons §9)",
+            AppSettings.Current.ComicSequentialRegions);
     }
     Check("Bare 'no' (no punct) is usable OCR",
         OcrProcessor.SmokeIsUsableOcrText("no"));

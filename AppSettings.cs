@@ -266,10 +266,10 @@ namespace SpeakRect
         /// When true: OCR each balloon alone, speak it, wait for TTS, then the
         /// next region. Isolates balloons so cross-region word reuse never hits
         /// global speak-dedupe (e.g. "Really?" after "it's really…").
-        /// When false (default): vertical crop-stack (one OCR image) + global unit plan.
-        /// Balloons §9 · SPEAK PATH — off by default for all modes.
+        /// When false: vertical crop-stack (one OCR image) + global unit plan.
+        /// Balloons §9 · SPEAK PATH — on by default for all modes.
         /// </summary>
-        public bool ComicSequentialRegions { get; set; } = false;
+        public bool ComicSequentialRegions { get; set; } = true;
 
         /// <summary>
         /// Comic Book alternate: tone + green region boxes (± outside fog map).
@@ -371,7 +371,7 @@ namespace SpeakRect
             ComicMergeOverlappingIslands = true;
             ComicOrphanRecoverPasses = DefaultComicOrphanRecoverPasses;
             ComicMinIslandAlnum = DefaultComicMinIslandAlnum;
-            ComicSequentialRegions = false;
+            ComicSequentialRegions = true;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
@@ -1237,7 +1237,7 @@ namespace SpeakRect
             ComicDynamicFog = true;
             ComicMergeOverlappingIslands = true;
             ComicSplitLargeRegions = true;
-            ComicSequentialRegions = false;
+            ComicSequentialRegions = true;
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
@@ -2478,8 +2478,8 @@ namespace SpeakRect
                 sb.AppendLine(";   false = nudge grow-overlaps apart instead.");
                 sb.AppendLine("; OrphanRecoverPasses = max missed balloon re-OCR attempts.");
                 sb.AppendLine("; MinIslandAlnum = drop scrap islands below this letter count (0 = off).");
-                sb.AppendLine("; SequentialRegions=false (default, Balloons §9): vertical crop-stack + global plan.");
-                sb.AppendLine("; SequentialRegions=true: OCR+speak each balloon alone (isolates from global dedupe).");
+                sb.AppendLine("; SequentialRegions=true (default, Balloons §9): OCR+speak each balloon alone.");
+                sb.AppendLine("; SequentialRegions=false: vertical crop-stack + global plan.");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine(";   AutoStack on (stock): per-island orange canvas VL ×N (preview = full-page map only).");
                 sb.AppendLine(";   AutoStack off + multi: §9 Sequential or crop-stack. 1 island + stack off: full-page VL.");

@@ -27,10 +27,10 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
-    public void Sequential_regions_defaults_off()
+    public void Sequential_regions_defaults_on()
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
-        Assert.False(AppSettings.Current.ComicSequentialRegions);
+        Assert.True(AppSettings.Current.ComicSequentialRegions);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiAutoStack);
             Assert.True(s.ComicDynamicFog);
             Assert.True(s.ComicDetectFog);
-            Assert.False(s.ComicSequentialRegions);
+            Assert.True(s.ComicSequentialRegions);
             Assert.False(s.ImageLlmSendDownscale);
             Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);
             Assert.Equal(ComicPoiGuide.DefaultStackBottomPadShare, s.ComicPoiStackBottomPadShare);
@@ -325,7 +325,7 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicDynamicFog);
             Assert.True(s.ComicDetectFog);
             Assert.True(s.ComicMergeOverlappingIslands);
-            Assert.False(s.ComicSequentialRegions);
+            Assert.True(s.ComicSequentialRegions);
             Assert.True(s.ComicSplitLargeRegions);
         }
         finally
