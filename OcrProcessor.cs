@@ -2869,8 +2869,8 @@ namespace SpeakRect
                 {
                     sb.AppendLine(
                         $"  poi island-canvas=on (per-island VL, one at a time) " +
-                        $"(margin={SpeakRunSettings.GetComicPoiAutoStackMarginPx()}px " +
-                        $"beef+{SpeakRunSettings.GetComicPoiStackBeefExtra():0.###}; " +
+                        $"(margin={ComicPoiGuide.LlmSendStackMarginPx}px " +
+                        $"beef+{ComicPoiGuide.DefaultStackBeefExtra:0.###}; " +
                         "preview stays full page; compose long-edge cap 2560)");
                 }
                 else
@@ -3358,8 +3358,8 @@ namespace SpeakRect
                 detail.AppendLine(
                     $"crop-stack: building strips={regions.Count} " +
                     $"(native prep crops; canvas=shared orange+beef " +
-                    $"gap={SpeakRunSettings.GetComicPoiAutoStackGapPx()} " +
-                    $"margin={SpeakRunSettings.GetComicPoiAutoStackMarginPx()})");
+                    $"gap={ComicPoiGuide.DefaultAutoStackGapPx} " +
+                    $"margin={ComicPoiGuide.LlmSendStackMarginPx})");
                 sw.Restart();
                 using var stackBmp = BuildVerticalCropStack(
                     pipelineImage, regions, detail, ActiveCropPadPx);
@@ -3517,8 +3517,8 @@ namespace SpeakRect
             var sw = Stopwatch.StartNew();
             bool poiFogOutside = SpeakRunSettings.GetComicPoiFogOutside();
             bool poiAutoStack = SpeakRunSettings.GetComicPoiAutoStack();
-            int poiStackGap = SpeakRunSettings.GetComicPoiAutoStackGapPx();
-            int poiStackMargin = SpeakRunSettings.GetComicPoiAutoStackMarginPx();
+            int poiStackGap = ComicPoiGuide.DefaultAutoStackGapPx;
+            int poiStackMargin = ComicPoiGuide.LlmSendStackMarginPx;
 
             // Pad once: live uses cores (_forcedCropPadPx null); Balloons override already final.
             bool displayBoxesFinal = _forcedCropPadPx == 0;
@@ -3915,12 +3915,9 @@ namespace SpeakRect
                     strips.Add(strip);
                 }
 
-                // Same canvas as POI: orange + beef/bottom-share from Balloons.
-                // Gap/margin from stack knobs so one UI drives both paths.
-                int gap = Math.Clamp(
-                    SpeakRunSettings.GetComicPoiAutoStackGapPx(), 0, 64);
-                int margin = Math.Clamp(
-                    SpeakRunSettings.GetComicPoiAutoStackMarginPx(), 0, 64);
+                // Same canvas as POI: orange + fixed gap/margin/beef (10/12/0/0).
+                int gap = ComicPoiGuide.DefaultAutoStackGapPx;
+                int margin = ComicPoiGuide.LlmSendStackMarginPx;
                 var canvas = ComicPoiGuide.ComposeVerticalStripStack(
                     strips,
                     detail,

@@ -328,18 +328,17 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Resolve stack beef knobs from current settings (Balloons A/B).
+        /// Fixed canvas beef knobs (not user-facing). gap/margin/beef/bottom = 10/12/0/0.
         /// </summary>
         public static void ResolveStackBeefFromSettings(
             out double beefExtra,
             out double bottomPadShare)
         {
-            // Prefer frozen speak-run knobs when OCR is mid-pipeline.
-            beefExtra = SpeakRunSettings.GetComicPoiStackBeefExtra();
-            bottomPadShare = SpeakRunSettings.GetComicPoiStackBottomPadShare();
+            beefExtra = DefaultStackBeefExtra;
+            bottomPadShare = DefaultStackBottomPadShare;
         }
 
-        /// <summary>Default gap (px) between multi-strip island bands on the orange canvas.</summary>
+        /// <summary>Fixed gap (px) between multi-strip bands when composing (stock 10).</summary>
         public const int DefaultAutoStackGapPx = 10;
 
         /// <summary>

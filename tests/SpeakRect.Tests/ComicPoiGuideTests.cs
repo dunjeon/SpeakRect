@@ -156,10 +156,11 @@ public class ComicPoiGuideTests
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
-        Assert.Equal(10, AppSettings.Current.ComicPoiAutoStackGapPx);
-        Assert.Equal(12, AppSettings.Current.ComicPoiAutoStackMarginPx);
-        Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBeefExtra);
-        Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBottomPadShare);
+        // Canvas compose is fixed (not AppSettings): gap 10, margin 12, beef 0, bottom 0.
+        Assert.Equal(10, ComicPoiGuide.DefaultAutoStackGapPx);
+        Assert.Equal(12, ComicPoiGuide.LlmSendStackMarginPx);
+        Assert.Equal(0.0, ComicPoiGuide.DefaultStackBeefExtra);
+        Assert.Equal(0.0, ComicPoiGuide.DefaultStackBottomPadShare);
     }
 
     [Fact]

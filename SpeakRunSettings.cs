@@ -24,10 +24,6 @@ namespace SpeakRect
         public bool ComicPoiMarkers { get; init; }
         public bool ComicPoiFogOutside { get; init; }
         public bool ComicPoiAutoStack { get; init; }
-        public int ComicPoiAutoStackGapPx { get; init; }
-        public int ComicPoiAutoStackMarginPx { get; init; }
-        public double ComicPoiStackBeefExtra { get; init; }
-        public double ComicPoiStackBottomPadShare { get; init; }
         public bool ComicDetectFog { get; init; }
         public float ComicDetectFogAmount { get; init; }
         public double ComicInflateFracX { get; init; }
@@ -99,10 +95,6 @@ namespace SpeakRect
                 ComicPoiMarkers = s.ComicPoiMarkers,
                 ComicPoiFogOutside = s.ComicPoiFogOutside,
                 ComicPoiAutoStack = s.ComicPoiAutoStack,
-                ComicPoiAutoStackGapPx = s.ComicPoiAutoStackGapPx,
-                ComicPoiAutoStackMarginPx = s.ComicPoiAutoStackMarginPx,
-                ComicPoiStackBeefExtra = s.ComicPoiStackBeefExtra,
-                ComicPoiStackBottomPadShare = s.ComicPoiStackBottomPadShare,
                 ComicDetectFog = s.ComicDetectFog,
                 ComicDetectFogAmount = s.ComicDetectFogAmount,
                 ComicInflateFracX = s.ComicInflateFracX,
@@ -195,19 +187,6 @@ namespace SpeakRect
 
         public static bool GetComicPoiAutoStack() =>
             Active?.ComicPoiAutoStack ?? AppSettings.Current.ComicPoiAutoStack;
-
-        public static int GetComicPoiAutoStackGapPx() =>
-            Active?.ComicPoiAutoStackGapPx ?? AppSettings.Current.ComicPoiAutoStackGapPx;
-
-        public static int GetComicPoiAutoStackMarginPx() =>
-            Active?.ComicPoiAutoStackMarginPx ?? AppSettings.Current.ComicPoiAutoStackMarginPx;
-
-        public static double GetComicPoiStackBeefExtra() =>
-            Active?.ComicPoiStackBeefExtra ?? AppSettings.Current.ComicPoiStackBeefExtra;
-
-        public static double GetComicPoiStackBottomPadShare() =>
-            Active?.ComicPoiStackBottomPadShare ??
-            AppSettings.Current.ComicPoiStackBottomPadShare;
 
         public static bool GetComicDetectFog() =>
             Active?.ComicDetectFog ?? AppSettings.Current.ComicDetectFog;
