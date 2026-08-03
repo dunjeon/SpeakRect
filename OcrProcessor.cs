@@ -5383,8 +5383,8 @@ namespace SpeakRect
         /// When detect fog + <see cref="AppSettings.ComicDynamicFog"/>:
         /// <list type="number">
         /// <item>Walk min→max @ 0.01 (no early stop).</item>
-        /// <item>Each tick: multipass WinOCR detect + grow → island count + total area.</item>
-        /// <item>Sweet spot = most islands, then largest area; go back to that amount.</item>
+        /// <item>Each tick: multipass WinOCR detect + grow → islands, WinOCR word count, area.</item>
+        /// <item>Sweet spot = most islands, then most WinOCR words (double-check), then largest area; go back to that amount.</item>
         /// <item>Final full detect at sweet spot with user's merge setting.</item>
         /// <item>Crop re-OCR each island when fog&gt;0; empty/junk → nuke (fog ghosts).</item>
         /// </list>
@@ -5440,7 +5440,9 @@ namespace SpeakRect
             //   • Score every fog amount with the SAME multipass WinOCR detect as live
             //     (pass1+pass2+orphans), then grow boxes. Cheap single-pass was blind —
             //     island count/area stayed flat so every page “peaked” at 0.
-            //   • Sweet spot = most islands, then largest total box area (size + number).
+            //   • Sweet spot = most islands, then most WinOCR words (double-check that
+            //     boxes actually hold text — ghost art under fog often inflates
+            //     islands/area without words), then largest total box area.
             //   • Walk the full range (no early stop). When later ticks shrink, keep the
             //     peak and go back to it for final detect.
             //   • Equal peak → lower fog wins (0 stays valid when truly equal).
@@ -5460,61 +5462,67 @@ namespace SpeakRect
             detail.AppendLine(
                 $"dyn-fog SEARCH: start={searchLo:0.00} walk +{step:0.00} " +
                 $"to {searchHi:0.00} (~{expectedTrials} trials; " +
-                $"score=multipass detect + grow; sweet=most islands then largest area; " +
+                $"score=multipass detect + grow; " +
+                $"sweet=most islands, then most WinOCR words, then largest area; " +
                 $"no early-stop — go back to peak; merge OFF for score; " +
                 $"user merge will restore={userMerge})");
 
-            var scored = new Dictionary<float, (long AreaSum, int Islands)>(
+            var scored = new Dictionary<float, (long AreaSum, int Islands, int Words)>(
                 expectedTrials + 4);
 
             float bestFog = searchLo;
             long bestArea = -1;
             int bestIslands = -1;
+            int bestWords = -1;
 
             for (int i = i0; i <= i1; i++)
             {
                 token.ThrowIfCancellationRequested();
                 float fogAmt = i / 100f;
 
-                var (areaSum, islands) = await ScoreDynamicFogTrialAsync(
+                var (areaSum, islands, words) = await ScoreDynamicFogTrialAsync(
                     toneImage, fogAmt, pipeW, pipeH, token).ConfigureAwait(false);
-                scored[fogAmt] = (areaSum, islands);
+                scored[fogAmt] = (areaSum, islands, words);
 
-                // Sweet spot: largest number of islands, then largest total size.
+                // Sweet spot: most islands, then most WinOCR words, then area.
                 if (SmokeDynFogCoverageIsBetter(
-                        islands, areaSum, bestIslands, bestArea))
+                        islands, words, areaSum, bestIslands, bestWords, bestArea))
                 {
                     bestArea = areaSum;
                     bestIslands = islands;
+                    bestWords = words;
                     bestFog = fogAmt;
                 }
 
                 detail.AppendLine(
                     $"  dyn-fog try amount={fogAmt:0.00} islands={islands} " +
-                    $"areaSum={areaSum}" +
+                    $"words={words} areaSum={areaSum}" +
                     (Math.Abs(fogAmt - bestFog) < 1e-6f ? " *sweet*" : ""));
             }
 
             // Go back to sweet spot (re-pick for clarity / same rules).
             bestFog = SmokeSelectDynamicFogBestAmount(
                 scored.ToDictionary(kv => kv.Key, kv => kv.Value.AreaSum),
-                scored.ToDictionary(kv => kv.Key, kv => kv.Value.Islands));
+                scored.ToDictionary(kv => kv.Key, kv => kv.Value.Islands),
+                scored.ToDictionary(kv => kv.Key, kv => kv.Value.Words));
             bestArea = scored[bestFog].AreaSum;
             bestIslands = scored[bestFog].Islands;
+            bestWords = scored[bestFog].Words;
 
             int trialsRun = scored.Count;
             long zeroArea = scored.TryGetValue(0f, out var zHit) ? zHit.AreaSum : -1;
             int zeroIslands = scored.TryGetValue(0f, out var zHit2) ? zHit2.Islands : -1;
+            int zeroWords = scored.TryGetValue(0f, out var zHit3) ? zHit3.Words : -1;
             detail.AppendLine(
                 $"dyn-fog SWEET SPOT (go back): amount={bestFog:0.00} " +
-                $"islands={bestIslands} areaSum={bestArea} " +
-                $"(most islands, then largest area)");
+                $"islands={bestIslands} words={bestWords} areaSum={bestArea} " +
+                $"(most islands, then most WinOCR words, then largest area)");
             detail.AppendLine(
                 $"dyn-fog CHOSEN: amount={bestFog:0.00} islands={bestIslands} " +
-                $"areaSum={bestArea} trials={trialsRun} " +
+                $"words={bestWords} areaSum={bestArea} trials={trialsRun} " +
                 $"range={searchLo:0.00}…{searchHi:0.00} " +
                 (zeroArea >= 0
-                    ? $"at0=islands {zeroIslands} area {zeroArea} "
+                    ? $"at0=islands {zeroIslands} words {zeroWords} area {zeroArea} "
                     : "") +
                 (bestFog <= 0.001f ? "→ no fog " : "") +
                 $"(final detect uses this amount)");
@@ -5765,12 +5773,15 @@ namespace SpeakRect
         /// <summary>
         /// One fog trial for the dyn-fog climb: same multipass WinOCR detect as live
         /// (pass1 + pass2 + orphan fill), then grow-only boxes.
-        /// Returns island count + total grown area — the size+number signal for the
-        /// sweet-spot pick. Single-pass scoring was flat across fog and always
-        /// “won” at 0; multipass is what actually finds balloons under fog.
+        /// Returns island count, total WinOCR word count, and total grown area —
+        /// the size+number+text signal for the sweet-spot pick. Word count is the
+        /// double-check that islands actually hold readable text (ghost art under
+        /// fog often inflates box count/area with empty or junk OCR).
+        /// Single-pass scoring was flat across fog and always “won” at 0; multipass
+        /// is what actually finds balloons under fog.
         /// Merge is off (grow only) so area is coverage, not merge topology.
         /// </summary>
-        private async Task<(long AreaSum, int IslandCount)> ScoreDynamicFogTrialAsync(
+        private async Task<(long AreaSum, int IslandCount, int WordCount)> ScoreDynamicFogTrialAsync(
             Bitmap toneImage,
             float fogAmount,
             int pipeW,
@@ -5778,7 +5789,7 @@ namespace SpeakRect
             CancellationToken token)
         {
             if (toneImage.Width < 2 || toneImage.Height < 2)
-                return (0, 0);
+                return (0, 0, 0);
 
             using var trialFog = ApplyGrayFog(
                 toneImage, fogAmount, WinOcrDetectGrayFogLevel);
@@ -5793,13 +5804,26 @@ namespace SpeakRect
                 detection.Regions, pipeW, pipeH, growOnlyNoMergeNoNudge: true);
 
             long sum = 0;
+            int words = 0;
             foreach (var r in grown)
             {
                 int w = Math.Max(0, r.Bounds.Width);
                 int h = Math.Max(0, r.Bounds.Height);
                 sum += (long)w * h;
+                words += CountDynFogTrialWords(r.WinOcrText);
             }
-            return (sum, grown.Count);
+            return (sum, grown.Count, words);
+        }
+
+        /// <summary>
+        /// WinOCR word count for one dyn-fog trial island. Junk / empty detect text
+        /// contributes 0 so ghost boxes do not pad the word double-check.
+        /// </summary>
+        public static int CountDynFogTrialWords(string? winOcrText)
+        {
+            if (string.IsNullOrWhiteSpace(winOcrText) || IsJunkWinOcrText(winOcrText))
+                return 0;
+            return ComicRegionGeometry.CountWords(winOcrText);
         }
 
         /// <summary>
@@ -5852,43 +5876,78 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Sweet-spot comparison: is (islands, areaSum) better than the current peak?
-        /// Rule: most islands wins; if equal island count, largest total area wins.
-        /// Equal both → not better (caller keeps the lower fog / earlier tick).
+        /// Sweet-spot comparison without word double-check (area after islands).
+        /// Prefer the words-aware overload for live dyn-fog.
         /// </summary>
         public static bool SmokeDynFogCoverageIsBetter(
             int islands,
             long areaSum,
             int bestIslands,
             long bestAreaSum)
+            => SmokeDynFogCoverageIsBetter(
+                islands, words: 0, areaSum, bestIslands, bestWords: 0, bestAreaSum);
+
+        /// <summary>
+        /// Sweet-spot comparison: is (islands, words, areaSum) better than the peak?
+        /// Rule: most islands wins; if equal islands, most WinOCR words wins
+        /// (double-check — real text over ghost boxes); if equal words too,
+        /// largest total area wins. Equal all three → not better (caller keeps
+        /// the lower fog / earlier tick).
+        /// </summary>
+        public static bool SmokeDynFogCoverageIsBetter(
+            int islands,
+            int words,
+            long areaSum,
+            int bestIslands,
+            int bestWords,
+            long bestAreaSum)
         {
             if (islands > bestIslands)
                 return true;
             if (islands < bestIslands)
                 return false;
+            if (words > bestWords)
+                return true;
+            if (words < bestWords)
+                return false;
             return areaSum > bestAreaSum;
         }
 
         /// <summary>
-        /// Global dyn-fog pick: max areaSum only (no island counts). Lower amount
-        /// on exact area ties. Prefer the islands-aware overload for live pick.
+        /// Global dyn-fog pick: max areaSum only (no island / word counts). Lower amount
+        /// on exact area ties. Prefer the islands+words overload for live pick.
         /// </summary>
         public static float SmokeSelectDynamicFogBestAmount(
             IReadOnlyDictionary<float, long> amountToScore)
-            => SmokeSelectDynamicFogBestAmount(amountToScore, islandCounts: null);
+            => SmokeSelectDynamicFogBestAmount(
+                amountToScore, islandCounts: null, wordCounts: null);
+
+        /// <summary>
+        /// Global dyn-fog peak with islands + area (no word double-check).
+        /// Prefer the three-dictionary overload for live pick.
+        /// </summary>
+        public static float SmokeSelectDynamicFogBestAmount(
+            IReadOnlyDictionary<float, long> amountToScore,
+            IReadOnlyDictionary<float, int>? islandCounts)
+            => SmokeSelectDynamicFogBestAmount(
+                amountToScore, islandCounts, wordCounts: null);
 
         /// <summary>
         /// Global dyn-fog peak across every scored tick (full climb, then go back):
         /// <list type="number">
         /// <item>Most islands (more boxes) wins.</item>
-        /// <item>On equal island count, largest areaSum wins.</item>
+        /// <item>On equal island count, most WinOCR words wins (text double-check).</item>
+        /// <item>On equal islands + words, largest areaSum wins.</item>
         /// <item>On full ties, lower fog (ascending order) — 0 stays strong when equal.</item>
         /// </list>
         /// When <paramref name="islandCounts"/> is null, falls back to area-only.
+        /// When <paramref name="wordCounts"/> is null, word double-check is skipped
+        /// (equal-words path → area decides after islands).
         /// </summary>
         public static float SmokeSelectDynamicFogBestAmount(
             IReadOnlyDictionary<float, long> amountToScore,
-            IReadOnlyDictionary<float, int>? islandCounts)
+            IReadOnlyDictionary<float, int>? islandCounts,
+            IReadOnlyDictionary<float, int>? wordCounts)
         {
             if (amountToScore == null || amountToScore.Count == 0)
                 return 0f;
@@ -5896,6 +5955,7 @@ namespace SpeakRect
             float bestAmt = 0f;
             long bestScore = -1;
             int bestIslands = -1;
+            int bestWords = -1;
             // Ascending amount → first peak wins full ties (prefer lower fog).
             foreach (var kv in amountToScore.OrderBy(k => k.Key))
             {
@@ -5909,11 +5969,18 @@ namespace SpeakRect
                     islands = 0;
                 }
 
+                int words = 0;
+                if (wordCounts != null &&
+                    wordCounts.TryGetValue(kv.Key, out int wc))
+                    words = wc;
+                // wordCounts null → all words stay 0 → islands then area (legacy).
+
                 if (SmokeDynFogCoverageIsBetter(
-                        islands, kv.Value, bestIslands, bestScore))
+                        islands, words, kv.Value, bestIslands, bestWords, bestScore))
                 {
                     bestScore = kv.Value;
                     bestIslands = islands;
+                    bestWords = words;
                     bestAmt = kv.Key;
                 }
             }

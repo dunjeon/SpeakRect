@@ -284,6 +284,97 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Dynamic_fog_coverage_words_double_check_beats_area()
+    {
+        // Same island count: more WinOCR words wins even with smaller area
+        // (ghost boxes under fog often have large area but few real words).
+        Assert.True(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 3, words: 40, areaSum: 20000,
+            bestIslands: 3, bestWords: 10, bestAreaSum: 50000));
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 3, words: 10, areaSum: 50000,
+            bestIslands: 3, bestWords: 40, bestAreaSum: 20000));
+
+        // More islands still beat more words.
+        Assert.True(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 4, words: 5, areaSum: 100,
+            bestIslands: 3, bestWords: 99, bestAreaSum: 99999));
+
+        // Equal islands + words: area still decides.
+        Assert.True(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 2, words: 20, areaSum: 600,
+            bestIslands: 2, bestWords: 20, bestAreaSum: 500));
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 2, words: 20, areaSum: 500,
+            bestIslands: 2, bestWords: 20, bestAreaSum: 600));
+
+        // Full equal: not better (prefer lower fog).
+        Assert.False(OcrProcessor.SmokeDynFogCoverageIsBetter(
+            islands: 2, words: 20, areaSum: 500,
+            bestIslands: 2, bestWords: 20, bestAreaSum: 500));
+    }
+
+    [Fact]
+    public void Dynamic_fog_pick_prefers_more_winocr_words_on_equal_islands()
+    {
+        // Same islands: 0.40 has more WinOCR words even though 0.70 has larger area.
+        var scores = new Dictionary<float, long>
+        {
+            [0.20f] = 30000,
+            [0.40f] = 28000,
+            [0.70f] = 45000,
+        };
+        var islands = new Dictionary<float, int>
+        {
+            [0.20f] = 3,
+            [0.40f] = 3,
+            [0.70f] = 3,
+        };
+        var words = new Dictionary<float, int>
+        {
+            [0.20f] = 12,
+            [0.40f] = 48,
+            [0.70f] = 15,
+        };
+        Assert.Equal(
+            0.40f,
+            OcrProcessor.SmokeSelectDynamicFogBestAmount(scores, islands, words));
+    }
+
+    [Fact]
+    public void Dynamic_fog_pick_words_tie_prefers_larger_area()
+    {
+        var scores = new Dictionary<float, long>
+        {
+            [0.30f] = 20000,
+            [0.55f] = 35000,
+        };
+        var islands = new Dictionary<float, int>
+        {
+            [0.30f] = 2,
+            [0.55f] = 2,
+        };
+        var words = new Dictionary<float, int>
+        {
+            [0.30f] = 20,
+            [0.55f] = 20,
+        };
+        Assert.Equal(
+            0.55f,
+            OcrProcessor.SmokeSelectDynamicFogBestAmount(scores, islands, words));
+    }
+
+    [Fact]
+    public void Dynamic_fog_trial_word_count_skips_junk()
+    {
+        Assert.Equal(0, OcrProcessor.CountDynFogTrialWords(null));
+        Assert.Equal(0, OcrProcessor.CountDynFogTrialWords(""));
+        Assert.Equal(0, OcrProcessor.CountDynFogTrialWords("!"));
+        Assert.True(OcrProcessor.CountDynFogTrialWords("hello world there") >= 3);
+        Assert.True(OcrProcessor.CountDynFogTrialWords("we don't have a weapon") >= 4);
+    }
+
+    [Fact]
     public void Real_dialogue_token_accepts_short_callouts()
     {
         Assert.True(ComicBestOfFusion.LooksLikeRealDialogueToken("SORRY"));

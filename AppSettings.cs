@@ -208,9 +208,10 @@ namespace SpeakRect
         /// <summary>
         /// Auto fog for OCR detect: climb from
         /// <see cref="ComicDynamicFogMin"/> to <see cref="ComicDynamicFogMax"/> in 0.01
-        /// steps (no early stop). At each tick score island count + total area; keep the
-        /// peak (most boxes first, then largest area; lower fog on ties). After the
-        /// climb, final detect uses that peak amount. Merge-overlap off during search.
+        /// steps (no early stop). At each tick score island count, WinOCR word count,
+        /// and total area; keep the peak (most boxes first, then most words, then
+        /// largest area; lower fog on ties). After the climb, final detect uses that
+        /// peak amount. Merge-overlap off during search.
         /// Shared by live + Balloons preview. Fixed Fog strength unused while this is on.
         /// </summary>
         public bool ComicDynamicFog { get; set; } = true;
@@ -2529,7 +2530,7 @@ namespace SpeakRect
                 sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
                 sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
                 sb.AppendLine("; DynamicFog=true: auto fog — climb DynamicFogMin…Max @ 0.01 (stock 0…1).");
-                sb.AppendLine(";   Peak = most islands, then largest area; go back to that amount.");
+                sb.AppendLine(";   Peak = most islands, then most WinOCR words, then largest area; go back.");
                 sb.AppendLine(";   crop re-OCR each island when fog>0; empty/junk → drop (fog ghosts).");
                 sb.AppendLine(";   merge off during search. DetectFogAmount unused while dyn on.");
                 sb.AppendLine("; DynamicFogMin/Max = search range (raise min / lower max to save CPU).");
