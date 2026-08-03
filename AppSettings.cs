@@ -184,10 +184,6 @@ namespace SpeakRect
         // -----------------------------------------------------------------------
 
         public const float DefaultComicDetectFogAmount = 0.35f;
-        /// <summary>Dyn-fog linear search start (stock 0.00). 0.01 steps up to max.</summary>
-        public const float DefaultComicDynamicFogMin = 0f;
-        /// <summary>Dyn-fog linear search end inclusive (stock 1.00 = 100%).</summary>
-        public const float DefaultComicDynamicFogMax = 1f;
         public const double DefaultComicClusterGapX = 1.05;
         public const double DefaultComicClusterGapY = 1.15;
         public const double DefaultComicInflateFracX = 0.22;
@@ -201,32 +197,9 @@ namespace SpeakRect
         /// <summary>Gray fog on the image OCR uses for balloon detect (Local-LLM reads clear tone).</summary>
         public bool ComicDetectFog { get; set; } = true;
 
-        /// <summary>Fog blend 0..1 (default 0.35). Higher softens art so ink plates stand out.
-        /// Used only when <see cref="ComicDynamicFog"/> is off (fixed fog). Dyn search ignores this.</summary>
+        /// <summary>Fog blend 0..1 (default 0.35). Higher softens art so ink plates stand out
+        /// for WinOCR balloon detect. Local-LLM still reads the clear tone image.</summary>
         public float ComicDetectFogAmount { get; set; } = DefaultComicDetectFogAmount;
-
-        /// <summary>
-        /// Auto fog for OCR detect: climb from
-        /// <see cref="ComicDynamicFogMin"/> to <see cref="ComicDynamicFogMax"/> in 0.01
-        /// steps (no early stop). At each tick score island count, WinOCR word count,
-        /// and total area; keep the peak (most boxes first, then most words, then
-        /// largest area; lower fog on ties). After the climb, final detect uses that
-        /// peak amount. Merge-overlap off during search.
-        /// Shared by live + Balloons preview. Fixed Fog strength unused while this is on.
-        /// </summary>
-        public bool ComicDynamicFog { get; set; } = true;
-
-        /// <summary>
-        /// Dyn-fog search floor 0..1 (stock 0.00). Inclusive start of the 0.01 grind.
-        /// Raise to skip low fog if you know it never helps (saves CPU).
-        /// </summary>
-        public float ComicDynamicFogMin { get; set; } = DefaultComicDynamicFogMin;
-
-        /// <summary>
-        /// Dyn-fog search ceiling 0..1 (stock 1.00). Inclusive end of the 0.01 grind.
-        /// Lower to skip heavy fog if wash-out never helps (saves CPU).
-        /// </summary>
-        public float ComicDynamicFogMax { get; set; } = DefaultComicDynamicFogMax;
 
         /// <summary>
         /// Line-cluster horizontal gap factor (median line height × this).
@@ -348,14 +321,6 @@ namespace SpeakRect
         public void NormalizeComicRegionSettings()
         {
             ComicDetectFogAmount = Math.Clamp(ComicDetectFogAmount, 0f, 1f);
-            ComicDynamicFogMin = MathF.Round(Math.Clamp(ComicDynamicFogMin, 0f, 1f), 2);
-            ComicDynamicFogMax = MathF.Round(Math.Clamp(ComicDynamicFogMax, 0f, 1f), 2);
-            if (ComicDynamicFogMin > ComicDynamicFogMax)
-            {
-                // Swap so floor ≤ ceiling after any manual/ini edit.
-                (ComicDynamicFogMin, ComicDynamicFogMax) =
-                    (ComicDynamicFogMax, ComicDynamicFogMin);
-            }
             ComicClusterGapX = Math.Clamp(ComicClusterGapX, 0.25, 3.0);
             ComicClusterGapY = Math.Clamp(ComicClusterGapY, 0.25, 3.0);
             ComicInflateFracX = Math.Clamp(ComicInflateFracX, 0.0, 0.80);
@@ -387,9 +352,6 @@ namespace SpeakRect
         {
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
-            ComicDynamicFog = true;
-            ComicDynamicFogMin = DefaultComicDynamicFogMin;
-            ComicDynamicFogMax = DefaultComicDynamicFogMax;
             ComicClusterGapX = DefaultComicClusterGapX;
             ComicClusterGapY = DefaultComicClusterGapY;
             ComicInflateFracX = DefaultComicInflateFracX;
@@ -1263,9 +1225,6 @@ namespace SpeakRect
             // Detect / island pipeline stock on-state (booleans only).
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
-            ComicDynamicFog = true;
-            ComicDynamicFogMin = DefaultComicDynamicFogMin;
-            ComicDynamicFogMax = DefaultComicDynamicFogMax;
             ComicMergeOverlappingIslands = true;
             ComicSplitLargeRegions = true;
             ComicSequentialRegions = true;
@@ -1607,17 +1566,7 @@ namespace SpeakRect
                 float.TryParse(fogAmtRaw, System.Globalization.NumberStyles.Float, inv, out float fogAmt))
                 ComicDetectFogAmount = fogAmt;
 
-            if (map.TryGetValue("ComicDynamicFog", out string? dynFogRaw) &&
-                TryParseBool(dynFogRaw, out bool dynFog))
-                ComicDynamicFog = dynFog;
-
-            if (map.TryGetValue("ComicDynamicFogMin", out string? dynMinRaw) &&
-                float.TryParse(dynMinRaw, System.Globalization.NumberStyles.Float, inv, out float dynMin))
-                ComicDynamicFogMin = dynMin;
-
-            if (map.TryGetValue("ComicDynamicFogMax", out string? dynMaxRaw) &&
-                float.TryParse(dynMaxRaw, System.Globalization.NumberStyles.Float, inv, out float dynMax))
-                ComicDynamicFogMax = dynMax;
+            // Legacy ComicDynamicFog / Min / Max keys ignored (feature removed).
 
             if (map.TryGetValue("ComicClusterGapX", out string? gapXRaw) &&
                 double.TryParse(gapXRaw, System.Globalization.NumberStyles.Float, inv, out double gapX))
@@ -2529,16 +2478,9 @@ namespace SpeakRect
                 sb.AppendLine("; StackBeefExtra=0 (stock: no extra canvas). Pad only — both POI + crop stacks.");
                 sb.AppendLine("; StackBottomPadShare=0 (stock). Higher = more pad below content when beef>0.");
                 sb.AppendLine("; PoiAutoStackGapPx=10 (multi-strip). PoiAutoStackMarginPx=12 (per canvas outer).");
-                sb.AppendLine("; DynamicFog=true: auto fog — climb DynamicFogMin…Max @ 0.01 (stock 0…1).");
-                sb.AppendLine(";   Peak = most islands, then most WinOCR words, then largest area; go back.");
-                sb.AppendLine(";   crop re-OCR each island when fog>0; empty/junk → drop (fog ghosts).");
-                sb.AppendLine(";   merge off during search. DetectFogAmount unused while dyn on.");
-                sb.AppendLine("; DynamicFogMin/Max = search range (raise min / lower max to save CPU).");
+                sb.AppendLine("; DetectFog=true + DetectFogAmount: fixed gray fog for WinOCR balloon detect.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");
-                sb.AppendLine($"ComicDynamicFog={ComicDynamicFog.ToString().ToLowerInvariant()}");
-                sb.AppendLine($"ComicDynamicFogMin={ComicDynamicFogMin.ToString("0.###", inv)}");
-                sb.AppendLine($"ComicDynamicFogMax={ComicDynamicFogMax.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicClusterGapX={ComicClusterGapX.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicClusterGapY={ComicClusterGapY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicInflateFracX={ComicInflateFracX.ToString("0.###", inv)}");
@@ -2802,8 +2744,6 @@ namespace SpeakRect
                 or "AppendedSilence" or "PunctuationSilence"
                 or "UseCustomPauseEncodings"
                 or "CommaPauseMs" or "SentencePauseMs" or "OtherPauseMs" or "BubblePauseMs"
-                or "ComicDetectFog" or "ComicDetectFogAmount" or "ComicDynamicFog"
-                or "ComicDynamicFogMin" or "ComicDynamicFogMax"
                 or "ComicClusterGapX" or "ComicClusterGapY"
                 or "ComicInflateFracX" or "ComicInflateFracY"
                 or "ComicRegionPadding" or "ComicDenseIslandCount"

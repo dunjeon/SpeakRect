@@ -431,18 +431,8 @@ namespace SpeakRect
                 w.WriteLine($"unreadable={(result.Unreadable ? "yes" : "no")}");
                 w.WriteLine($"spoken_chars={(result.SpokenText ?? "").Length}");
                 w.WriteLine($"detail_chars={(result.Detail ?? "").Length}");
-                w.WriteLine($"dyn_fog={(result.DynamicFogSearched ? "yes" : "no")}");
                 w.WriteLine(
                     $"fog_amount_used={result.FogAmountUsed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-                w.WriteLine(
-                    $"fog_amount_start={result.FogAmountStart.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-                if (result.DynamicFogSearched)
-                {
-                    w.WriteLine(
-                        result.FogAmountUsed <= 0.001f
-                            ? "fog_note=dyn chose no fog (baseline 0)"
-                            : $"fog_note=dyn auto {result.FogAmountStart:0.00}→{result.FogAmountUsed:0.00}");
-                }
                 int n = result.Images?.Count ?? 0;
                 w.WriteLine($"images={n}");
                 if (n > 0)
@@ -805,19 +795,7 @@ namespace SpeakRect
             sb.Append(@"\par ");
 
             Section(sb, "DETECT FOG");
-            if (result.DynamicFogSearched)
-            {
-                Row(sb, "Mode", "dynamic (linear 0.01 grind)");
-                Row(sb, "Search range",
-                    $"{result.FogAmountStart:0.00}…{AppSettings.Current.ComicDynamicFogMax:0.00}");
-                Row(sb, "Step",
-                    OcrProcessor.DynamicFogSearchStep.ToString("0.00"));
-                Row(sb, "Chosen",
-                    result.FogAmountUsed <= 0.001f
-                        ? "0.00 (no fog)"
-                        : result.FogAmountUsed.ToString("0.00"));
-            }
-            else if (result.FogAmountUsed > 0.001f)
+            if (result.FogAmountUsed > 0.001f)
             {
                 Row(sb, "Mode", "fixed");
                 Row(sb, "Amount", result.FogAmountUsed.ToString("0.00"));
@@ -847,9 +825,7 @@ namespace SpeakRect
                         line.StartsWith("strategy=", StringComparison.OrdinalIgnoreCase) ||
                         line.StartsWith("winner=", StringComparison.OrdinalIgnoreCase) ||
                         line.StartsWith("settings:", StringComparison.OrdinalIgnoreCase) ||
-                        line.StartsWith("profile=", StringComparison.OrdinalIgnoreCase) ||
-                        line.StartsWith("dyn-fog", StringComparison.OrdinalIgnoreCase) ||
-                        line.TrimStart().StartsWith("dyn-fog", StringComparison.OrdinalIgnoreCase))
+                        line.StartsWith("profile=", StringComparison.OrdinalIgnoreCase))
                     {
                         sb.Append(@"\cf5 ");
                         sb.Append(RtfEscape(line));
@@ -878,12 +854,6 @@ namespace SpeakRect
         /// <summary>Short summary fragment for the intro strip (empty when not applicable).</summary>
         private static string FormatFogAnalyticsShort(OcrLastResult result)
         {
-            if (result.DynamicFogSearched)
-            {
-                if (result.FogAmountUsed <= 0.001f)
-                    return "dyn-fog → 0.00 (none)";
-                return $"dyn-fog {result.FogAmountStart:0.00}→{result.FogAmountUsed:0.00}";
-            }
             if (result.FogAmountUsed > 0.001f)
                 return $"fog={result.FogAmountUsed:0.00}";
             return "";

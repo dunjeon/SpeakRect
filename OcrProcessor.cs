@@ -62,18 +62,9 @@ namespace SpeakRect
         public IReadOnlyList<OcrResultImage> Images { get; init; } = Array.Empty<OcrResultImage>();
 
         /// <summary>
-        /// Detect fog amount used for this run (after dynamic search when enabled).
-        /// 0 when fog is off or dyn chose no fog.
+        /// Detect fog amount used for this run (fixed fog strength, or 0 when fog off).
         /// </summary>
         public float FogAmountUsed { get; init; }
-
-        /// <summary>True when dynamic fog search ran (not fixed amount / fog off).</summary>
-        public bool DynamicFogSearched { get; init; }
-
-        /// <summary>
-        /// Dyn search low end (0 baseline when dyn runs); else same as used / 0 when off.
-        /// </summary>
-        public float FogAmountStart { get; init; }
     }
 
     /// <summary>
@@ -109,16 +100,9 @@ namespace SpeakRect
         public int RegionCount { get; init; }
 
         /// <summary>
-        /// Fog amount actually used for detect (after dynamic search when enabled).
-        /// 0 when fog is off.
+        /// Fog amount used for detect (fixed strength, or 0 when fog off).
         /// </summary>
         public float FogAmountUsed { get; init; }
-
-        /// <summary>True when dynamic fog search ran (not fixed amount / fog off).</summary>
-        public bool DynamicFogSearched { get; init; }
-
-        /// <summary>Start strength when <see cref="DynamicFogSearched"/>; else same as used.</summary>
-        public float FogAmountStart { get; init; }
 
         /// <summary>Pipeline log (prep + detect summary).</summary>
         public string Detail { get; init; } = "";
@@ -1075,8 +1059,6 @@ namespace SpeakRect
 
         /// <summary>Detect fog knobs for the current run (published into <see cref="OcrLastResult"/>).</summary>
         private float _runFogAmountUsed;
-        private bool _runDynamicFogSearched;
-        private float _runFogAmountStart;
 
         /// <summary>Create debug_images/ — Debug builds only (no-op in Release/publish).</summary>
         private static void EnsureDebugFolder()
@@ -1221,6 +1203,11 @@ namespace SpeakRect
                 try { _sapiSynth?.Dispose(); } catch { /* ignore */ }
                 _sapiSynth = null;
             }
+            // WinRT TTS + MediaPlayer must be released — SnapRegionOnly used to spin up
+            // a full host per click and leak these, which eventually breaks screen snap.
+            try { _player.Source = null; } catch { /* ignore */ }
+            try { _player.Dispose(); } catch { /* ignore */ }
+            try { _synth?.Dispose(); } catch { /* ignore */ }
         }
 
         /// <summary>
@@ -1290,7 +1277,6 @@ namespace SpeakRect
                 $" gray={(EnablePipelineGrayscale ? "on" : "off")}" +
                 $" fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on linear {SpeakRunSettings.GetComicDynamicFogMin():0.##}→{SpeakRunSettings.GetComicDynamicFogMax():0.##} step={DynamicFogSearchStep:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
@@ -1314,9 +1300,9 @@ namespace SpeakRect
 
                 token.ThrowIfCancellationRequested();
 
-                // Same detect entry as live (optional dynamic fog search).
+                // Same detect entry as live (fixed fog when enabled).
                 using var host = new OcrProcessor(new Rectangle(0, 0, 2, 2));
-                var (regions, _, _, detectImage, ownsDetect, fogUsed, dynSearched, fogStart) =
+                var (regions, _, _, detectImage, ownsDetect, fogUsed) =
                     await host.BuildComicRegionsSharedDetectAsync(
                         toneOwned, detail, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
@@ -1332,16 +1318,13 @@ namespace SpeakRect
                 var displayRects = previewBoxes.Select(r => r.Bounds).ToList();
 
                 // POI: preview canvas = TONE (VL canvas). Non-POI: detect image so fog is visible
-                // at the *chosen* dyn-fog amount (not the start slider alone).
                 bool poiMode = SpeakRunSettings.GetComicPoiMarkers();
                 detail.AppendLine(
                     $"grow X/Y={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##} " +
                     $"cropPad={TextRegionPadding}px " +
                     $"(display boxes = grow + pad; " +
                     $"preview base={(poiMode ? "TONE (POI=live VL canvas)" : "detect @ fog")}; " +
-                    $"fogUsed={fogUsed:0.###}" +
-                    (dynSearched ? $" dynStart={fogStart:0.###}" : "") +
-                    ")");
+                    $"fogUsed={fogUsed:0.###})");
 
                 Bitmap detectForOverlay = detectImage;
                 overlay = BuildRegionsOverlayBitmap(
@@ -1359,8 +1342,6 @@ namespace SpeakRect
                     PipelineHeight = pipeH,
                     RegionCount = regions.Count,
                     FogAmountUsed = fogUsed,
-                    DynamicFogSearched = dynSearched,
-                    FogAmountStart = fogStart,
                     Detail = detail.ToString(),
                 };
             }
@@ -1476,7 +1457,6 @@ namespace SpeakRect
             detail.AppendLine(
                 $"settings: fog={(EnableWinOcrDetectGrayFog ? "on" : "off")}" +
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
-                $" dynFog={(SpeakRunSettings.GetComicDynamicFog() ? $"on linear {SpeakRunSettings.GetComicDynamicFogMin():0.##}→{SpeakRunSettings.GetComicDynamicFogMax():0.##} step={DynamicFogSearchStep:0.##}" : "off")}" +
                 $" clusterGap={ClusterGapXFactor:0.##}/{ClusterGapYFactor:0.##}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
@@ -1592,7 +1572,7 @@ namespace SpeakRect
                         }
                     }
                     detectImage = fogOwned ?? toneOwned;
-                    SetRunFogAnalytics(fogUsed, dynSearched: false, fogStart: fogUsed);
+                    SetRunFogAnalytics(fogUsed);
 
                     sw.Restart();
                     regions = RegionsFromOverride(regionOverride!, pipeW, pipeH);
@@ -1606,22 +1586,20 @@ namespace SpeakRect
                 }
                 else
                 {
-                    // Same shared detect as live + Balloons preview (dynamic fog when on).
+                    // Same shared detect as live + Balloons preview (fixed fog when on).
                     sw.Restart();
                     DetectionResult detection;
                     Bitmap detImg;
                     bool ownsDet;
-                    bool dynSearched;
-                    float fogStart;
-                    (regions, detection, fragmented, detImg, ownsDet, fogUsed, dynSearched, fogStart) =
+                    (regions, detection, fragmented, detImg, ownsDet, fogUsed) =
                         await BuildComicRegionsSharedDetectAsync(
                             toneOwned, detail, token).ConfigureAwait(false);
                     if (ownsDet)
                         fogOwned = detImg;
                     detectImage = detImg;
-                    SetRunFogAnalytics(fogUsed, dynSearched, fogStart);
+                    SetRunFogAnalytics(fogUsed);
                     pipeTimer.Mark(
-                        $"winocr-detect+regions (dyn={dynSearched} fog={fogUsed:0.00})",
+                        $"winocr-detect+regions (fog={fogUsed:0.00})",
                         sw);
                     solidIslands = HasWellSeparatedSolidIslands(
                         regions, pipeW, pipeH);
@@ -1631,7 +1609,6 @@ namespace SpeakRect
                         $"(lowConf={detection.LowConfidence} frag={fragmented} " +
                         $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count} " +
                         $"fogUsed={fogUsed:0.###}" +
-                        (dynSearched ? $" dynStart={fogStart:0.###}" : "") +
                         ")");
                 }
 
@@ -2304,7 +2281,7 @@ namespace SpeakRect
                         $"upscale {upscaleOwned.Width}x{upscaleOwned.Height} " +
                         $"ocr {ocrImage.Width}x{ocrImage.Height}");
 
-                    // Shared detect (optional dynamic fog) — same entry as Balloons.
+                    // Shared detect (fixed fog when on) — same entry as Balloons.
                     // Local-LLM always reads ocrImage/tone; WinOCR detect may use fog.
                     sw.Restart();
                     var detectLog = new StringBuilder();
@@ -2312,10 +2289,8 @@ namespace SpeakRect
                     DetectionResult detection;
                     bool fragmented;
                     float fogUsedLive;
-                    bool dynFogLive;
-                    float fogStartLive;
                     {
-                        var (regs, det, frag, detImg, ownsDet, fogAmt, dyn, fogStart) =
+                        var (regs, det, frag, detImg, ownsDet, fogAmt) =
                             await BuildComicRegionsSharedDetectAsync(
                                 ocrImage, detectLog, token).ConfigureAwait(false);
                         if (ownsDet)
@@ -2325,13 +2300,10 @@ namespace SpeakRect
                         detection = det;
                         fragmented = frag;
                         fogUsedLive = fogAmt;
-                        dynFogLive = dyn;
-                        fogStartLive = fogStart;
-                        SetRunFogAnalytics(fogUsedLive, dynFogLive, fogStartLive);
+                        SetRunFogAnalytics(fogUsedLive);
                     }
                     pipeTimer.Mark(
-                        $"detect-fog+regions (dyn={dynFogLive} fog={fogUsedLive:0.00}" +
-                        (dynFogLive ? $" start={fogStartLive:0.00}" : "") + ")",
+                        $"detect-fog+regions (fog={fogUsedLive:0.00})",
                         sw);
 
                     sw.Restart();
@@ -2956,11 +2928,9 @@ namespace SpeakRect
                 $"  winocr detect=pass1+pass2" +
                 $", orphans={ActiveMaxOrphanWinOcrPasses}" +
                 $", fog={(detectUsesFog ? "on" : "off")}" +
-                (detectUsesFog && SpeakRunSettings.GetComicDynamicFog()
-                    ? $", dynFog=on linear {SpeakRunSettings.GetComicDynamicFogMin():0.###}→{SpeakRunSettings.GetComicDynamicFogMax():0.###} step={DynamicFogSearchStep:0.##}"
-                    : detectUsesFog
-                        ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
-                        : ""));
+                (detectUsesFog
+                    ? $", amount={WinOcrDetectGrayFogAmount:0.###}"
+                    : ""));
             if (poi)
             {
                 sb.AppendLine(
@@ -5296,15 +5266,19 @@ namespace SpeakRect
         /// Screen snap of a region only — no OCR, Kobold, or TTS.
         /// Used by Settings Image / Balloons "Snap region" preview load.
         /// Caller owns and must dispose the returned bitmap.
+        /// Does <b>not</b> construct an <see cref="OcrProcessor"/> (that wired TTS/MediaPlayer
+        /// for no reason and leaked COM objects until snap failed).
         /// </summary>
         public static Bitmap? SnapRegionOnly(
             Rectangle rect,
             List<Point>? lassoPoints = null,
             bool isEllipse = false)
         {
-            // Lightweight host: constructor wires TTS but we never Start().
-            using var host = new OcrProcessor(rect, lassoPoints, isEllipse);
-            return host.SnapCapture();
+            if (lassoPoints != null && lassoPoints.Count > 2)
+                return CreateMaskedBitmapFromLasso(lassoPoints);
+            if (isEllipse)
+                return CreateEllipseMaskedBitmap(rect);
+            return CreateRectBitmap(rect);
         }
 
         // ------------------- WinOCR region detect / cluster / order -------------------
@@ -5359,36 +5333,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Fixed step for <see cref="AppSettings.ComicDynamicFog"/> linear grind (0.01).
-        /// Some pages change a lot between 0.01 ticks — coarser steps miss peaks.
-        /// Range is <see cref="AppSettings.ComicDynamicFogMin"/>…
-        /// <see cref="AppSettings.ComicDynamicFogMax"/> (stock 0.00…1.00).
-        /// </summary>
-        public const float DynamicFogSearchStep = 0.01f;
-
-        /// <summary>
-        /// Stock search floor when settings are default (0.00). Prefer reading
-        /// <see cref="SpeakRunSettings.GetComicDynamicFogMin"/> at runtime.
-        /// </summary>
-        public const float DynamicFogSearchFloor = AppSettings.DefaultComicDynamicFogMin;
-
-        /// <summary>
-        /// Stock search ceiling when settings are default (1.00). Prefer reading
-        /// <see cref="SpeakRunSettings.GetComicDynamicFogMax"/> at runtime.
-        /// </summary>
-        public const float DynamicFogSearchMax = AppSettings.DefaultComicDynamicFogMax;
-
-        /// <summary>
         /// Shared detect entry for live + Balloons preview/speak.
-        /// When detect fog + <see cref="AppSettings.ComicDynamicFog"/>:
-        /// <list type="number">
-        /// <item>Walk min→max @ 0.01 (no early stop).</item>
-        /// <item>Each tick: multipass WinOCR detect + grow → islands, WinOCR word count, area.</item>
-        /// <item>Sweet spot = most islands, then most WinOCR words (double-check), then largest area; go back to that amount.</item>
-        /// <item>Final full detect at sweet spot with user's merge setting.</item>
-        /// <item>Crop re-OCR each island when fog&gt;0; empty/junk → nuke (fog ghosts).</item>
-        /// </list>
-        /// Preview base image is the final fog so you can see the chosen amount.
+        /// Detect fog off → WinOCR on tone. On → fixed gray fog amount, then full
+        /// reading-region pipeline. (Dynamic fog search was removed.)
         /// </summary>
         private async Task<(
             List<DetectedTextRegion> Regions,
@@ -5396,9 +5343,7 @@ namespace SpeakRect
             bool Fragmented,
             Bitmap DetectImage,
             bool OwnsDetectImage,
-            float FogAmountUsed,
-            bool DynamicFogSearched,
-            float FogAmountStart)> BuildComicRegionsSharedDetectAsync(
+            float FogAmountUsed)> BuildComicRegionsSharedDetectAsync(
             Bitmap toneImage,
             StringBuilder detail,
             CancellationToken token)
@@ -5412,579 +5357,22 @@ namespace SpeakRect
                 detail.AppendLine("detect-fog=off (detect on tone)");
                 var (r0, d0, f0) = await BuildComicReadingRegionsAsync(
                     toneImage, pipeW, pipeH, detail, token).ConfigureAwait(false);
-                return (r0, d0, f0, toneImage, OwnsDetectImage: false,
-                    FogAmountUsed: 0f, DynamicFogSearched: false, FogAmountStart: 0f);
+                return (r0, d0, f0, toneImage, OwnsDetectImage: false, FogAmountUsed: 0f);
             }
 
-            if (!SpeakRunSettings.GetComicDynamicFog())
-            {
-                detail.AppendLine($"detect-fog=fixed amount={fixedAmt:0.###}");
-                Bitmap fog = ApplyGrayFog(toneImage, fixedAmt, WinOcrDetectGrayFogLevel);
-                try
-                {
-                    var (r1, d1, f1) = await BuildComicReadingRegionsAsync(
-                        fog, pipeW, pipeH, detail, token).ConfigureAwait(false);
-                    return (r1, d1, f1, fog, OwnsDetectImage: true,
-                        FogAmountUsed: fixedAmt, DynamicFogSearched: false,
-                        FogAmountStart: fixedAmt);
-                }
-                catch
-                {
-                    try { fog.Dispose(); } catch { /* ignore */ }
-                    throw;
-                }
-            }
-
-            // --- Dynamic fog: start at floor, walk +0.01, keep the sweet spot ---
-            // Rules (simple):
-            //   • Score every fog amount with the SAME multipass WinOCR detect as live
-            //     (pass1+pass2+orphans), then grow boxes. Cheap single-pass was blind —
-            //     island count/area stayed flat so every page “peaked” at 0.
-            //   • Sweet spot = most islands, then most WinOCR words (double-check that
-            //     boxes actually hold text — ghost art under fog often inflates
-            //     islands/area without words), then largest total box area.
-            //   • Walk the full range (no early stop). When later ticks shrink, keep the
-            //     peak and go back to it for final detect.
-            //   • Equal peak → lower fog wins (0 stays valid when truly equal).
-            float searchLo = MathF.Round(
-                Math.Clamp(SpeakRunSettings.GetComicDynamicFogMin(), 0f, 1f), 2);
-            float searchHi = MathF.Round(
-                Math.Clamp(SpeakRunSettings.GetComicDynamicFogMax(), 0f, 1f), 2);
-            if (searchLo > searchHi)
-                (searchLo, searchHi) = (searchHi, searchLo);
-
-            const float step = DynamicFogSearchStep; // 0.01
-            int i0 = (int)Math.Round(searchLo * 100f);
-            int i1 = (int)Math.Round(searchHi * 100f);
-            int expectedTrials = Math.Max(1, i1 - i0 + 1);
-
-            bool userMerge = EnableMergeOverlappingIslands;
-            detail.AppendLine(
-                $"dyn-fog SEARCH: start={searchLo:0.00} walk +{step:0.00} " +
-                $"to {searchHi:0.00} (~{expectedTrials} trials; " +
-                $"score=multipass detect + grow; " +
-                $"sweet=most islands, then most WinOCR words, then largest area; " +
-                $"no early-stop — go back to peak; merge OFF for score; " +
-                $"user merge will restore={userMerge})");
-
-            var scored = new Dictionary<float, (long AreaSum, int Islands, int Words)>(
-                expectedTrials + 4);
-
-            float bestFog = searchLo;
-            long bestArea = -1;
-            int bestIslands = -1;
-            int bestWords = -1;
-
-            for (int i = i0; i <= i1; i++)
-            {
-                token.ThrowIfCancellationRequested();
-                float fogAmt = i / 100f;
-
-                var (areaSum, islands, words) = await ScoreDynamicFogTrialAsync(
-                    toneImage, fogAmt, pipeW, pipeH, token).ConfigureAwait(false);
-                scored[fogAmt] = (areaSum, islands, words);
-
-                // Sweet spot: most islands, then most WinOCR words, then area.
-                if (SmokeDynFogCoverageIsBetter(
-                        islands, words, areaSum, bestIslands, bestWords, bestArea))
-                {
-                    bestArea = areaSum;
-                    bestIslands = islands;
-                    bestWords = words;
-                    bestFog = fogAmt;
-                }
-
-                detail.AppendLine(
-                    $"  dyn-fog try amount={fogAmt:0.00} islands={islands} " +
-                    $"words={words} areaSum={areaSum}" +
-                    (Math.Abs(fogAmt - bestFog) < 1e-6f ? " *sweet*" : ""));
-            }
-
-            // Go back to sweet spot (re-pick for clarity / same rules).
-            bestFog = SmokeSelectDynamicFogBestAmount(
-                scored.ToDictionary(kv => kv.Key, kv => kv.Value.AreaSum),
-                scored.ToDictionary(kv => kv.Key, kv => kv.Value.Islands),
-                scored.ToDictionary(kv => kv.Key, kv => kv.Value.Words));
-            bestArea = scored[bestFog].AreaSum;
-            bestIslands = scored[bestFog].Islands;
-            bestWords = scored[bestFog].Words;
-
-            int trialsRun = scored.Count;
-            long zeroArea = scored.TryGetValue(0f, out var zHit) ? zHit.AreaSum : -1;
-            int zeroIslands = scored.TryGetValue(0f, out var zHit2) ? zHit2.Islands : -1;
-            int zeroWords = scored.TryGetValue(0f, out var zHit3) ? zHit3.Words : -1;
-            detail.AppendLine(
-                $"dyn-fog SWEET SPOT (go back): amount={bestFog:0.00} " +
-                $"islands={bestIslands} words={bestWords} areaSum={bestArea} " +
-                $"(most islands, then most WinOCR words, then largest area)");
-            detail.AppendLine(
-                $"dyn-fog CHOSEN: amount={bestFog:0.00} islands={bestIslands} " +
-                $"words={bestWords} areaSum={bestArea} trials={trialsRun} " +
-                $"range={searchLo:0.00}…{searchHi:0.00} " +
-                (zeroArea >= 0
-                    ? $"at0=islands {zeroIslands} words {zeroWords} area {zeroArea} "
-                    : "") +
-                (bestFog <= 0.001f ? "→ no fog " : "") +
-                $"(final detect uses this amount)");
-            detail.AppendLine(
-                $"dyn-fog FINAL detect @ {bestFog:0.00} with merge-overlap={userMerge}");
-
-            // Final full pipeline at best fog — merge follows user setting (not mutated).
-            // amount=0 → ApplyGrayFog clones tone (no veil).
-            Bitmap finalFog = ApplyGrayFog(toneImage, bestFog, WinOcrDetectGrayFogLevel);
+            detail.AppendLine($"detect-fog=fixed amount={fixedAmt:0.###}");
+            Bitmap fog = ApplyGrayFog(toneImage, fixedAmt, WinOcrDetectGrayFogLevel);
             try
             {
-                var (regions, detection, fragmented) = await BuildComicReadingRegionsAsync(
-                    finalFog, pipeW, pipeH, detail, token).ConfigureAwait(false);
-                // Dyn fog can invent ghost islands (art that looks like ink under gray).
-                // Crop re-OCR on the chosen fog view; empty/junk → drop before speak/POI.
-                // Skip when best is amount=0: no veil was applied, so no fog ghosts.
-                if (bestFog > 0.001f)
-                {
-                    regions = await VerifyDynFogIslandsWinOcrAsync(
-                        finalFog, regions, detail, token).ConfigureAwait(false);
-                }
-                else
-                {
-                    detail.AppendLine(
-                        "dyn-fog island-verify: skipped (amount=0 — no veil ghosts; " +
-                        "keep full-frame islands)");
-                }
-                // FogAmountStart = search floor (where the grind began).
-                return (regions, detection, fragmented, finalFog, OwnsDetectImage: true,
-                    FogAmountUsed: bestFog, DynamicFogSearched: true,
-                    FogAmountStart: searchLo);
+                var (r1, d1, f1) = await BuildComicReadingRegionsAsync(
+                    fog, pipeW, pipeH, detail, token).ConfigureAwait(false);
+                return (r1, d1, f1, fog, OwnsDetectImage: true, FogAmountUsed: fixedAmt);
             }
             catch
             {
-                try { finalFog.Dispose(); } catch { /* ignore */ }
+                try { fog.Dispose(); } catch { /* ignore */ }
                 throw;
             }
-        }
-
-        /// <summary>
-        /// After dynamic-fog final detect: crop each island and re-run WinOCR.
-        /// Nuke when crop text is empty/junk, or a single weak token that is not
-        /// real dialogue — unless full-frame detect already saw real dialogue text
-        /// (tiny balloons often fail crop re-OCR while full-frame succeeded).
-        /// Real multi-word balloons keep; short real call-outs keep.
-        /// Comic Book + dyn fog only (caller gates). Skips when engine missing.
-        /// Caller skips this entirely when chosen fog amount is 0 (no veil ghosts).
-        /// </summary>
-        private static async Task<List<DetectedTextRegion>> VerifyDynFogIslandsWinOcrAsync(
-            Bitmap detectImage,
-            List<DetectedTextRegion> regions,
-            StringBuilder detail,
-            CancellationToken token)
-        {
-            if (regions == null || regions.Count == 0 || detectImage == null)
-                return regions ?? new List<DetectedTextRegion>();
-
-            var engine = GetWinOcrEngine();
-            if (engine == null)
-            {
-                detail.AppendLine(
-                    "dyn-fog island-verify: skipped (no WinOCR engine)");
-                return regions;
-            }
-
-            int before = regions.Count;
-            var kept = new List<DetectedTextRegion>(regions.Count);
-            int nuked = 0;
-            int refreshed = 0;
-            int priorKept = 0;
-            var frame = new Rectangle(0, 0, detectImage.Width, detectImage.Height);
-
-            foreach (var r in regions)
-            {
-                token.ThrowIfCancellationRequested();
-
-                var cropRect = Rectangle.Inflate(r.Bounds, 6, 6);
-                cropRect.Intersect(frame);
-                if (cropRect.Width < BalloonOcrDetect.MinClusterSize ||
-                    cropRect.Height < BalloonOcrDetect.MinClusterSize)
-                {
-                    nuked++;
-                    detail.AppendLine(
-                        $"  dyn-fog nuke tiny-crop " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height}");
-                    continue;
-                }
-
-                using var crop = CropBitmap(detectImage, cropRect);
-                if (crop == null)
-                {
-                    nuked++;
-                    detail.AppendLine(
-                        $"  dyn-fog nuke crop-fail " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height}");
-                    continue;
-                }
-
-                // Quiet pass log — one summary line per island below.
-                var quiet = new StringBuilder();
-                List<DetectedTextRegion> inner;
-                try
-                {
-                    inner = await RunWinOcrPassAsync(
-                        engine, crop, OrphanWinOcrScale, token, quiet)
-                        .ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // Keep original island if crop OCR fails hard (do not over-nuke).
-                    detail.AppendLine(
-                        $"  dyn-fog verify-error keep " +
-                        $"@{r.Bounds.X},{r.Bounds.Y}: {ex.Message}");
-                    kept.Add(r);
-                    continue;
-                }
-
-                var texts = new List<string>();
-                foreach (var ir in inner)
-                {
-                    if (!string.IsNullOrWhiteSpace(ir.WinOcrText) &&
-                        !IsJunkWinOcrText(ir.WinOcrText))
-                    {
-                        texts.Add(ir.WinOcrText.Trim());
-                    }
-                }
-
-                string joined = Regex.Replace(
-                    string.Join(" ", texts), @"\s+", " ").Trim();
-                int words = ComicRegionGeometry.CountWords(joined);
-                int alnum = SpeechCleaner.CountAlnum(joined);
-                string was = string.IsNullOrWhiteSpace(r.WinOcrText)
-                    ? "(empty)"
-                    : $"\"{Truncate(r.WinOcrText, 24)}\"";
-                string cropPreview = string.IsNullOrWhiteSpace(joined)
-                    ? "(empty)"
-                    : $"\"{Truncate(joined, 32)}\"";
-
-                // 1) Empty / below alnum floor
-                if (IsJunkWinOcrText(joined) || string.IsNullOrWhiteSpace(joined))
-                {
-                    // Crop re-OCR is flaky on tiny real balloons (ellipsis, tight box).
-                    // Full-frame already saw dialogue → keep geometry; true fog ghosts
-                    // almost always have empty/junk prior text too.
-                    if (SmokeDynFogKeepOnEmptyCrop(r.WinOcrText))
-                    {
-                        priorKept++;
-                        kept.Add(r);
-                        detail.AppendLine(
-                            $"  dyn-fog verify-keep prior-text crop-empty " +
-                            $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
-                            $"was={was}");
-                        continue;
-                    }
-
-                    nuked++;
-                    detail.AppendLine(
-                        $"  dyn-fog nuke empty-crop-ocr " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
-                        $"crop={cropPreview} was={was}");
-                    continue;
-                }
-
-                // 2) Single weak token that is not a real dialogue call-out.
-                // Multi-word crop text is trusted as speech. One-word must look like
-                // a letter+vowel dialogue token — not random art glyphs.
-                // If crop is weak but full-frame prior is real multi-word / dialogue,
-                // keep prior (same tiny-balloon crop flakiness as empty-crop).
-                if (words <= 1)
-                {
-                    bool realWord = LooksLikeRealDialogueToken(joined);
-                    bool belowMin =
-                        MinIslandAlnumChars > 0 && alnum < MinIslandAlnumChars;
-                    if (!realWord || belowMin)
-                    {
-                        if (SmokeDynFogKeepOnEmptyCrop(r.WinOcrText))
-                        {
-                            priorKept++;
-                            kept.Add(r);
-                            detail.AppendLine(
-                                $"  dyn-fog verify-keep prior-text weak-crop " +
-                                $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
-                                $"crop={cropPreview} was={was}");
-                            continue;
-                        }
-
-                        nuked++;
-                        detail.AppendLine(
-                            $"  dyn-fog nuke weak-single-token " +
-                            $"@{r.Bounds.X},{r.Bounds.Y} {r.Bounds.Width}x{r.Bounds.Height} " +
-                            $"crop={cropPreview} alnum={alnum} realWord={realWord} was={was}");
-                        continue;
-                    }
-                }
-
-                // Crop confirmed text — keep geometry; refresh detect text if better.
-                if (!string.Equals(r.WinOcrText, joined, StringComparison.Ordinal))
-                {
-                    refreshed++;
-                    kept.Add(new DetectedTextRegion
-                    {
-                        Bounds = r.Bounds,
-                        WinOcrText = joined
-                    });
-                    detail.AppendLine(
-                        $"  dyn-fog verify-ok text-refresh " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} crop={cropPreview}");
-                }
-                else
-                {
-                    kept.Add(r);
-                    detail.AppendLine(
-                        $"  dyn-fog verify-ok " +
-                        $"@{r.Bounds.X},{r.Bounds.Y} crop={cropPreview}");
-                }
-            }
-
-            detail.AppendLine(
-                $"dyn-fog island-verify: {before} → {kept.Count} " +
-                $"(nuked={nuked} refreshed={refreshed} priorKept={priorKept})");
-            return kept;
-        }
-
-        /// <summary>
-        /// True when full-frame detect text is strong enough to keep an island even
-        /// though crop re-OCR returned empty/weak (tiny real balloons).
-        /// Ghost art under fog almost always fails this gate.
-        /// </summary>
-        public static bool SmokeDynFogKeepOnEmptyCrop(string? priorFullFrameText)
-        {
-            if (string.IsNullOrWhiteSpace(priorFullFrameText))
-                return false;
-            if (IsJunkWinOcrText(priorFullFrameText))
-                return false;
-
-            // Multi-word full-frame already proved speech.
-            if (ComicRegionGeometry.CountWords(priorFullFrameText) >= 2)
-                return true;
-
-            // Single short call-out full-frame trusted ("USE", "NO!", "…ME…").
-            return LooksLikeRealDialogueToken(priorFullFrameText);
-        }
-
-        /// <summary>
-        /// One fog trial for the dyn-fog climb: same multipass WinOCR detect as live
-        /// (pass1 + pass2 + orphan fill), then grow-only boxes.
-        /// Returns island count, total WinOCR word count, and total grown area —
-        /// the size+number+text signal for the sweet-spot pick. Word count is the
-        /// double-check that islands actually hold readable text (ghost art under
-        /// fog often inflates box count/area with empty or junk OCR).
-        /// Single-pass scoring was flat across fog and always “won” at 0; multipass
-        /// is what actually finds balloons under fog.
-        /// Merge is off (grow only) so area is coverage, not merge topology.
-        /// </summary>
-        private async Task<(long AreaSum, int IslandCount, int WordCount)> ScoreDynamicFogTrialAsync(
-            Bitmap toneImage,
-            float fogAmount,
-            int pipeW,
-            int pipeH,
-            CancellationToken token)
-        {
-            if (toneImage.Width < 2 || toneImage.Height < 2)
-                return (0, 0, 0);
-
-            using var trialFog = ApplyGrayFog(
-                toneImage, fogAmount, WinOcrDetectGrayFogLevel);
-
-            // Real detect path — not a cheap single pass. Quiet detail is discarded;
-            // caller logs one summary line per amount.
-            var detection = await DetectTextRegionsAsync(trialFog, token)
-                .ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-
-            var grown = ImproveDetectedRegions(
-                detection.Regions, pipeW, pipeH, growOnlyNoMergeNoNudge: true);
-
-            long sum = 0;
-            int words = 0;
-            foreach (var r in grown)
-            {
-                int w = Math.Max(0, r.Bounds.Width);
-                int h = Math.Max(0, r.Bounds.Height);
-                sum += (long)w * h;
-                words += CountDynFogTrialWords(r.WinOcrText);
-            }
-            return (sum, grown.Count, words);
-        }
-
-        /// <summary>
-        /// WinOCR word count for one dyn-fog trial island. Junk / empty detect text
-        /// contributes 0 so ghost boxes do not pad the word double-check.
-        /// </summary>
-        public static int CountDynFogTrialWords(string? winOcrText)
-        {
-            if (string.IsNullOrWhiteSpace(winOcrText) || IsJunkWinOcrText(winOcrText))
-                return 0;
-            return ComicRegionGeometry.CountWords(winOcrText);
-        }
-
-        /// <summary>
-        /// Pure hill-climb pick used by dynamic fog (and unit tests):
-        /// walk scores in order; track peak; stop when score falls below
-        /// <paramref name="shrinkVsPeak"/> of the peak. Returns index of best.
-        /// </summary>
-        public static int SmokeSelectDynamicFogBestIndex(
-            IReadOnlyList<long> areaScores,
-            double shrinkVsPeak = 0.97)
-        {
-            if (areaScores == null || areaScores.Count == 0)
-                return 0;
-
-            int bestIdx = 0;
-            long best = areaScores[0];
-            for (int i = 1; i < areaScores.Count; i++)
-            {
-                long s = areaScores[i];
-                if (s > best)
-                {
-                    best = s;
-                    bestIdx = i;
-                }
-                else if (best > 0 && s < best * shrinkVsPeak)
-                {
-                    break;
-                }
-            }
-            return bestIdx;
-        }
-
-        /// <summary>
-        /// Whether the dyn-fog coarse climb should stop after the latest score:
-        /// clear shrink vs peak only (no plateau early-out).
-        /// </summary>
-        public static bool SmokeDynamicFogShouldStopClimb(
-            IReadOnlyList<long> areaScores,
-            double shrinkVsPeak = 0.97)
-        {
-            if (areaScores == null || areaScores.Count < 2)
-                return false;
-
-            int bestIdx = SmokeSelectDynamicFogBestIndex(areaScores, shrinkVsPeak);
-            int i = areaScores.Count - 1;
-            long best = areaScores[bestIdx];
-            long score = areaScores[i];
-
-            return best > 0 && score < best * shrinkVsPeak && bestIdx < i;
-        }
-
-        /// <summary>
-        /// Sweet-spot comparison without word double-check (area after islands).
-        /// Prefer the words-aware overload for live dyn-fog.
-        /// </summary>
-        public static bool SmokeDynFogCoverageIsBetter(
-            int islands,
-            long areaSum,
-            int bestIslands,
-            long bestAreaSum)
-            => SmokeDynFogCoverageIsBetter(
-                islands, words: 0, areaSum, bestIslands, bestWords: 0, bestAreaSum);
-
-        /// <summary>
-        /// Sweet-spot comparison: is (islands, words, areaSum) better than the peak?
-        /// Rule: most islands wins; if equal islands, most WinOCR words wins
-        /// (double-check — real text over ghost boxes); if equal words too,
-        /// largest total area wins. Equal all three → not better (caller keeps
-        /// the lower fog / earlier tick).
-        /// </summary>
-        public static bool SmokeDynFogCoverageIsBetter(
-            int islands,
-            int words,
-            long areaSum,
-            int bestIslands,
-            int bestWords,
-            long bestAreaSum)
-        {
-            if (islands > bestIslands)
-                return true;
-            if (islands < bestIslands)
-                return false;
-            if (words > bestWords)
-                return true;
-            if (words < bestWords)
-                return false;
-            return areaSum > bestAreaSum;
-        }
-
-        /// <summary>
-        /// Global dyn-fog pick: max areaSum only (no island / word counts). Lower amount
-        /// on exact area ties. Prefer the islands+words overload for live pick.
-        /// </summary>
-        public static float SmokeSelectDynamicFogBestAmount(
-            IReadOnlyDictionary<float, long> amountToScore)
-            => SmokeSelectDynamicFogBestAmount(
-                amountToScore, islandCounts: null, wordCounts: null);
-
-        /// <summary>
-        /// Global dyn-fog peak with islands + area (no word double-check).
-        /// Prefer the three-dictionary overload for live pick.
-        /// </summary>
-        public static float SmokeSelectDynamicFogBestAmount(
-            IReadOnlyDictionary<float, long> amountToScore,
-            IReadOnlyDictionary<float, int>? islandCounts)
-            => SmokeSelectDynamicFogBestAmount(
-                amountToScore, islandCounts, wordCounts: null);
-
-        /// <summary>
-        /// Global dyn-fog peak across every scored tick (full climb, then go back):
-        /// <list type="number">
-        /// <item>Most islands (more boxes) wins.</item>
-        /// <item>On equal island count, most WinOCR words wins (text double-check).</item>
-        /// <item>On equal islands + words, largest areaSum wins.</item>
-        /// <item>On full ties, lower fog (ascending order) — 0 stays strong when equal.</item>
-        /// </list>
-        /// When <paramref name="islandCounts"/> is null, falls back to area-only.
-        /// When <paramref name="wordCounts"/> is null, word double-check is skipped
-        /// (equal-words path → area decides after islands).
-        /// </summary>
-        public static float SmokeSelectDynamicFogBestAmount(
-            IReadOnlyDictionary<float, long> amountToScore,
-            IReadOnlyDictionary<float, int>? islandCounts,
-            IReadOnlyDictionary<float, int>? wordCounts)
-        {
-            if (amountToScore == null || amountToScore.Count == 0)
-                return 0f;
-
-            float bestAmt = 0f;
-            long bestScore = -1;
-            int bestIslands = -1;
-            int bestWords = -1;
-            // Ascending amount → first peak wins full ties (prefer lower fog).
-            foreach (var kv in amountToScore.OrderBy(k => k.Key))
-            {
-                int islands = 0;
-                if (islandCounts != null &&
-                    islandCounts.TryGetValue(kv.Key, out int ic))
-                    islands = ic;
-                else if (islandCounts == null)
-                {
-                    // Area-only mode: treat every tick as 0 islands so area decides.
-                    islands = 0;
-                }
-
-                int words = 0;
-                if (wordCounts != null &&
-                    wordCounts.TryGetValue(kv.Key, out int wc))
-                    words = wc;
-                // wordCounts null → all words stay 0 → islands then area (legacy).
-
-                if (SmokeDynFogCoverageIsBetter(
-                        islands, words, kv.Value, bestIslands, bestWords, bestScore))
-                {
-                    bestScore = kv.Value;
-                    bestIslands = islands;
-                    bestWords = words;
-                    bestAmt = kv.Key;
-                }
-            }
-            return bestAmt;
         }
 
         /// <summary>
@@ -9329,15 +8717,11 @@ namespace SpeakRect
         private void ClearRunFogAnalytics()
         {
             _runFogAmountUsed = 0f;
-            _runDynamicFogSearched = false;
-            _runFogAmountStart = 0f;
         }
 
-        private void SetRunFogAnalytics(float fogUsed, bool dynSearched, float fogStart)
+        private void SetRunFogAnalytics(float fogUsed)
         {
             _runFogAmountUsed = fogUsed;
-            _runDynamicFogSearched = dynSearched;
-            _runFogAmountStart = fogStart;
         }
 
         /// <summary>
@@ -9375,8 +8759,6 @@ namespace SpeakRect
                 Unreadable = unreadable,
                 Images = images,
                 FogAmountUsed = _runFogAmountUsed,
-                DynamicFogSearched = _runDynamicFogSearched,
-                FogAmountStart = _runFogAmountStart,
             };
             lock (LastResultLock)
                 LastResult = snapshot;
@@ -10635,14 +10017,6 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Smoke helper: crop re-OCR text alone is empty/junk (first gate).
-        /// Live still may keep the island via <see cref="SmokeDynFogKeepOnEmptyCrop"/>
-        /// when full-frame prior text is real dialogue.
-        /// </summary>
-        public static bool SmokeDynFogIslandCropIsEmpty(string? cropOcrText)
-            => IsJunkWinOcrText(cropOcrText);
-
-        /// <summary>
         /// Smoke helper: dead-island filter used after WinOCR detect (drops logos
         /// on non-balloon art, junk OCR, empty small boxes).
         /// </summary>
@@ -10772,7 +10146,7 @@ namespace SpeakRect
             return hit;
         }
 
-        private Bitmap CreateRectBitmap(Rectangle r)
+        private static Bitmap CreateRectBitmap(Rectangle r)
         {
             r = ClampToVirtualScreen(r);
             if (r.Width < 1 || r.Height < 1)
@@ -10793,7 +10167,7 @@ namespace SpeakRect
             return b;
         }
 
-        private Bitmap CreateMaskedBitmapFromLasso(List<Point> points)
+        private static Bitmap CreateMaskedBitmapFromLasso(List<Point> points)
         {
             if (points == null || points.Count < 3)
                 return new Bitmap(1, 1, PixelFormat.Format32bppArgb);
@@ -10844,7 +10218,7 @@ namespace SpeakRect
             return masked;
         }
 
-        private Bitmap CreateEllipseMaskedBitmap(Rectangle bounds)
+        private static Bitmap CreateEllipseMaskedBitmap(Rectangle bounds)
         {
             bounds = ClampToVirtualScreen(bounds);
             if (bounds.Width < 5 || bounds.Height < 5)

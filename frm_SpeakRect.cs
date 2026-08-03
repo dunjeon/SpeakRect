@@ -2539,35 +2539,64 @@ namespace SpeakRect
             // Ensure live fields match the active slot (overlay may be hidden under Settings).
             LoadRegionIntoCurrent(_activeRectKey);
 
-            Rectangle bounds = Rectangle.Empty;
-            List<Point>? lasso = null;
-            bool ellipse = false;
-            bool hasSelection = false;
+            // Settings-open blocks drawing, so Snap relies on a previously saved slot.
+            // If memory is empty, rebuild from AppSettings (ini / profile) and try again.
+            if (!TryGetActiveRegionGeometry(out _, out _, out _))
+            {
+                try { ApplyRegionsFromSettings(); } catch { /* ignore */ }
+                LoadRegionIntoCurrent(_activeRectKey);
+            }
+
+            if (!TryGetActiveRegionGeometry(out Rectangle bounds, out List<Point>? lasso, out bool ellipse))
+            {
+                return (null,
+                    "No active region — close Settings, draw region 1–8 on the overlay, then Snap again.");
+            }
+
+            return await CaptureRegionBitmapAsync(bounds, lasso, ellipse).ConfigureAwait(true);
+        }
+
+        /// <summary>
+        /// Active F1–F8 geometry for Enter speak / Snap region (live fields only).
+        /// </summary>
+        private bool TryGetActiveRegionGeometry(
+            out Rectangle bounds,
+            out List<Point>? lasso,
+            out bool ellipse)
+        {
+            bounds = Rectangle.Empty;
+            lasso = null;
+            ellipse = false;
 
             if (_currentMode == CaptureMode.Rectangle && !_currentRect.IsEmpty)
             {
-                hasSelection = true;
                 bounds = _currentRect;
+                return true;
             }
-            else if (_currentMode == CaptureMode.Ellipse && !_currentEllipse.IsEmpty)
+            if (_currentMode == CaptureMode.Ellipse && !_currentEllipse.IsEmpty)
             {
-                hasSelection = true;
                 bounds = _currentEllipse;
                 ellipse = true;
+                return true;
             }
-            else if (_currentMode == CaptureMode.Lasso && _currentLasso.Count > 2)
+            if (_currentMode == CaptureMode.Lasso && _currentLasso.Count > 2)
             {
-                hasSelection = true;
                 bounds = GetBoundingRect(_currentLasso);
                 lasso = new List<Point>(_currentLasso);
+                return true;
             }
+            return false;
+        }
 
-            if (!hasSelection)
-            {
-                return (null,
-                    "No active region — draw or select a region (1–8) on the overlay first.");
-            }
-
+        /// <summary>
+        /// Hide Settings + overlay chrome, settle, screen-snap, restore.
+        /// Caller owns the bitmap.
+        /// </summary>
+        private async Task<(Bitmap? Bitmap, string Error)> CaptureRegionBitmapAsync(
+            Rectangle bounds,
+            List<Point>? lasso,
+            bool ellipse)
+        {
             var settings = _settingsForm;
             bool settingsWasVisible = settings is { IsDisposed: false, Visible: true };
             double restoreOpacity = Opacity;

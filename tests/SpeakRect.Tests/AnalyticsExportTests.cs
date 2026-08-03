@@ -17,11 +17,9 @@ public class AnalyticsExportTests
             CaptureBounds = new System.Drawing.Rectangle(10, 20, 300, 200),
             Shape = "Rectangle",
             SpokenText = "hello world",
-            Detail = "strategy=test\nstep=ok\ndyn-fog CHOSEN: amount=0.30",
+            Detail = "strategy=test\nstep=ok\ndetect-fog=fixed amount=0.30",
             Unreadable = false,
-            DynamicFogSearched = true,
             FogAmountUsed = 0.30f,
-            FogAmountStart = 0f,
             Images = new[]
             {
                 new OcrResultImage
@@ -64,9 +62,7 @@ public class AnalyticsExportTests
                 Assert.Contains("shape=Rectangle", body, StringComparison.Ordinal);
                 Assert.Contains("images=1", body, StringComparison.Ordinal);
                 Assert.Contains("key=capture", body, StringComparison.Ordinal);
-                Assert.Contains("dyn_fog=yes", body, StringComparison.Ordinal);
                 Assert.Contains("fog_amount_used=0.3", body, StringComparison.Ordinal);
-                Assert.Contains("fog_amount_start=0", body, StringComparison.Ordinal);
             }
 
             var img = zip.GetEntry("images/00_capture.png");
