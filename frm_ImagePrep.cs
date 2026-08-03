@@ -186,11 +186,13 @@ namespace SpeakRect
                 row++;
             }
 
-            AddFull(MakeSection("PICTURE CLEANUP"), 22);
+            // Section rows taller than the bold label so the previous multi-line
+            // hint does not collide with the next header.
+            AddFull(MakeSection("PICTURE CLEANUP"), 26);
             AddFull(MakeHint(
                 "Trim edges, resize, and clean the picture before text is read. " +
                 "Same steps as when you speak. Turn off to use the raw capture."),
-                48);
+                52);
 
             _chkPrepEnabled = MakeCheck("Clean up the picture before reading");
             _chkPrepEnabled.Checked = true;
@@ -200,10 +202,10 @@ namespace SpeakRect
                 ApplyKeyboardTabOrder();
             };
             AddFull(_chkPrepEnabled, 28);
-            AddFull(MakeHint("Off = use the capture as captured, with no cleanup."), 28);
+            AddFull(MakeHint("Off = use the capture as captured, with no cleanup."), 32);
 
             // Letterbox
-            AddFull(MakeSection("TRIM BARS"), 20);
+            AddFull(MakeSection("TRIM BARS"), 28);
             _chkLetterbox = MakeCheck("Trim black or white edges");
             _chkLetterbox.CheckedChanged += (_, _) =>
             {
@@ -220,10 +222,10 @@ namespace SpeakRect
             _trkLetterboxWhite = MakeTrack(0, 255, AppSettings.DefaultImageLetterboxWhite);
             _lblLetterboxWhiteVal = MakeValueLabel();
             AddRow(MakeLabel("Light edges"), WrapTrack(_trkLetterboxWhite, _lblLetterboxWhiteVal), 42);
-            AddFull(MakeHint("Higher dark / lower light trims more. Off keeps the full capture."), 36);
+            AddFull(MakeHint("Higher dark / lower light trims more. Off keeps the full capture."), 40);
 
             // Scale — not free-form resolution. Long edge only; aspect always kept.
-            AddFull(MakeSection("SIZE"), 20);
+            AddFull(MakeSection("SIZE"), 28);
             _trkUpscale = MakeTrack(640, 4096, AppSettings.DefaultImageUpscaleLongSide);
             _trkUpscale.TickFrequency = 128;
             _lblUpscaleVal = MakeValueLabel();
@@ -232,10 +234,10 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "Resize so the longer side is this many pixels. " +
                 "Shape is kept (no stretch). Larger values are sharper but slower."),
-                44);
+                48);
 
             // Send size after prep
-            AddFull(MakeSection("READING SIZE"), 20);
+            AddFull(MakeSection("READING SIZE"), 28);
             _chkLlmSendDownscale = MakeCheck("Shrink before reading");
             _chkLlmSendDownscale.Checked = false;
             _chkLlmSendDownscale.CheckedChanged += (_, _) =>
@@ -251,14 +253,15 @@ namespace SpeakRect
                 MakeLabel("Max longer side"),
                 WrapTrack(_trkLlmSendMaxEdge, _lblLlmSendMaxEdgeVal, valueWidth: 90),
                 42);
+            // 3 wrapped lines were clipping at 52 — leave room + gap before next section.
             AddFull(MakeHint(
                 "Off (default): read at the size after cleanup. " +
                 "On: shrink so the longer side is no larger than this (faster, less detail). " +
                 "Finding balloons still uses the Size setting above."),
-                52);
+                64);
 
             // Gray
-            AddFull(MakeSection("GRAYSCALE"), 20);
+            AddFull(MakeSection("GRAYSCALE"), 28);
             _chkGray = MakeCheck("Convert to grayscale");
             _chkGray.CheckedChanged += (_, _) =>
             {
@@ -269,20 +272,20 @@ namespace SpeakRect
             _trkInkWeight = MakeTrack(0, 100, 55);
             _lblInkWeightVal = MakeValueLabel();
             AddRow(MakeLabel("Ink weight"), WrapTrack(_trkInkWeight, _lblInkWeightVal), 42);
-            AddFull(MakeHint("Higher keeps bright colors (like yellow SFX) darker in gray."), 36);
+            AddFull(MakeHint("Higher keeps bright colors (like yellow SFX) darker in gray."), 40);
 
             // Tone: denoise
-            AddFull(MakeSection("SMOOTH"), 20);
+            AddFull(MakeSection("SMOOTH"), 28);
             _trkDenoiseR = MakeTrack(0, 4, 1);
             _lblDenoiseRVal = MakeValueLabel();
             AddRow(MakeLabel("Strength"), WrapTrack(_trkDenoiseR, _lblDenoiseRVal), 42);
             _trkDenoiseSigma = MakeTrack(1, 80, 22);
             _lblDenoiseSigmaVal = MakeValueLabel();
             AddRow(MakeLabel("Detail keep"), WrapTrack(_trkDenoiseSigma, _lblDenoiseSigmaVal), 42);
-            AddFull(MakeHint("0 = off. Softens noise while trying to keep edges."), 28);
+            AddFull(MakeHint("0 = off. Softens noise while trying to keep edges."), 32);
 
             // Tone: levels
-            AddFull(MakeSection("CONTRAST"), 20);
+            AddFull(MakeSection("CONTRAST"), 28);
             _chkAutoLevels = MakeCheck("Auto contrast");
             _chkAutoLevels.CheckedChanged += (_, _) =>
             {
@@ -299,17 +302,17 @@ namespace SpeakRect
             _trkLevelsMinRange = MakeTrack(8, 200, 48);
             _lblLevelsMinRangeVal = MakeValueLabel();
             AddRow(MakeLabel("Skip if already strong"), WrapTrack(_trkLevelsMinRange, _lblLevelsMinRangeVal), 42);
-            AddFull(MakeHint("Gently boosts contrast. Skip if the page is already clean."), 32);
+            AddFull(MakeHint("Gently boosts contrast. Skip if the page is already clean."), 36);
 
             // Tone: sharpen
-            AddFull(MakeSection("SHARPEN"), 20);
+            AddFull(MakeSection("SHARPEN"), 28);
             _trkSharpenAmt = MakeTrack(0, 200, 55); // 0.00–2.00
             _lblSharpenAmtVal = MakeValueLabel();
             AddRow(MakeLabel("Amount"), WrapTrack(_trkSharpenAmt, _lblSharpenAmtVal), 42);
             _trkSharpenPasses = MakeTrack(0, 4, 1);
             _lblSharpenPassesVal = MakeValueLabel();
             AddRow(MakeLabel("Passes"), WrapTrack(_trkSharpenPasses, _lblSharpenPassesVal), 42);
-            AddFull(MakeHint("0 = off. Too much can fringe black lettering."), 28);
+            AddFull(MakeHint("0 = off. Too much can fringe black lettering."), 32);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -1140,7 +1143,9 @@ namespace SpeakRect
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.FgHeader,
             Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleLeft,
+            // Bottom-align in the taller section row so prior hints keep a clear gap.
+            TextAlign = ContentAlignment.BottomLeft,
+            Padding = new Padding(0, 0, 0, 2),
         };
 
         private static Label MakeLabel(string text) => new()

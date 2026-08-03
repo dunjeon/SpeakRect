@@ -154,7 +154,7 @@ namespace SpeakRect
             }
 
             // ---- Header ----
-            AddFull(MakeSection("VOICE"), 22);
+            AddFull(MakeSection("VOICE"), 26);
 
             _cmbEngine = new ComboBox
             {
@@ -185,7 +185,7 @@ namespace SpeakRect
             AddFull(_lblVoiceHint, 40);
 
             // ---- Rate / Pitch / Volume ----
-            AddFull(MakeSection("OPTIONS"), 22);
+            AddFull(MakeSection("OPTIONS"), 28);
 
             _trkRate = MakeTrack(RateMin, RateMax, 100);
             _lblRateVal = MakeValueLabel();
@@ -204,7 +204,7 @@ namespace SpeakRect
             AddFull(_lblOptionsHint, 28);
 
             // ---- Silence ----
-            AddFull(MakeSection("SILENCE"), 22);
+            AddFull(MakeSection("SILENCE"), 28);
 
             _cmbAppendedSilence = MakeSilenceCombo();
             AddRow(MakeLabel("End silence"), _cmbAppendedSilence, 34);
@@ -217,7 +217,7 @@ namespace SpeakRect
             AddFull(_lblSilenceHint, 40);
 
             // ---- Speak-unit pauses (engine-agnostic Task.Delay between units) ----
-            AddFull(MakeSection("SPEAK PAUSES"), 22);
+            AddFull(MakeSection("SPEAK PAUSES"), 28);
 
             _chkCustomPauseEncodings = new CheckBox
             {
@@ -379,7 +379,7 @@ namespace SpeakRect
             ForeColor = UiTheme.FgHeader,
             Font = new Font("Segoe UI", 8f, FontStyle.Bold),
             TextAlign = ContentAlignment.BottomLeft,
-            Padding = new Padding(0, 4, 0, 0),
+            Padding = new Padding(0, 0, 0, 2),
         };
 
         private static Label MakeHint(string text) => new()

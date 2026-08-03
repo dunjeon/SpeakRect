@@ -204,14 +204,16 @@ namespace SpeakRect
                 row++;
             }
 
-            AddFull(MakeSection("BALLOONS"), 22);
+            // Section rows are taller than the bold label so multi-line hints above
+            // do not collide with the next header (extra line of breathing room).
+            AddFull(MakeSection("BALLOONS"), 26);
             AddFull(MakeHint(
                 "Find speech balloons and set green boxes around them. " +
                 "Used when Comic Book mode is on."),
-                36);
+                40);
 
             // 0) Comic Book POI alternate path
-            AddFull(MakeSection("0 · GUIDE BOXES"), 20);
+            AddFull(MakeSection("0 · GUIDE BOXES"), 28);
             _chkPoiMarkers = new CheckBox
             {
                 Text = "Guide boxes (turns on Comic Book)",
@@ -235,7 +237,7 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "Draws green boxes on the page so you can check and edit them. " +
                 "Turns on Comic Book mode. How text is read depends on “One balloon at a time” below."),
-                48);
+                52);
 
             _chkPoiFogOutside = new CheckBox
             {
@@ -258,7 +260,7 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "Grays out everything outside the boxes so you can see what counts as speech. " +
                 "Does not change how each balloon is read when “One balloon at a time” is on."),
-                44);
+                52);
 
             _chkPoiAutoStack = new CheckBox
             {
@@ -278,14 +280,15 @@ namespace SpeakRect
                 ApplyControlsEnabled();
             };
             AddFull(_chkPoiAutoStack, 28);
+            // 3–4 wrapped lines + gap before §1 header.
             AddFull(MakeHint(
                 "On (recommended): each green box is read separately. " +
                 "The preview stays the full page so you can edit boxes. " +
                 "Off: several balloons are read as separate crops; a single box uses the full page."),
-                52);
+                64);
 
             // 1) Detect fog
-            AddFull(MakeSection("1 · FIND BOXES"), 20);
+            AddFull(MakeSection("1 · FIND BOXES"), 28);
             _chkFog = new CheckBox
             {
                 Text = "Soften art when finding balloons",
@@ -303,18 +306,18 @@ namespace SpeakRect
             };
             AddFull(_chkFog, 28);
 
-
             _trkFogAmount = MakeTrack(0, 100, 35);
             _lblFogAmount = MakeLabel("Softness");
             _lblFogAmountVal = MakeValueLabel();
             AddRow(_lblFogAmount, WrapTrack(_trkFogAmount, _lblFogAmountVal), 42);
+            // 2 wrapped lines + gap before §2 header.
             AddFull(MakeHint(
                 "Higher softens the picture so lettering stands out when boxes are found. " +
                 "Speech still uses a clear image."),
-                40);
+                48);
 
             // 2) Box pad
-            AddFull(MakeSection("2 · BOX SIZE"), 20);
+            AddFull(MakeSection("2 · BOX SIZE"), 28);
             _trkInflateX = MakeTrack(0, 80, 22);
             _lblInflateXVal = MakeValueLabel();
             AddRow(MakeLabel("Wider"), WrapTrack(_trkInflateX, _lblInflateXVal), 42);
@@ -324,14 +327,14 @@ namespace SpeakRect
             _trkPadding = MakeTrack(0, 64, 16);
             _lblPaddingVal = MakeValueLabel();
             AddRow(MakeLabel("Extra margin"), WrapTrack(_trkPadding, _lblPaddingVal), 42);
-            // Extra row height leaves a clear gap before merge section.
+            // 2 wrapped lines + gap before merge section.
             AddFull(MakeHint(
                 "How much the green boxes grow around the text. " +
                 "They stop short of neighboring balloons."),
-                40);
+                48);
 
             // 3) Merge overlapping (default on)
-            AddFull(MakeSection("3 · OVERLAPPING BOXES"), 20);
+            AddFull(MakeSection("3 · OVERLAPPING BOXES"), 28);
             _chkMergeOverlap = new CheckBox
             {
                 Text = "Join boxes that overlap",
@@ -346,7 +349,7 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "On: overlapping boxes become one. " +
                 "Off: they are nudged apart instead."),
-                40);
+                48);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -1043,7 +1046,7 @@ namespace SpeakRect
             _trkFogAmount.Enabled = fogSliderOn;
             _lblFogAmount.Enabled = fogSliderOn;
             _lblFogAmountVal.Enabled = fogSliderOn;
-            _lblFogAmount.Text = "Fog strength";
+            _lblFogAmount.Text = "Softness";
             _trkInflateX.Enabled = ready;
             _trkInflateY.Enabled = ready;
             // Crop pad sizes islands for POI (green boxes + outside fog).
@@ -1419,7 +1422,7 @@ namespace SpeakRect
             _lblFogAmount.Enabled = fogOn;
             _lblFogAmountVal.Enabled = fogOn;
             _trkFogAmount.TabStop = fogOn;
-            _lblFogAmount.Text = "Fog strength";
+            _lblFogAmount.Text = "Softness";
         }
 
         private void ResetDefaults()
@@ -2038,7 +2041,9 @@ namespace SpeakRect
             Dock = DockStyle.Fill,
             ForeColor = UiTheme.FgHeader,
             Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleLeft,
+            // Top pad so the bold header sits below the previous hint (row is taller).
+            TextAlign = ContentAlignment.BottomLeft,
+            Padding = new Padding(0, 0, 0, 2),
         };
 
         private static Label MakeLabel(string text) => new()
