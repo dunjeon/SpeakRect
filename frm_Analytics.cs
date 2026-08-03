@@ -743,8 +743,8 @@ namespace SpeakRect
             sb.Append(@"\b0\cf1\par\par ");
             sb.Append(RtfEscape(
                 "After you speak a region (Enter on the overlay, a region hotkey, or Follow), " +
-                "this tab shows the spoken text, pipeline images (capture, prep, region boxes, " +
-                "and crops), and step timings."));
+                "this tab shows the spoken text, pipeline images (capture, OCR prep, detect fog, " +
+                "box map, and Local-LLM island/crop frames), and step timings."));
             sb.Append(@"\par\par\cf6 ");
             sb.Append(RtfEscape(
                 "Tip: press Refresh (or F5) after a speak if this window was already open. " +

@@ -1457,22 +1457,10 @@ namespace SpeakRect
                 Bitmap? upscaleOwned = prepStages.Upscale;
                 Bitmap? grayOwned = prepStages.Gray;
                 pipeTimer.Mark("image-prep", sw);
-                // Same Analytics stage keys as live CaptureAndRecognizeAsync.
-                CaptureAnalyticsImage("capture", "Capture", rawSnap);
-                if (letterboxOwned.Width != rawSnap.Width ||
-                    letterboxOwned.Height != rawSnap.Height)
-                {
-                    CaptureAnalyticsImage("letterbox", "Letterbox", letterboxOwned);
-                }
-                if (upscaleOwned != null &&
-                    (upscaleOwned.Width != letterboxOwned.Width ||
-                     upscaleOwned.Height != letterboxOwned.Height))
-                {
-                    CaptureAnalyticsImage("upscale", "Upscale", upscaleOwned);
-                }
-                if (grayOwned != null)
-                    CaptureAnalyticsImage("gray", "Ink gray", grayOwned);
-                CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", toneOwned);
+                // Analytics thumbs: capture → letterbox (if changed) → final tone only.
+                // Skip upscale/gray intermediates (same frame, easy to confuse).
+                CapturePrepAnalyticsImages(
+                    rawSnap, letterboxOwned, toneOwned);
 
                 token.ThrowIfCancellationRequested();
 
@@ -2241,18 +2229,10 @@ namespace SpeakRect
                         sw);
 
                     sw.Restart();
-                    // Analytics: one slot per real stage (no clones of the same pixels).
-                    CaptureAnalyticsImage("capture", "Capture", rawSnap);
-                    if (letterboxOwned.Width != rawSnap.Width ||
-                        letterboxOwned.Height != rawSnap.Height)
-                    {
-                        CaptureAnalyticsImage("letterbox", "Letterbox", letterboxOwned);
-                    }
-                    if (upscaleOwned != null)
-                        CaptureAnalyticsImage("upscale", "Upscale", upscaleOwned);
-                    if (grayOwned != null)
-                        CaptureAnalyticsImage("gray", "Ink gray", grayOwned);
-                    CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", ocrImage);
+                    // Analytics thumbs: capture → letterbox (if changed) → tone → detect fog.
+                    // Skip upscale/gray (same framing as tone; thumbs look identical).
+                    CapturePrepAnalyticsImages(
+                        rawSnap, letterboxOwned, ocrImage);
                     if (!ReferenceEquals(detectImage, ocrImage))
                         CaptureAnalyticsImage("detect", "Detect (fog)", detectImage);
 
@@ -3556,9 +3536,17 @@ namespace SpeakRect
                     toneImage, boxes, detail, fogOutside: fogOutside);
                 pipeTimer.Mark(
                     fogOutside ? "poi-outside-fog+boxes" : "poi-green-boxes", sw);
+                // Edit map only — not VL when island canvases are on.
+                // Prefer this over the "regions" WinOCR overlay (same boxes, less useful).
                 CaptureAnalyticsImage(
                     "poi_guide",
-                    fogOutside ? "POI boxes + outside fog (tone)" : "POI green boxes (tone)",
+                    poiAutoStack
+                        ? (fogOutside
+                            ? "POI edit map (boxes + outside fog; not VL)"
+                            : "POI edit map (green boxes; not VL)")
+                        : (fogOutside
+                            ? "POI guide + outside fog (tone)"
+                            : "POI green boxes (tone)"),
                     guideBmp);
                 // isVlInput only if we will NOT replace with stack (stack overwrites send files).
                 SavePoiVlDebug(guideBmp, isVlInput: !poiAutoStack && boxes.Count == 1);
@@ -3611,12 +3599,10 @@ namespace SpeakRect
                                     continue;
                                 }
 
-                                string slotKey = i == 0
-                                    ? "llm_island_stack"
-                                    : $"llm_island_{i + 1}";
+                                // One slot per island (not "stack" — multi-strip stack is gone).
                                 CaptureAnalyticsImage(
-                                    slotKey,
-                                    $"Local-LLM island canvas {i + 1}/{boxes.Count} " +
+                                    $"llm_island_{i + 1}",
+                                    $"Local-LLM island {i + 1}/{boxes.Count} " +
                                     $"{islandCanvas.Width}x{islandCanvas.Height} " +
                                     $"(margin={margin}" +
                                     (sendCap > 0 ? $"; then ≤{sendCap}" : "") + ")",
@@ -4056,18 +4042,9 @@ namespace SpeakRect
                 Debug.WriteLine(
                     $"[OCR] ComicBook OFF prep {koboldSource.Width}x{koboldSource.Height} → Kobold");
 
-                // Analytics: snap → letterbox → upscale → gray → tone (Kobold input).
-                CaptureAnalyticsImage("capture", "Capture", rawSnap);
-                if (letterboxOwned.Width != rawSnap.Width ||
-                    letterboxOwned.Height != rawSnap.Height)
-                {
-                    CaptureAnalyticsImage("letterbox", "Letterbox", letterboxOwned);
-                }
-                if (upscaleOwned != null)
-                    CaptureAnalyticsImage("upscale", "Upscale", upscaleOwned);
-                if (grayOwned != null)
-                    CaptureAnalyticsImage("gray", "Ink gray", grayOwned);
-                CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", koboldSource);
+                // Analytics thumbs: capture → letterbox (if changed) → final tone only.
+                CapturePrepAnalyticsImages(
+                    rawSnap, letterboxOwned, koboldSource);
 
                 if (ActiveAnyDebugArtifacts)
                 {
@@ -8460,6 +8437,43 @@ namespace SpeakRect
         /// Gallery UI thumbs are display-only; stored PNGs stay stage-native.
         /// Optionally replaces an existing entry with the same key.
         /// </summary>
+        /// <summary>
+        /// Capture → optional letterbox → final OCR prep/tone only (no upscale/gray thumbs).
+        /// </summary>
+        private void CapturePrepAnalyticsImages(
+            Bitmap rawSnap,
+            Bitmap letterbox,
+            Bitmap ocrTone)
+        {
+            CaptureAnalyticsImage("capture", "Capture", rawSnap);
+            if (letterbox != null &&
+                (letterbox.Width != rawSnap.Width || letterbox.Height != rawSnap.Height))
+            {
+                CaptureAnalyticsImage("letterbox", "Letterbox", letterbox);
+            }
+            CaptureAnalyticsImage("ocr_prep", "OCR prep / tone", ocrTone);
+        }
+
+        /// <summary>
+        /// True when Analytics already has per-island / crop VL frames so a generic
+        /// <c>llm_send</c> thumb would only confuse (and overwrite with the last call).
+        /// </summary>
+        private bool HasSpecializedVlAnalyticsFrames()
+        {
+            if (_runImages == null || _runImages.Count == 0)
+                return false;
+            foreach (var img in _runImages)
+            {
+                string k = img.Key ?? "";
+                if (k.StartsWith("llm_island", StringComparison.OrdinalIgnoreCase) ||
+                    k.StartsWith("region_", StringComparison.OrdinalIgnoreCase) ||
+                    k.StartsWith("wide_half", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(k, "crop_stack", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
         private void CaptureAnalyticsImage(string key, string title, Bitmap? source)
         {
             if (source == null || _runImages == null)
@@ -8867,11 +8881,15 @@ namespace SpeakRect
                     regions, capture.Width, capture.Height, pad);
 
                 using var overlay = BuildRegionsOverlayBitmap(capture, boxes);
-                // WinOCR detect view only — not Local-LLM VL input (see poi_guide / llm_island_*).
-                CaptureAnalyticsImage(
-                    "regions",
-                    "WinOCR detect boxes (fog when on; not VL input)",
-                    overlay);
+                // POI path publishes poi_guide instead (same boxes on tone; less confusing).
+                // Non-POI: show WinOCR detect overlay so the user sees balloon boxes.
+                if (!SpeakRunSettings.GetComicPoiMarkers())
+                {
+                    CaptureAnalyticsImage(
+                        "regions",
+                        "WinOCR detect boxes (fog when on; not VL input)",
+                        overlay);
+                }
                 if (ActiveHeavyDebugImages)
                 {
                     EnsureDebugFolder();
@@ -9465,16 +9483,21 @@ namespace SpeakRect
                         $"{send.Width}x{send.Height} (max long-edge {maxEdge})");
                 }
 
-                // Analytics + debug: exact pixels Local-LLM receives (not pre-scale tone).
+                // Analytics: only when send pixels differ from already-published frames.
+                // Skip when downscale is off (clone of ocr_prep) or when island/crop
+                // thumbs already show the real VL inputs (llm_island_*, region_*, …).
                 string scaleNote = didScale
                     ? $" (from {bmp.Width}x{bmp.Height})"
                     : (maxEdge > 0 ? "" : " (downscale off)");
                 try
                 {
-                    CaptureAnalyticsImage(
-                        "llm_send",
-                        $"Local-LLM send {send.Width}x{send.Height}{scaleNote}",
-                        send);
+                    if (didScale || !HasSpecializedVlAnalyticsFrames())
+                    {
+                        CaptureAnalyticsImage(
+                            "llm_send",
+                            $"Local-LLM send {send.Width}x{send.Height}{scaleNote}",
+                            send);
+                    }
                 }
                 catch { /* ignore */ }
 
