@@ -836,32 +836,65 @@ namespace SpeakRect
         {
             if (_listNames.SelectedItems.Count == 0)
             {
-                SetStatus("Select a name rule to delete.", bad: true);
+                SetStatus("Select name rule(s) to delete.", bad: true);
                 return;
             }
-            int idx = _listNames.SelectedIndices[0];
-            _listNames.Items.RemoveAt(idx);
+
+            // Snapshot indices descending so removals don't shift remaining indices.
+            var indices = _listNames.SelectedIndices.Cast<int>()
+                .OrderByDescending(i => i)
+                .ToList();
+            int count = indices.Count;
+            if (count > 1)
+            {
+                var dr = UiMessageBox.Show(GetModalOwner(),
+                    $"Delete {count} name rules from this profile?",
+                    "Delete name rules",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (dr != DialogResult.Yes)
+                    return;
+            }
+            int focusAfter = indices[^1]; // lowest original index (last in desc list)
+            foreach (int idx in indices)
+                _listNames.Items.RemoveAt(idx);
+
             if (_listNames.Items.Count > 0)
             {
-                int next = Math.Min(idx, _listNames.Items.Count - 1);
+                int next = Math.Min(focusAfter, _listNames.Items.Count - 1);
                 _listNames.Items[next].Selected = true;
+                _listNames.Items[next].EnsureVisible();
             }
-            MarkChanged();
+            MarkChanged(count == 1
+                ? "Name rule deleted · saved."
+                : $"{count} name rules deleted · saved.");
         }
 
         private void ToggleNameSelected()
         {
             if (_listNames.SelectedItems.Count == 0)
             {
-                SetStatus("Select a name rule to toggle.", bad: true);
+                SetStatus("Select name rule(s) to toggle.", bad: true);
                 return;
             }
-            var item = _listNames.SelectedItems[0];
-            if (item.Tag is not SpeechRule r)
+
+            int on = 0, off = 0;
+            // Copy selection — SelectedItems mutates if we clear/rebuild later.
+            var items = _listNames.SelectedItems.Cast<ListViewItem>().ToList();
+            foreach (var item in items)
+            {
+                if (item.Tag is not SpeechRule r)
+                    continue;
+                r.Enabled = !r.Enabled;
+                RefreshNameItem(item, r);
+                if (r.Enabled) on++;
+                else off++;
+            }
+            if (on + off == 0)
                 return;
-            r.Enabled = !r.Enabled;
-            RefreshNameItem(item, r);
-            MarkChanged();
+            string msg = on + off == 1
+                ? (on == 1 ? "Enabled · saved." : "Disabled · saved.")
+                : $"Toggled {on + off} name rules ({on} on, {off} off) · saved.";
+            MarkChanged(msg);
         }
 
         private void MoveNameSelected(int delta)
@@ -952,9 +985,26 @@ namespace SpeakRect
 
         private SpeechTextRule? SelectedTextRule()
         {
-            if (_listText.SelectedItems.Count == 0)
-                return null;
-            return _listText.SelectedItems[0].Tag as SpeechTextRule;
+            foreach (ListViewItem item in _listText.SelectedItems)
+            {
+                if (item.Tag is SpeechTextRule r)
+                    return r;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// All selected text rules (skips stage header rows). Stable order = list order.
+        /// </summary>
+        private List<SpeechTextRule> SelectedTextRules()
+        {
+            var list = new List<SpeechTextRule>();
+            foreach (ListViewItem item in _listText.SelectedItems)
+            {
+                if (item.Tag is SpeechTextRule r)
+                    list.Add(r);
+            }
+            return list;
         }
 
         private void AddTextRule()
@@ -998,40 +1048,88 @@ namespace SpeakRect
 
         private void DeleteTextSelected()
         {
-            if (SelectedTextRule() is not SpeechTextRule r)
+            var selected = SelectedTextRules();
+            if (selected.Count == 0)
             {
-                SetStatus("Select a text rule to delete.", bad: true);
+                SetStatus(
+                    IsStageHeader(_listText.SelectedItems.Count > 0 ? _listText.SelectedItems[0] : null)
+                        ? "That row is a stage label — select rule(s) under it."
+                        : "Select text rule(s) to delete.",
+                    bad: true);
                 return;
             }
-            if (r.IsBuiltIn)
+
+            int builtInCount = selected.Count(r => r.IsBuiltIn);
+            if (builtInCount > 0)
             {
-                var dr = UiMessageBox.Show(GetModalOwner(),
-                    $"“{r.Name}” is a built-in rule.\n\n" +
-                    "Delete removes it from this profile. It stays gone across restarts " +
-                    "until you use Reset all (or Reset this on a restored copy).\n\nDelete anyway?",
-                    "Delete built-in text rule",
+                string body = selected.Count == 1
+                    ? $"“{selected[0].Name}” is a built-in rule.\n\n" +
+                      "Delete removes it from this profile. It stays gone across restarts " +
+                      "until you use Reset all (or Reset this on a restored copy).\n\nDelete anyway?"
+                    : $"Delete {selected.Count} text rule(s)?\n\n" +
+                      $"{builtInCount} are built-in — they stay gone across restarts until " +
+                      "you use Reset all (or Reset one on a restored copy).\n\nDelete anyway?";
+                var dr = UiMessageBox.Show(GetModalOwner(), body,
+                    selected.Count == 1 ? "Delete built-in text rule" : "Delete text rules",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (dr != DialogResult.Yes)
                     return;
             }
+            else if (selected.Count > 1)
+            {
+                var dr = UiMessageBox.Show(GetModalOwner(),
+                    $"Delete {selected.Count} text rules from this profile?",
+                    "Delete text rules",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (dr != DialogResult.Yes)
+                    return;
+            }
+
             SyncTextRulesFromListViewTags();
-            _textRules.RemoveAll(x => x.Id.Equals(r.Id, StringComparison.OrdinalIgnoreCase));
+            var ids = new HashSet<string>(
+                selected.Select(r => r.Id),
+                StringComparer.OrdinalIgnoreCase);
+            _textRules.RemoveAll(x => ids.Contains(x.Id));
             RebuildTextListView();
-            MarkChanged("Text rule deleted · saved.");
+            MarkChanged(selected.Count == 1
+                ? "Text rule deleted · saved."
+                : $"{selected.Count} text rules deleted · saved.");
         }
 
         private void ToggleTextSelected()
         {
-            if (SelectedTextRule() is not SpeechTextRule r)
+            var selected = SelectedTextRules();
+            if (selected.Count == 0)
             {
-                SetStatus("Select a text rule to toggle.", bad: true);
+                SetStatus(
+                    IsStageHeader(_listText.SelectedItems.Count > 0 ? _listText.SelectedItems[0] : null)
+                        ? "That row is a stage label — select rule(s) under it."
+                        : "Select text rule(s) to toggle.",
+                    bad: true);
                 return;
             }
-            r.Enabled = !r.Enabled;
+
             SyncTextRulesFromListViewTags();
+            int on = 0, off = 0;
+            var ids = new List<string>(selected.Count);
+            foreach (var sel in selected)
+            {
+                int idx = _textRules.FindIndex(r =>
+                    r.Id.Equals(sel.Id, StringComparison.OrdinalIgnoreCase));
+                if (idx < 0)
+                    continue;
+                var r = _textRules[idx];
+                r.Enabled = !r.Enabled;
+                if (r.Enabled) on++;
+                else off++;
+                ids.Add(r.Id);
+            }
             RebuildTextListView();
-            SelectTextRuleById(r.Id);
-            MarkChanged(r.Enabled ? "Enabled · saved." : "Disabled · saved.");
+            SelectTextRulesByIds(ids);
+            string msg = on + off == 1
+                ? (on == 1 ? "Enabled · saved." : "Disabled · saved.")
+                : $"Toggled {on + off} text rules ({on} on, {off} off) · saved.";
+            MarkChanged(msg);
         }
 
         private void MoveTextSelected(int delta)
@@ -1128,18 +1226,28 @@ namespace SpeakRect
             SetStatus($"Reset {AppSettings.Current.SpeechTextRules.Count} text rules to defaults.");
         }
 
-        private void SelectTextRuleById(string id)
+        private void SelectTextRuleById(string id) =>
+            SelectTextRulesByIds(new[] { id });
+
+        private void SelectTextRulesByIds(IEnumerable<string> ids)
         {
+            var want = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            if (want.Count == 0)
+                return;
+
+            _listText.SelectedItems.Clear();
+            ListViewItem? first = null;
             foreach (ListViewItem item in _listText.Items)
             {
-                if (item.Tag is SpeechTextRule r &&
-                    r.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                if (item.Tag is SpeechTextRule r && want.Contains(r.Id))
                 {
                     item.Selected = true;
-                    item.EnsureVisible();
-                    break;
+                    first ??= item;
                 }
             }
+            first?.EnsureVisible();
+            if (first != null)
+                _listText.FocusedItem = first;
         }
 
         private void TextRules_KeyDown(object? sender, KeyEventArgs e)
@@ -1346,7 +1454,8 @@ namespace SpeakRect
                 Dock = DockStyle.Fill,
                 View = View.Details,
                 FullRowSelect = true,
-                MultiSelect = false,
+                // Shift/Ctrl multi-select for bulk Delete and On/Off (Names + Text rules).
+                MultiSelect = true,
                 HideSelection = false,
                 HeaderStyle = ColumnHeaderStyle.Nonclickable,
                 Font = new Font("Segoe UI", 9f),

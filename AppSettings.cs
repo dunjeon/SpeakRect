@@ -74,7 +74,8 @@ namespace SpeakRect
         /// (Default, Comic full-frame, crops, POI, recovery retries).
         /// </summary>
         public const string DefaultOcrPrompt =
-            "As an OCR, Extract all english text. Do not export html or markdown.";
+            "As an OCR, Extract all english text. " +
+            "Output plain text only — do not format as JSON, HTML, or markdown.";
 
         /// <summary>
         /// <b>OFF</b> (product default = Default mode): shared Image prep → one full-frame OCR.
@@ -2478,6 +2479,8 @@ namespace SpeakRect
             "Extract all text. Include SFX (BRAP! CRASH!). Do not stop after SFX.",
             "As an OCR, Extract all english text.",
             "As an OCR, Extract all english text. Correct the spelling of common english words.",
+            // Pre-JSON wording (html/markdown only)
+            "As an OCR, Extract all english text. Do not export html or markdown.",
             "OCR:",
             "OCR all text including SFX. Do not stop after the first word.",
             "OCR all text including SFX. Do not stop after the first word. " +
