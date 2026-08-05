@@ -337,6 +337,40 @@ public class ComicPoiGuideTests
     }
 
     [Fact]
+    public void Wide_ribbon_edge_touch_neighbor_must_not_swallow()
+    {
+        // debug_images 2026-08-05 Titania page (merge-overlap OFF):
+        // island1 824×207 @12,45 touches island2 798×404 @102,252 (seam at y=252).
+        // Bug: gap-inflate made "clearly below" fail; RecoverMinSize re-grew to
+        // minH=480 @y=0 and VL double-spoke Titania text.
+        var top = new Rectangle(12, 45, 824, 207);     // bottom 252
+        var lower = new Rectangle(102, 252, 798, 404); // top 252 (edge touch)
+        var grown = ComicPoiGuide.ExpandIslandCropToMinSize(
+            top, frameW: 900, frameH: 851,
+            minWidth: 0,
+            minHeight: ComicPoiGuide.IslandStripMinHeight,
+            avoidIslands: new[] { top, lower });
+
+        Assert.True(grown.Contains(top) ||
+            (grown.Left <= top.Left && grown.Right >= top.Right &&
+             grown.Top <= top.Top && grown.Bottom >= top.Bottom),
+            $"must contain top; grown={grown}");
+        Assert.True(
+            grown.Bottom <= lower.Top,
+            $"must not enter lower island; grown.Bottom={grown.Bottom} lower.Top={lower.Top}");
+        // Prefer stopping short by the gap when room exists.
+        Assert.True(
+            grown.Bottom <= lower.Top - ComicPoiGuide.IslandExpandNeighborGapPx + 1 ||
+            grown.Bottom <= lower.Top,
+            $"prefer gap before lower; grown={grown}");
+        // Must not claim full minH by eating the next balloon.
+        Assert.True(
+            grown.Height < ComicPoiGuide.IslandStripMinHeight ||
+            grown.Bottom <= lower.Top,
+            $"full minH only if still clear of lower; grown H={grown.Height}");
+    }
+
+    [Fact]
     public void Wide_ribbon_expands_up_when_low_in_frame()
     {
         // Near frame bottom: no room down — full minH must come from above.

@@ -165,6 +165,9 @@ namespace SpeakRect
                 return tight;
 
             // Free band that may host the crop (must still contain tight).
+            // Classify neighbors from the raw box (not gap-inflated): gap inflate
+            // crosses the seam when islands touch, which used to skip limitB and
+            // let RecoverMinSize re-grow into the next balloon (double-speak).
             int limitL = 0;
             int limitT = 0;
             int limitR = frameW;
@@ -178,28 +181,13 @@ namespace SpeakRect
                     var n = Rectangle.Intersect(raw, frame);
                     if (n.Width < 1 || n.Height < 1)
                         continue;
-                    if (n.Equals(tight) ||
-                        (Math.Abs(n.X - tight.X) <= 1 &&
-                         Math.Abs(n.Y - tight.Y) <= 1 &&
-                         Math.Abs(n.Width - tight.Width) <= 2 &&
-                         Math.Abs(n.Height - tight.Height) <= 2))
+                    if (IsSameIslandBox(n, tight))
                         continue;
 
-                    var blocked = Rectangle.Inflate(n, neighborGapPx, neighborGapPx);
-                    blocked.Intersect(frame);
-                    if (blocked.Width < 1 || blocked.Height < 1)
-                        continue;
-
-                    // Neighbor clearly below / above / right / left of tight core.
-                    if (blocked.Top >= tight.Bottom - 1)
-                        limitB = Math.Min(limitB, Math.Max(tight.Bottom, blocked.Top));
-                    else if (blocked.Bottom <= tight.Top + 1)
-                        limitT = Math.Max(limitT, Math.Min(tight.Top, blocked.Bottom));
-
-                    if (blocked.Left >= tight.Right - 1)
-                        limitR = Math.Min(limitR, Math.Max(tight.Right, blocked.Left));
-                    else if (blocked.Right <= tight.Left + 1)
-                        limitL = Math.Max(limitL, Math.Min(tight.Left, blocked.Right));
+                    // Stop edge includes gap; classification uses raw n.
+                    ApplyNeighborFreeBandLimit(
+                        tight, n, neighborGapPx,
+                        ref limitL, ref limitT, ref limitR, ref limitB);
                 }
             }
 
@@ -247,13 +235,121 @@ namespace SpeakRect
                 expanded = ClampCropAwayFromNeighbors(
                     tight, expanded, avoidIslands, frameW, frameH, neighborGapPx);
                 // After clamp, reclaim free room on the opposite side if min size
-                // was cut (e.g. bottom blocked → grow further up).
+                // was cut (e.g. bottom blocked → grow further up). Free-band limits
+                // already exclude neighbor+gap so recover cannot re-enter them.
                 expanded = RecoverMinSizeInFreeBand(
                     tight, expanded, needW, needH,
                     limitL, limitT, limitR, limitB, frameW, frameH);
+                // Belt-and-suspenders: recover must never undo the neighbor clamp.
+                expanded = ClampCropAwayFromNeighbors(
+                    tight, expanded, avoidIslands, frameW, frameH, neighborGapPx);
             }
 
             return expanded;
+        }
+
+        /// <summary>
+        /// Near-identical box check used when skipping self in avoid lists.
+        /// </summary>
+        private static bool IsSameIslandBox(Rectangle a, Rectangle b) =>
+            a.Equals(b) ||
+            (Math.Abs(a.X - b.X) <= 1 &&
+             Math.Abs(a.Y - b.Y) <= 1 &&
+             Math.Abs(a.Width - b.Width) <= 2 &&
+             Math.Abs(a.Height - b.Height) <= 2);
+
+        /// <summary>
+        /// Tighten free-band limits so the crop stays outside <paramref name="n"/>
+        /// (plus gap). Uses the raw neighbor for above/below/left/right — not a
+        /// gap-inflated rect — so edge-touching islands still block expansion.
+        /// </summary>
+        private static void ApplyNeighborFreeBandLimit(
+            Rectangle tight,
+            Rectangle n,
+            int gapPx,
+            ref int limitL,
+            ref int limitT,
+            ref int limitR,
+            ref int limitB)
+        {
+            gapPx = Math.Max(0, gapPx);
+            double acx = tight.Left + tight.Width / 2.0;
+            double acy = tight.Top + tight.Height / 2.0;
+            double ocx = n.Left + n.Width / 2.0;
+            double ocy = n.Top + n.Height / 2.0;
+            double dx = Math.Abs(acx - ocx);
+            double dy = Math.Abs(acy - ocy);
+
+            // X / Y overlap of the cores (or nearly so) — stacked / side-by-side.
+            bool xNear = tight.Left < n.Right && tight.Right > n.Left;
+            bool yNear = tight.Top < n.Bottom && tight.Bottom > n.Top;
+            // Also treat near-miss (within gap) as near so pad/minH stops short.
+            bool xNearGap = tight.Left - gapPx < n.Right && tight.Right + gapPx > n.Left;
+            bool yNearGap = tight.Top - gapPx < n.Bottom && tight.Bottom + gapPx > n.Top;
+
+            bool primarilyStacked = dy >= dx * 0.75;
+            bool primarilySideBySide = dx > dy * 0.75 && !primarilyStacked;
+
+            // Vertical: neighbor at/below or at/above tight (including touch).
+            if (xNearGap && (primarilyStacked || (!primarilySideBySide && dy > 0)))
+            {
+                if (n.Top >= tight.Bottom - 1 ||
+                    (ocy > acy && n.Top >= tight.Top + Math.Max(1, tight.Height / 3)))
+                {
+                    // Stop at neighbor top minus gap; never above tight.Bottom.
+                    int stop = n.Top - gapPx;
+                    limitB = Math.Min(limitB, Math.Max(tight.Bottom, stop));
+                }
+                else if (n.Bottom <= tight.Top + 1 ||
+                         (ocy < acy && n.Bottom <= tight.Bottom - Math.Max(1, tight.Height / 3)))
+                {
+                    int stop = n.Bottom + gapPx;
+                    limitT = Math.Max(limitT, Math.Min(tight.Top, stop));
+                }
+            }
+
+            // Horizontal: neighbor at/right or at/left of tight.
+            if (yNearGap && primarilySideBySide)
+            {
+                if (n.Left >= tight.Right - 1 ||
+                    (ocx > acx && n.Left >= tight.Left + Math.Max(1, tight.Width / 3)))
+                {
+                    int stop = n.Left - gapPx;
+                    limitR = Math.Min(limitR, Math.Max(tight.Right, stop));
+                }
+                else if (n.Right <= tight.Left + 1 ||
+                         (ocx < acx && n.Right <= tight.Right - Math.Max(1, tight.Width / 3)))
+                {
+                    int stop = n.Right + gapPx;
+                    limitL = Math.Max(limitL, Math.Min(tight.Left, stop));
+                }
+            }
+
+            // Already-overlapping cores (merge-off residual): still fence the free band
+            // to the midline so minH cannot swallow the other island's text.
+            if (xNear && yNear)
+            {
+                if (ocy > acy)
+                {
+                    int mid = Math.Max(tight.Bottom, (tight.Bottom + n.Top) / 2);
+                    limitB = Math.Min(limitB, mid);
+                }
+                else if (ocy < acy)
+                {
+                    int mid = Math.Min(tight.Top, (n.Bottom + tight.Top) / 2);
+                    limitT = Math.Max(limitT, mid);
+                }
+                else if (ocx > acx)
+                {
+                    int mid = Math.Max(tight.Right, (tight.Right + n.Left) / 2);
+                    limitR = Math.Min(limitR, mid);
+                }
+                else if (ocx < acx)
+                {
+                    int mid = Math.Min(tight.Left, (n.Right + tight.Left) / 2);
+                    limitL = Math.Max(limitL, mid);
+                }
+            }
         }
 
         /// <summary>
@@ -328,6 +424,8 @@ namespace SpeakRect
         /// <summary>
         /// Shrink <paramref name="expanded"/> so it does not enter other island boxes
         /// (with gap), while always containing <paramref name="tight"/>.
+        /// Classification uses the raw neighbor; gap is applied at the stop edge so
+        /// edge-touching islands still clamp (gap-inflate must not hide the seam).
         /// </summary>
         public static Rectangle ClampCropAwayFromNeighbors(
             Rectangle tight,
@@ -353,30 +451,34 @@ namespace SpeakRect
                 if (n.Width < 1 || n.Height < 1)
                     continue;
                 // Skip self / near-identical to tight.
-                if (n.Equals(tight) ||
-                    (Math.Abs(n.X - tight.X) <= 1 &&
-                     Math.Abs(n.Y - tight.Y) <= 1 &&
-                     Math.Abs(n.Width - tight.Width) <= 2 &&
-                     Math.Abs(n.Height - tight.Height) <= 2))
+                if (IsSameIslandBox(n, tight))
                     continue;
 
+                // Forbidden zone = neighbor + gap (for intersection tests only).
                 var blocked = Rectangle.Inflate(n, gapPx, gapPx);
                 blocked.Intersect(frame);
                 if (blocked.Width < 1 || blocked.Height < 1)
                     continue;
-                if (!expanded.IntersectsWith(blocked))
+                if (!expanded.IntersectsWith(blocked) && !expanded.IntersectsWith(n))
                     continue;
 
-                // Vertical: neighbor clearly below / above the tight island.
-                if (blocked.Top >= tight.Bottom - 1)
+                double acy = tight.Top + tight.Height / 2.0;
+                double ocy = n.Top + n.Height / 2.0;
+                double acx = tight.Left + tight.Width / 2.0;
+                double ocx = n.Left + n.Width / 2.0;
+
+                // Vertical: raw neighbor at/below or at/above (including touch).
+                if (n.Top >= tight.Bottom - 1 ||
+                    (ocy > acy && n.Top >= tight.Top + Math.Max(1, tight.Height / 3)))
                 {
-                    int maxBottom = Math.Max(tight.Bottom, blocked.Top);
+                    int maxBottom = Math.Max(tight.Bottom, n.Top - gapPx);
                     if (expanded.Bottom > maxBottom)
                         expanded.Height = Math.Max(tight.Height, maxBottom - expanded.Top);
                 }
-                else if (blocked.Bottom <= tight.Top + 1)
+                else if (n.Bottom <= tight.Top + 1 ||
+                         (ocy < acy && n.Bottom <= tight.Bottom - Math.Max(1, tight.Height / 3)))
                 {
-                    int minTop = Math.Min(tight.Top, blocked.Bottom);
+                    int minTop = Math.Min(tight.Top, n.Bottom + gapPx);
                     if (expanded.Top < minTop)
                     {
                         int bottom = Math.Max(expanded.Bottom, tight.Bottom);
@@ -385,16 +487,18 @@ namespace SpeakRect
                     }
                 }
 
-                // Horizontal: neighbor clearly right / left of tight.
-                if (blocked.Left >= tight.Right - 1)
+                // Horizontal: raw neighbor at/right or at/left.
+                if (n.Left >= tight.Right - 1 ||
+                    (ocx > acx && n.Left >= tight.Left + Math.Max(1, tight.Width / 3)))
                 {
-                    int maxRight = Math.Max(tight.Right, blocked.Left);
+                    int maxRight = Math.Max(tight.Right, n.Left - gapPx);
                     if (expanded.Right > maxRight)
                         expanded.Width = Math.Max(tight.Width, maxRight - expanded.Left);
                 }
-                else if (blocked.Right <= tight.Left + 1)
+                else if (n.Right <= tight.Left + 1 ||
+                         (ocx < acx && n.Right <= tight.Right - Math.Max(1, tight.Width / 3)))
                 {
-                    int minLeft = Math.Min(tight.Left, blocked.Right);
+                    int minLeft = Math.Min(tight.Left, n.Right + gapPx);
                     if (expanded.Left < minLeft)
                     {
                         int right = Math.Max(expanded.Right, tight.Right);
@@ -403,22 +507,20 @@ namespace SpeakRect
                     }
                 }
 
-                // Still overlapping (diagonal / nested): back off to tight on that side
-                // by intersecting out the blocked region conservatively.
-                if (expanded.IntersectsWith(blocked))
+                // Still overlapping (diagonal / nested / residual merge-off): cut
+                // expanded margin using raw neighbor + gap, never the tight core.
+                if (expanded.IntersectsWith(blocked) || expanded.IntersectsWith(n))
                 {
-                    // Prefer cutting the expanded margin, never the tight core.
                     var core = tight;
-                    // If blocked is mostly below core, cut bottom of expanded.
-                    if (blocked.Top >= core.Top + core.Height / 2)
+                    if (n.Top >= core.Top + core.Height / 2 || ocy > acy)
                     {
-                        int maxBottom = Math.Max(core.Bottom, blocked.Top);
+                        int maxBottom = Math.Max(core.Bottom, n.Top - gapPx);
                         if (expanded.Bottom > maxBottom)
                             expanded.Height = Math.Max(core.Height, maxBottom - expanded.Top);
                     }
-                    else if (blocked.Bottom <= core.Top + core.Height / 2)
+                    else if (n.Bottom <= core.Top + core.Height / 2 || ocy < acy)
                     {
-                        int minTop = Math.Min(core.Top, blocked.Bottom);
+                        int minTop = Math.Min(core.Top, n.Bottom + gapPx);
                         if (expanded.Top < minTop)
                         {
                             int bottom = Math.Max(expanded.Bottom, core.Bottom);
