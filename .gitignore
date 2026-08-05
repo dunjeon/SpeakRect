@@ -50,3 +50,8 @@ project.lock.json
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+## Local maintainer todo lists (not product)
+todo.txt
+todo.txt.txt
+**/todo.txt
