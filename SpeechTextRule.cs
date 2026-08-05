@@ -31,11 +31,6 @@ namespace SpeakRect
     /// </summary>
     public sealed class SpeechTextRule
     {
-        public const int MaxRules = 128;
-        public const int MaxIdLength = 64;
-        public const int MaxNameLength = 80;
-        public const int MaxPatternLength = 512;
-        public const int MaxReplaceLength = 256;
         public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(80);
 
         /// <summary>Stable id for built-ins (<c>abbrev-mr</c>) or <c>custom-…</c>.</summary>
@@ -145,21 +140,14 @@ namespace SpeakRect
             error = null;
 
             string cleanId = SanitizeId(id);
-            string cleanName = CollapseOneLine(name, MaxNameLength);
+            string cleanName = CollapseOneLine(name);
             string cleanPat = (pattern ?? "").Trim();
             // Replacement may intentionally include spaces; do not collapse internals.
             string cleanRepl = (replace ?? "").Replace('\r', ' ').Replace('\n', ' ');
-            if (cleanRepl.Length > MaxReplaceLength)
-                cleanRepl = cleanRepl[..MaxReplaceLength];
 
             if (cleanId.Length == 0)
             {
                 error = "Rule id is empty.";
-                return false;
-            }
-            if (cleanId.Length > MaxIdLength)
-            {
-                error = $"Rule id is too long (max {MaxIdLength}).";
                 return false;
             }
             if (cleanName.Length == 0)
@@ -167,11 +155,6 @@ namespace SpeakRect
             if (cleanPat.Length == 0)
             {
                 error = "Regex pattern is empty.";
-                return false;
-            }
-            if (cleanPat.Length > MaxPatternLength)
-            {
-                error = $"Pattern is too long (max {MaxPatternLength} characters).";
                 return false;
             }
 
@@ -232,27 +215,23 @@ namespace SpeakRect
         {
             if (string.IsNullOrWhiteSpace(raw))
                 return "";
-            var chars = new char[Math.Min(raw.Length, MaxIdLength)];
-            int n = 0;
+            var sb = new System.Text.StringBuilder(raw.Length);
             foreach (char c in raw.Trim())
             {
-                if (n >= MaxIdLength)
-                    break;
                 if (char.IsLetterOrDigit(c) || c is '-' or '_')
-                    chars[n++] = char.ToLowerInvariant(c);
+                    sb.Append(char.ToLowerInvariant(c));
             }
-            return n == 0 ? "" : new string(chars, 0, n);
+            return sb.ToString();
         }
 
         public static string NewCustomId() =>
             "custom-" + Guid.NewGuid().ToString("N")[..10];
 
-        private static string CollapseOneLine(string? s, int maxLen)
+        private static string CollapseOneLine(string? s)
         {
             if (string.IsNullOrEmpty(s))
                 return "";
-            string t = Regex.Replace(s.Replace('\r', ' ').Replace('\n', ' ').Trim(), @"\s+", " ");
-            return t.Length <= maxLen ? t : t[..maxLen];
+            return Regex.Replace(s.Replace('\r', ' ').Replace('\n', ' ').Trim(), @"\s+", " ");
         }
     }
 
@@ -624,8 +603,6 @@ namespace SpeakRect
 
             foreach (var s in storedList)
             {
-                if (result.Count >= SpeechTextRule.MaxRules)
-                    break;
                 string id = SpeechTextRule.SanitizeId(s.Id);
                 if (id.Length == 0 || !seen.Add(id))
                     continue;

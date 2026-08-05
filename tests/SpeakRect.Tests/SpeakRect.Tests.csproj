@@ -22,4 +22,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SpeakRect.csproj" />
   </ItemGroup>
+  <!-- Name packs live next to AppDir (test output) so SpeechNamePacks.Discover finds them. -->
+  <ItemGroup>
+    <Content Include="..\..\NamePacks\**\*"
+             Link="NamePacks\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

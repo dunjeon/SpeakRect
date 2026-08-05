@@ -106,4 +106,183 @@ public class SpeechRulesAndPauseTests
         });
         Assert.DoesNotContain(merged, r => r.Id.Equals("noise-md-html", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Name_pack_discover_skips_readme_docs()
+    {
+        Assert.True(SpeechNamePacks.IsDocumentationFile("README.txt"));
+        Assert.True(SpeechNamePacks.IsDocumentationFile(@"C:\packs\readme.TXT"));
+        Assert.True(SpeechNamePacks.IsDocumentationFile("LICENSE.txt"));
+        Assert.False(SpeechNamePacks.IsDocumentationFile("x-men.txt"));
+        Assert.False(SpeechNamePacks.IsDocumentationFile("my-game.txt"));
+
+        // Live folder next to the test host may include README.txt + x-men.txt.
+        if (!Directory.Exists(SpeechNamePacks.PacksDir))
+            return;
+        var discovered = SpeechNamePacks.Discover();
+        Assert.DoesNotContain(discovered, p =>
+            Path.GetFileNameWithoutExtension(p.FilePath)
+                .Equals("README", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(discovered, p =>
+            p.DisplayName.Equals("README", StringComparison.OrdinalIgnoreCase) ||
+            p.DisplayName.Equals("Readme", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void XMen_name_pack_is_on_by_default_sorted_and_merges()
+    {
+        // Pack ships as NamePacks\x-men.txt next to the app (not embedded in the DLL).
+        Assert.True(
+            Directory.Exists(SpeechNamePacks.PacksDir) ||
+            File.Exists(Path.Combine(AppSettings.AppDir, "NamePacks", "x-men.txt")),
+            $"Expected NamePacks under AppDir: {AppSettings.AppDir}");
+
+        var discovered = SpeechNamePacks.Discover();
+        Assert.Contains(discovered, p =>
+            p.Id.Equals("x-men", StringComparison.OrdinalIgnoreCase));
+        // Docs are not packs; Discover is list-only (never auto-applies rules).
+        Assert.DoesNotContain(discovered, p =>
+            Path.GetFileNameWithoutExtension(p.FilePath)
+                .Equals("README", StringComparison.OrdinalIgnoreCase));
+        var xMenInfo = discovered.First(p =>
+            p.Id.Equals("x-men", StringComparison.OrdinalIgnoreCase));
+        Assert.True(xMenInfo.RuleCount > 100, $"Expected rule count on PackInfo, got {xMenInfo.RuleCount}");
+
+        var pack = SpeechNamePacks.Create("x-men");
+        Assert.NotEmpty(pack);
+        Assert.True(pack.Count > 100);
+        Assert.Equal(pack.Count, xMenInfo.RuleCount);
+        Assert.All(pack, r => Assert.True(r.Enabled));
+        // A–Z by Find for easy browsing.
+        for (int i = 1; i < pack.Count; i++)
+        {
+            Assert.True(
+                string.Compare(pack[i - 1].Match, pack[i].Match, StringComparison.OrdinalIgnoreCase) <= 0,
+                $"Expected A–Z: '{pack[i - 1].Match}' before '{pack[i].Match}'");
+        }
+        Assert.Contains(pack, r =>
+            r.Match.Equals("X-Men", StringComparison.OrdinalIgnoreCase) &&
+            r.Replace.Contains("Ex", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(pack, r =>
+            r.Match.Equals("Cyclops", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(pack, r =>
+            r.Match.Equals("Magneto", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(pack, r =>
+            r.Match.Equals("Jean Grey", StringComparison.OrdinalIgnoreCase));
+
+        var list = new System.Collections.Generic.List<SpeechRule>
+        {
+            new() { Match = "X-Men", Replace = "custom", Kind = SpeechMatchKind.Word, Enabled = true },
+        };
+        int added = SpeechNamePacks.MergeInto(list, "x-men", out int skipped);
+        Assert.True(added > 100);
+        Assert.True(skipped >= 1); // existing X-Men Find (and any pack self-collisions)
+        Assert.Contains(list, r =>
+            r.Match.Equals("X-Men", StringComparison.OrdinalIgnoreCase) &&
+            r.Replace.Equals("custom", StringComparison.Ordinal) &&
+            r.Enabled);
+        Assert.All(list, r => Assert.True(r.Enabled));
+        for (int i = 1; i < list.Count; i++)
+        {
+            Assert.True(
+                string.Compare(list[i - 1].Match, list[i].Match, StringComparison.OrdinalIgnoreCase) <= 0,
+                $"Merged list A–Z: '{list[i - 1].Match}' before '{list[i].Match}'");
+        }
+    }
+
+    [Fact]
+    public void Name_rules_longer_find_wins_despite_az_list_order()
+    {
+        // List is A–Z so "X-Men" appears before "X-Treme X-Men"; engine still
+        // prefers the longer Find.
+        var rules = new[]
+        {
+            new SpeechRule
+            {
+                Match = "X-Men",
+                Replace = "Ex-Men",
+                Kind = SpeechMatchKind.Word,
+                Enabled = true,
+            },
+            new SpeechRule
+            {
+                Match = "X-Treme X-Men",
+                Replace = "Ex-Treem Ex-Men",
+                Kind = SpeechMatchKind.Word,
+                Enabled = true,
+            },
+        };
+        Assert.Equal(
+            "the Ex-Treem Ex-Men",
+            SpeechRulesEngine.Apply("the x-treme x-men", rules));
+        Assert.Equal(
+            "the Ex-Men",
+            SpeechRulesEngine.Apply("the x-men", rules));
+    }
+
+    [Fact]
+    public void Name_rule_matches_any_case()
+    {
+        // Engine always IgnoreCase — pack Find "X-Men" hits x-men / X-MEN / X-Men.
+        var rules = new[]
+        {
+            new SpeechRule
+            {
+                Match = "X-Men",
+                Replace = "Ex-Men",
+                Kind = SpeechMatchKind.Word,
+                Enabled = true,
+            },
+        };
+        Assert.Equal(
+            "the Ex-Men win",
+            SpeechRulesEngine.Apply("the x-men win", rules));
+        Assert.Equal(
+            "the Ex-Men win",
+            SpeechRulesEngine.Apply("the X-MEN win", rules));
+        Assert.Equal(
+            "the Ex-Men win",
+            SpeechRulesEngine.Apply("the X-Men win", rules));
+    }
+
+    [Fact]
+    public void Custom_name_pack_file_parses_pipe_and_header()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "SpeakRectPackTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "my-pack.txt");
+        try
+        {
+            File.WriteAllText(path,
+                "Id=demo\nName=Demo Pack\nDescription=Test pack.\n\n" +
+                "Foo | Bar\n" +
+                "Baz\tQux\tPhrase\n" +
+                "; comment\n" +
+                "Hello = World\n",
+                System.Text.Encoding.UTF8);
+
+            var rules = SpeechNamePacks.LoadFile(path);
+            Assert.Equal(3, rules.Count);
+            Assert.All(rules, r => Assert.True(r.Enabled));
+            // A–Z: Baz, Foo, Hello
+            Assert.Equal("Baz", rules[0].Match);
+            Assert.Equal("Foo", rules[1].Match);
+            Assert.Equal("Hello", rules[2].Match);
+            Assert.Contains(rules, r =>
+                r.Match.Equals("Foo", StringComparison.Ordinal) &&
+                r.Replace.Equals("Bar", StringComparison.Ordinal) &&
+                r.Kind == SpeechMatchKind.Word);
+            Assert.Contains(rules, r =>
+                r.Match.Equals("Baz", StringComparison.Ordinal) &&
+                r.Replace.Equals("Qux", StringComparison.Ordinal) &&
+                r.Kind == SpeechMatchKind.Phrase);
+            Assert.Contains(rules, r =>
+                r.Match.Equals("Hello", StringComparison.Ordinal) &&
+                r.Replace.Equals("World", StringComparison.Ordinal));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* temp */ }
+        }
+    }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -251,7 +253,7 @@ namespace SpeakRect
             var header = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "NAMES — Find as on screen · leave Say as blank to skip speaking",
+                Text = "NAMES — Find as on screen · ▶ / Preview / Space = sample voice · blank Say as = skip",
                 ForeColor = UiTheme.FgHeader,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -260,12 +262,15 @@ namespace SpeakRect
             root.SetColumnSpan(header, 2);
 
             list = MakeListView();
+            // On | Find | Say as | ▶ | How(fill) — last column stretches (FitListViewLastColumn).
             list.Columns.Add("On", 40);
             list.Columns.Add("Find", 160);
             list.Columns.Add("Say as", 160);
+            list.Columns.Add("▶", 36);
             list.Columns.Add("How", 70);
             list.DoubleClick += (_, _) => EditNameSelected();
             list.KeyDown += Names_KeyDown;
+            list.MouseUp += Names_MouseUp;
             root.Controls.Add(list, 0, 1);
 
             var side = MakeSidePanel();
@@ -275,18 +280,24 @@ namespace SpeakRect
             btnToggle = MakeSideButton("On/Off");
             btnUp = MakeSideButton("Move up");
             btnDown = MakeSideButton("Move down");
+            var btnPreview = MakeSideButton("Preview");
+            var btnPack = MakeSideButton("Packs…");
             btnAdd.Click += (_, _) => AddNameRule();
             btnEdit.Click += (_, _) => EditNameSelected();
             btnDelete.Click += (_, _) => DeleteNameSelected();
             btnToggle.Click += (_, _) => ToggleNameSelected();
             btnUp.Click += (_, _) => MoveNameSelected(-1);
             btnDown.Click += (_, _) => MoveNameSelected(1);
+            btnPreview.Click += (_, _) => PreviewNameSelected();
+            btnPack.Click += (_, _) => ImportNamePack();
             side.Controls.Add(btnAdd);
             side.Controls.Add(btnEdit);
+            side.Controls.Add(btnPreview);
             side.Controls.Add(btnDelete);
             side.Controls.Add(btnToggle);
             side.Controls.Add(btnUp);
             side.Controls.Add(btnDown);
+            side.Controls.Add(btnPack);
             root.Controls.Add(side, 1, 1);
             tab.Controls.Add(root);
         }
@@ -769,11 +780,15 @@ namespace SpeakRect
         // Names list
         // =====================================================================
 
+        /// <summary>Column index of the inline ▶ preview control on the Names list.</summary>
+        private const int NameColPreview = 3;
+
         private static ListViewItem MakeNameItem(SpeechRule rule)
         {
             var item = new ListViewItem(rule.Enabled ? "✓" : "—");
             item.SubItems.Add(rule.Match);
             item.SubItems.Add(string.IsNullOrEmpty(rule.Replace) ? "(never speak)" : rule.Replace);
+            item.SubItems.Add(string.IsNullOrEmpty(rule.Replace) ? "·" : "▶");
             item.SubItems.Add(rule.Kind == SpeechMatchKind.Phrase ? "Anywhere" : "Word");
             item.Tag = rule;
             item.ForeColor = rule.Enabled ? UiTheme.Fg : UiTheme.FgDim;
@@ -785,7 +800,8 @@ namespace SpeakRect
             item.Text = rule.Enabled ? "✓" : "—";
             item.SubItems[1].Text = rule.Match;
             item.SubItems[2].Text = string.IsNullOrEmpty(rule.Replace) ? "(never speak)" : rule.Replace;
-            item.SubItems[3].Text = rule.Kind == SpeechMatchKind.Phrase ? "Anywhere" : "Word";
+            item.SubItems[3].Text = string.IsNullOrEmpty(rule.Replace) ? "·" : "▶";
+            item.SubItems[4].Text = rule.Kind == SpeechMatchKind.Phrase ? "Anywhere" : "Word";
             item.Tag = rule;
             item.ForeColor = rule.Enabled ? UiTheme.Fg : UiTheme.FgDim;
         }
@@ -803,11 +819,6 @@ namespace SpeakRect
 
         private void AddNameRule()
         {
-            if (_listNames.Items.Count >= SpeechRule.MaxRules)
-            {
-                SetStatus($"Maximum {SpeechRule.MaxRules} name rules.", bad: true);
-                return;
-            }
             if (!EditNameDialog.Show(GetModalOwner(), null, out SpeechRule? rule) || rule == null)
                 return;
             _listNames.Items.Add(MakeNameItem(rule));
@@ -918,6 +929,408 @@ namespace SpeakRect
             if (e.KeyCode == Keys.Delete) { e.Handled = true; DeleteNameSelected(); }
             else if (e.KeyCode == Keys.Enter) { e.Handled = true; EditNameSelected(); }
             else if (e.KeyCode == Keys.Insert) { e.Handled = true; AddNameRule(); }
+            else if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; PreviewNameSelected(); }
+        }
+
+        private void Names_MouseUp(object? sender, MouseEventArgs e)
+        {
+            var hit = _listNames.HitTest(e.Location);
+            if (hit.Item == null)
+                return;
+
+            if (e.Button == MouseButtons.Left)
+            {
+                int col = hit.SubItem != null
+                    ? hit.Item.SubItems.IndexOf(hit.SubItem)
+                    : -1;
+                if (col == NameColPreview)
+                    PreviewNameRule(hit.Item.Tag as SpeechRule);
+                return;
+            }
+
+            if (e.Button == MouseButtons.Right)
+            {
+                if (!hit.Item.Selected)
+                {
+                    foreach (ListViewItem sel in _listNames.SelectedItems)
+                        sel.Selected = false;
+                    hit.Item.Selected = true;
+                    hit.Item.Focused = true;
+                }
+                ShowNamesContextMenu(hit.Item, _listNames.PointToScreen(e.Location));
+            }
+        }
+
+        private void ShowNamesContextMenu(ListViewItem item, Point screenPt)
+        {
+            using var menu = new ContextMenuStrip
+            {
+                BackColor = UiTheme.BgPanel,
+                ForeColor = UiTheme.Fg,
+                ShowImageMargin = false,
+            };
+
+            var preview = new ToolStripMenuItem("Preview")
+            {
+                Enabled = item.Tag is SpeechRule r && !string.IsNullOrWhiteSpace(r.Replace),
+            };
+            preview.Click += (_, _) => PreviewNameRule(item.Tag as SpeechRule);
+            var edit = new ToolStripMenuItem("Edit…");
+            edit.Click += (_, _) => EditNameSelected();
+            var toggle = new ToolStripMenuItem("On/Off");
+            toggle.Click += (_, _) => ToggleNameSelected();
+            var del = new ToolStripMenuItem("Delete");
+            del.Click += (_, _) => DeleteNameSelected();
+
+            menu.Items.Add(preview);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(edit);
+            menu.Items.Add(toggle);
+            menu.Items.Add(del);
+            menu.Show(screenPt);
+        }
+
+        private void PreviewNameSelected()
+        {
+            if (_listNames.SelectedItems.Count == 0)
+            {
+                SetStatus("Select a name rule to preview.", bad: true);
+                return;
+            }
+            PreviewNameRule(_listNames.SelectedItems[0].Tag as SpeechRule);
+        }
+
+        /// <summary>
+        /// Speak the rule's Say as text with the current Voice settings (same path as
+        /// announcements / test Speak). Empty Say as = never spoken — status only.
+        /// </summary>
+        private void PreviewNameRule(SpeechRule? rule)
+        {
+            if (rule == null)
+            {
+                SetStatus("No name rule selected.", bad: true);
+                return;
+            }
+            if (!TrySpeakNamePreview(rule.Replace, out string? status, out bool bad))
+            {
+                SetStatus(status ?? "Nothing to speak.", bad: true);
+                return;
+            }
+            SetStatus(status ?? "Speaking…", bad: false);
+        }
+
+        /// <summary>
+        /// Speak phonetic Say-as text via the live TTS path. Returns false when there
+        /// is nothing to play (blank / strip rule).
+        /// </summary>
+        private static bool TrySpeakNamePreview(
+            string? sayAs, out string? status, out bool bad)
+        {
+            status = null;
+            bad = false;
+            string text = (sayAs ?? "").Trim();
+            if (text.Length == 0)
+            {
+                status = "Say as is blank — that text is never spoken.";
+                bad = true;
+                return false;
+            }
+            try
+            {
+                OcrProcessor.SpeakAnnouncement(text);
+                status = $"Preview: “{text}” · {OcrProcessor.DescribeCurrentVoice()}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = $"Preview failed: {ex.Message}";
+                bad = true;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Open the name-pack picker. Nothing is loaded until the user picks a pack
+        /// (or browses to a file) and confirms Import. Imported rules start ON and
+        /// the Names list is sorted A–Z. Matching is always case-insensitive.
+        /// </summary>
+        private void ImportNamePack()
+        {
+            if (!TryPickNamePack(out string? importPath, out string displayName) ||
+                string.IsNullOrWhiteSpace(importPath))
+                return;
+
+            ApplyNamePackImport(importPath, displayName);
+        }
+
+        /// <summary>
+        /// Always shows a list of packs from <c>NamePacks\</c> (may be empty).
+        /// Never auto-imports — user must select + Import, or Browse to a file.
+        /// </summary>
+        private bool TryPickNamePack(out string? importPath, out string displayName)
+        {
+            importPath = null;
+            displayName = "pack";
+
+            SpeechNamePacks.EnsurePacksDir();
+
+            // Must be TopMost: Settings (and the overlay) are TopMost. A non-TopMost
+            // modal is pushed behind them, owner stays disabled → UI looks locked.
+            using var picker = new Form
+            {
+                Text = "Import name pack",
+                FormBorderStyle = FormBorderStyle.Sizable,
+                StartPosition = FormStartPosition.CenterParent,
+                MinimizeBox = false,
+                MaximizeBox = false,
+                ShowInTaskbar = false,
+                TopMost = true,
+                MinimumSize = new Size(520, 360),
+                ClientSize = new Size(560, 420),
+                BackColor = UiTheme.Bg,
+                Font = Font,
+                KeyPreview = true,
+            };
+            UiTheme.ApplyForm(picker);
+
+            var hint = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 48,
+                Padding = new Padding(10, 8, 10, 4),
+                ForeColor = UiTheme.FgDim,
+                Text =
+                    "Choose a pack from NamePacks\\ next to SpeakRect.exe, then Import.\n" +
+                    "Nothing is applied until you import. Imported rules start ON (A–Z). Matching is case-insensitive.",
+            };
+
+            var list = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                MultiSelect = false,
+                HideSelection = false,
+                HeaderStyle = ColumnHeaderStyle.Nonclickable,
+                ShowItemToolTips = true,
+                BackColor = UiTheme.BgDeep,
+                ForeColor = UiTheme.Fg,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 9f),
+            };
+            UiTheme.StyleListView(list);
+            list.Columns.Add("Pack", 140);
+            list.Columns.Add("Rules", 60);
+            list.Columns.Add("Description", 280);
+            list.Columns.Add("File", 120);
+
+            var empty = new Label
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = UiTheme.FgMuted,
+                BackColor = UiTheme.BgDeep,
+                Text =
+                    "No .txt packs in this folder yet.\n\n" +
+                    "Drop packs into NamePacks\\ (see README), or use Browse… / Folder.",
+                Visible = false,
+            };
+
+            void FillList()
+            {
+                list.BeginUpdate();
+                list.Items.Clear();
+                var packs = SpeechNamePacks.Discover();
+                foreach (var p in packs)
+                {
+                    var item = new ListViewItem(p.DisplayName);
+                    item.SubItems.Add(p.RuleCount > 0 ? p.RuleCount.ToString() : "—");
+                    item.SubItems.Add(p.Description);
+                    item.SubItems.Add(Path.GetFileName(p.FilePath));
+                    item.Tag = p;
+                    item.ToolTipText = p.FilePath;
+                    list.Items.Add(item);
+                }
+                list.EndUpdate();
+                empty.Visible = list.Items.Count == 0;
+                list.Visible = list.Items.Count > 0;
+                if (list.Items.Count > 0)
+                {
+                    list.Items[0].Selected = true;
+                    list.Items[0].Focused = true;
+                    list.EnsureVisible(0);
+                }
+                try { UiTheme.FitListViewLastColumn(list); } catch { /* ignore */ }
+            }
+
+            FillList();
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 48,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(8, 8, 8, 8),
+                BackColor = UiTheme.BgBar,
+            };
+            var btnOk = MakeSideButton("Import");
+            var btnBrowse = MakeSideButton("Browse…");
+            var btnFolder = MakeSideButton("Folder");
+            var btnRefresh = MakeSideButton("Refresh");
+            var btnCancel = MakeSideButton("Cancel");
+            btnOk.DialogResult = DialogResult.None; // validate selection first
+            btnCancel.DialogResult = DialogResult.Cancel;
+
+            btnOk.Click += (_, _) =>
+            {
+                if (list.SelectedItems.Count == 0 || list.SelectedItems[0].Tag is not SpeechNamePacks.PackInfo)
+                {
+                    UiMessageBox.Show(
+                        picker,
+                        list.Items.Count == 0
+                            ? "No packs listed. Drop .txt files into NamePacks\\ or use Browse…."
+                            : "Select a pack in the list, then Import.",
+                        "Import name pack",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+                picker.DialogResult = DialogResult.OK;
+                picker.Close();
+            };
+            btnBrowse.Click += (_, _) =>
+            {
+                string? path = BrowseNamePackFile();
+                if (path == null)
+                    return;
+                picker.Tag = path;
+                picker.DialogResult = DialogResult.Yes;
+                picker.Close();
+            };
+            btnFolder.Click += (_, _) => OpenNamePacksFolder();
+            btnRefresh.Click += (_, _) => FillList();
+            list.DoubleClick += (_, _) =>
+            {
+                if (list.SelectedItems.Count > 0 && list.SelectedItems[0].Tag is SpeechNamePacks.PackInfo)
+                {
+                    picker.DialogResult = DialogResult.OK;
+                    picker.Close();
+                }
+            };
+            list.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter &&
+                    list.SelectedItems.Count > 0 &&
+                    list.SelectedItems[0].Tag is SpeechNamePacks.PackInfo)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    picker.DialogResult = DialogResult.OK;
+                    picker.Close();
+                }
+            };
+
+            buttons.Controls.Add(btnOk);
+            buttons.Controls.Add(btnBrowse);
+            buttons.Controls.Add(btnFolder);
+            buttons.Controls.Add(btnRefresh);
+            buttons.Controls.Add(btnCancel);
+
+            var center = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.BgDeep };
+            center.Controls.Add(list);
+            center.Controls.Add(empty);
+
+            // Fill first, then top/bottom chrome so Dock.Fill gets the middle.
+            picker.Controls.Add(center);
+            picker.Controls.Add(hint);
+            picker.Controls.Add(buttons);
+            picker.AcceptButton = btnOk;
+            picker.CancelButton = btnCancel;
+            picker.Shown += (_, _) =>
+            {
+                if (list.Visible)
+                    list.Focus();
+            };
+
+            var result = picker.ShowDialog(GetModalOwner());
+            if (result == DialogResult.Yes && picker.Tag is string browsed)
+            {
+                importPath = browsed;
+                displayName = Path.GetFileNameWithoutExtension(browsed);
+                return true;
+            }
+            if (result == DialogResult.OK &&
+                list.SelectedItems.Count > 0 &&
+                list.SelectedItems[0].Tag is SpeechNamePacks.PackInfo pack)
+            {
+                importPath = pack.FilePath;
+                displayName = pack.DisplayName;
+                return true;
+            }
+            return false;
+        }
+
+        private void ApplyNamePackImport(string pathOrId, string displayName)
+        {
+            var current = CollectNameRules();
+            int added = SpeechNamePacks.MergeInto(current, pathOrId, out int skipped);
+            if (added == 0)
+            {
+                SetStatus(
+                    skipped > 0
+                        ? $"“{displayName}” already present ({skipped} duplicate Find). Nothing added."
+                        : $"Pack “{displayName}” is empty or unreadable.",
+                    bad: skipped == 0);
+                return;
+            }
+
+            _listNames.BeginUpdate();
+            _listNames.Items.Clear();
+            foreach (var r in current)
+                _listNames.Items.Add(MakeNameItem(r));
+            _listNames.EndUpdate();
+            SizeListColumns(_listNames);
+            if (_listNames.Items.Count > 0)
+            {
+                _listNames.Items[0].Selected = true;
+                _listNames.EnsureVisible(0);
+            }
+
+            string skipNote = skipped > 0 ? $" · skipped {skipped} duplicate(s)" : "";
+            MarkChanged(
+                $"Imported {added} “{displayName}” name rules (on, A–Z){skipNote} · saved.");
+        }
+
+        private string? BrowseNamePackFile()
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Title = "Open name pack",
+                Filter = "Name packs (*.txt)|*.txt|All files (*.*)|*.*",
+                InitialDirectory = SpeechNamePacks.EnsurePacksDir(),
+                CheckFileExists = true,
+                Multiselect = false,
+            };
+            if (ofd.ShowDialog(GetModalOwner()) != DialogResult.OK)
+                return null;
+            return ofd.FileName;
+        }
+
+        private static void OpenNamePacksFolder()
+        {
+            string dir = SpeechNamePacks.EnsurePacksDir();
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = dir,
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // ignore — status is enough if folder open fails
+            }
         }
 
         // =====================================================================
@@ -1009,11 +1422,6 @@ namespace SpeakRect
 
         private void AddTextRule()
         {
-            if (_textRules.Count >= SpeechTextRule.MaxRules)
-            {
-                SetStatus($"Maximum {SpeechTextRule.MaxRules} text rules.", bad: true);
-                return;
-            }
             if (!EditTextRuleDialog.Show(GetModalOwner(), null, out SpeechTextRule? rule) || rule == null)
                 return;
             SyncTextRulesFromListViewTags();
@@ -1404,15 +1812,29 @@ namespace SpeakRect
             // Leave the last column for UiTheme.FitListViewLastColumn so the native
             // header never shows a white dead zone past "Replace" / "How".
             int w = Math.Max(200, list.ClientSize.Width - 4);
-            if (list.Columns.Count == 4)
+            bool namesList = list.Columns.Count >= 2 &&
+                string.Equals(list.Columns[1].Text, "Find", StringComparison.Ordinal);
+
+            if (namesList && list.Columns.Count >= 5)
             {
-                // On | Find | Say as | How(fill)
+                // On | Find | Say as | ▶ | How(fill)
+                int on = 40, preview = 36, how = 72;
+                int mid = Math.Max(120, w - on - preview - how);
+                list.Columns[0].Width = on;
+                list.Columns[1].Width = mid / 2;
+                list.Columns[2].Width = mid - mid / 2;
+                list.Columns[3].Width = preview;
+                list.Columns[4].Width = how; // stretched to fill by FitListViewLastColumn
+            }
+            else if (list.Columns.Count == 4)
+            {
+                // Legacy 4-col names: On | Find | Say as | How(fill)
                 int on = 40;
                 int mid = Math.Max(120, w - on - 72);
                 list.Columns[0].Width = on;
                 list.Columns[1].Width = mid / 2;
                 list.Columns[2].Width = mid - mid / 2;
-                list.Columns[3].Width = 72; // stretched to fill by FitListViewLastColumn
+                list.Columns[3].Width = 72;
             }
             else if (list.Columns.Count >= 5)
             {
@@ -1516,7 +1938,7 @@ namespace SpeakRect
                 MaximizeBox = false;
                 ShowInTaskbar = false;
                 TopMost = true;
-                ClientSize = new Size(420, 260);
+                ClientSize = new Size(420, 280);
                 UiTheme.ApplyForm(this);
                 Font = new Font("Segoe UI", 9f);
                 KeyPreview = true;
@@ -1561,7 +1983,8 @@ namespace SpeakRect
                     Font = new Font("Segoe UI", 7.5f),
                     Text = "Type names the way you see them on screen.\n" +
                            "Example: Find  X-Men    Say as  Ex-Men\n" +
-                           "Leave “Say as” blank to skip that text (never speak it).",
+                           "Leave “Say as” blank to skip that text (never speak it).\n" +
+                           "Preview speaks “Say as” with your current Voice settings.",
                 };
 
                 body.Controls.Add(MakeLbl("Find"), 0, 0);
@@ -1575,7 +1998,26 @@ namespace SpeakRect
                 body.SetColumnSpan(lblHint, 2);
                 body.Controls.Add(lblHint, 0, 4);
 
+                // RightToLeft: first added is rightmost → OK · Cancel · Preview
                 var buttons = MakeOkCancel(out var btnOk, out var btnCancel);
+                var btnPreview = new Button
+                {
+                    Text = "Preview",
+                    Width = 88,
+                    Height = 28,
+                    Margin = new Padding(6, 4, 0, 0),
+                };
+                UiTheme.StyleButton(btnPreview);
+                btnPreview.Click += (_, _) =>
+                {
+                    if (!TrySpeakNamePreview(_txtReplace.Text, out string? status, out bool bad) && bad)
+                    {
+                        UiMessageBox.Show(this,
+                            status ?? "Say as is blank — enter phonetic text to preview.",
+                            Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                };
+                buttons.Controls.Add(btnPreview);
                 body.SetColumnSpan(buttons, 2);
                 body.Controls.Add(buttons, 0, 5);
                 Controls.Add(body);

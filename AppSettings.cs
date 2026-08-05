@@ -729,8 +729,9 @@ namespace SpeakRect
         public void ClearSpeechRules() => SpeechRules.Clear();
 
         /// <summary>
-        /// Replace the in-memory speech rule list (clamped to max). Used by the Speech tab.
+        /// Replace the in-memory speech rule list (validated / normalized). Used by the Speech tab.
         /// Does not persist — call <see cref="PersistSpeechRules"/> or <see cref="Save"/>.
+        /// No hard cap on count — comic name packs can be large.
         /// </summary>
         public void SetSpeechRules(IEnumerable<SpeechRule>? rules)
         {
@@ -739,8 +740,6 @@ namespace SpeakRect
                 return;
             foreach (var r in rules)
             {
-                if (SpeechRules.Count >= SpeechRule.MaxRules)
-                    break;
                 if (r == null)
                     continue;
                 if (!SpeechRule.TryNormalize(
@@ -752,8 +751,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Replace pipeline text rules (clamped / validated). Used by the Speech tab.
+        /// Replace pipeline text rules (validated / merged with defaults). Used by the Speech tab.
         /// Does not persist — call <see cref="PersistSpeechRules"/> or <see cref="Save"/>.
+        /// No hard cap on count.
         /// </summary>
         public void SetSpeechTextRules(IEnumerable<SpeechTextRule>? rules)
         {
@@ -1953,9 +1953,10 @@ namespace SpeakRect
 
             int count = 0;
             if (map.TryGetValue("SpeechRuleCount", out string? countRaw) &&
-                int.TryParse(countRaw, out int parsed))
+                int.TryParse(countRaw, out int parsed) &&
+                parsed > 0)
             {
-                count = Math.Clamp(parsed, 0, SpeechRule.MaxRules);
+                count = parsed;
             }
 
             if (count > 0)
@@ -1992,22 +1993,41 @@ namespace SpeakRect
                 return;
             }
 
-            // Fallback: scan SpeechRule0.Match … without count
-            for (int i = 0; i < SpeechRule.MaxRules; i++)
+            // Fallback: discover SpeechRuleN.Match keys (no count line) — sparse-safe.
+            var indices = new SortedSet<int>();
+            foreach (string key in map.Keys)
+            {
+                if (!key.StartsWith("SpeechRule", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // SpeechRule12.Match or SpeechRule12Match
+                string rest = key.Length > 10 ? key.Substring(10) : "";
+                int dot = rest.IndexOf('.');
+                string numPart = dot >= 0 ? rest.Substring(0, dot) : rest;
+                if (numPart.EndsWith("Match", StringComparison.OrdinalIgnoreCase))
+                    numPart = numPart.Substring(0, numPart.Length - 5);
+                if (int.TryParse(numPart, out int idx) && idx >= 0)
+                    indices.Add(idx);
+            }
+
+            foreach (int i in indices)
             {
                 string prefix = $"SpeechRule{i}";
-                string? match = ReadMap(map, $"{prefix}.Match");
-                if (match == null)
-                    continue;
+                string? match = ReadMap(map, $"{prefix}.Match")
+                    ?? ReadMap(map, $"{prefix}Match");
                 if (string.IsNullOrWhiteSpace(match))
                     continue;
 
-                string replace = ReadMap(map, $"{prefix}.Replace") ?? "";
+                string replace = ReadMap(map, $"{prefix}.Replace")
+                    ?? ReadMap(map, $"{prefix}Replace")
+                    ?? "";
                 if (!SpeechRule.TryParseKind(
-                        ReadMap(map, $"{prefix}.Kind"), out SpeechMatchKind kind))
+                        ReadMap(map, $"{prefix}.Kind") ?? ReadMap(map, $"{prefix}Kind"),
+                        out SpeechMatchKind kind))
                     kind = SpeechMatchKind.Word;
                 bool enabled = true;
-                if (TryParseBool(ReadMap(map, $"{prefix}.Enabled") ?? "true", out bool en))
+                string? enRaw = ReadMap(map, $"{prefix}.Enabled")
+                    ?? ReadMap(map, $"{prefix}Enabled");
+                if (enRaw != null && TryParseBool(enRaw, out bool en))
                     enabled = en;
 
                 if (SpeechRule.TryNormalize(
@@ -2021,19 +2041,28 @@ namespace SpeakRect
 
         private void LoadSpeechTextRulesFromMap(Dictionary<string, string> map)
         {
-            // Missing section / count → keep catalog defaults.
+            // Missing section / count → keep catalog defaults (or sparse keys).
             if (!map.TryGetValue("SpeechTextRuleCount", out string? countRaw) ||
                 !int.TryParse(countRaw, out int parsed) ||
                 parsed <= 0)
             {
                 var sparse = new List<SpeechTextRule>();
-                for (int i = 0; i < SpeechTextRule.MaxRules; i++)
+                var indices = new SortedSet<int>();
+                foreach (string key in map.Keys)
                 {
-                    string prefix = $"SpeechTextRule{i}";
-                    if (ReadMap(map, $"{prefix}.Id") == null &&
-                        ReadMap(map, $"{prefix}.Pattern") == null)
+                    if (!key.StartsWith("SpeechTextRule", StringComparison.OrdinalIgnoreCase))
                         continue;
-                    if (TryReadSpeechTextRule(map, prefix, out SpeechTextRule? r) && r != null)
+                    // SpeechTextRule12.Id / .Pattern …
+                    string rest = key.Length > 14 ? key.Substring(14) : "";
+                    int dot = rest.IndexOf('.');
+                    string numPart = dot >= 0 ? rest.Substring(0, dot) : rest;
+                    if (int.TryParse(numPart, out int idx) && idx >= 0)
+                        indices.Add(idx);
+                }
+                foreach (int i in indices)
+                {
+                    if (TryReadSpeechTextRule(map, $"SpeechTextRule{i}", out SpeechTextRule? r) &&
+                        r != null)
                         sparse.Add(r);
                 }
                 if (sparse.Count > 0)
@@ -2044,9 +2073,8 @@ namespace SpeakRect
                 return;
             }
 
-            int count = Math.Clamp(parsed, 0, SpeechTextRule.MaxRules);
-            var loaded = new List<SpeechTextRule>(count);
-            for (int i = 0; i < count; i++)
+            var loaded = new List<SpeechTextRule>(parsed);
+            for (int i = 0; i < parsed; i++)
             {
                 if (TryReadSpeechTextRule(map, $"SpeechTextRule{i}", out SpeechTextRule? r) &&
                     r != null)

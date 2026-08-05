@@ -25,10 +25,6 @@ namespace SpeakRect
     /// </summary>
     public sealed class SpeechRule
     {
-        public const int MaxRules = 64;
-        public const int MaxMatchLength = 128;
-        public const int MaxReplaceLength = 256;
-
         /// <summary>Find text — stored exactly as the user typed it.</summary>
         public string Match { get; set; } = "";
 
@@ -91,7 +87,7 @@ namespace SpeakRect
             kind == SpeechMatchKind.Phrase ? "Phrase" : "Word";
 
         /// <summary>
-        /// Normalize match/replace for storage (trim, length clamp, no newlines).
+        /// Normalize match/replace for storage (trim, no newlines). No length cap.
         /// Returns false if match is empty after normalize.
         /// </summary>
         public static bool TryNormalize(
@@ -111,16 +107,6 @@ namespace SpeakRect
             if (m.Length == 0)
             {
                 error = "Find text is empty.";
-                return false;
-            }
-            if (m.Length > MaxMatchLength)
-            {
-                error = $"Find text is too long (max {MaxMatchLength} characters).";
-                return false;
-            }
-            if (r.Length > MaxReplaceLength)
-            {
-                error = $"Say-as text is too long (max {MaxReplaceLength} characters).";
                 return false;
             }
 
@@ -149,8 +135,10 @@ namespace SpeakRect
     public static class SpeechRulesEngine
     {
         /// <summary>
-        /// Run enabled rules in order. Empty replace removes the match.
-        /// Collapses leftover multi-spaces (keeps non-space control pause marks).
+        /// Run enabled rules. Empty replace removes the match.
+        /// Longer Finds run first so A–Z list order does not break nested names
+        /// (e.g. “X-Treme X-Men” before “X-Men”). Collapses leftover multi-spaces
+        /// (keeps non-space control pause marks).
         /// </summary>
         public static string Apply(string? input, IEnumerable<SpeechRule>? rules)
         {
@@ -159,17 +147,16 @@ namespace SpeakRect
             if (rules == null)
                 return input;
 
-            string s = input;
-            foreach (SpeechRule rule in rules)
-            {
-                if (rule == null || !rule.Enabled)
-                    continue;
-                string match = (rule.Match ?? "").Trim();
-                if (match.Length == 0)
-                    continue;
+            // Materialize + longer-first so UI A–Z order is safe for name packs.
+            var ordered = rules
+                .Where(r => r != null && r.Enabled && !string.IsNullOrWhiteSpace(r.Match))
+                .OrderByDescending(r => ToCleanedLookup(r.Match).Length)
+                .ThenBy(r => r.Match ?? "", StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-                s = ApplyOne(s, match, rule.Replace ?? "", rule.Kind);
-            }
+            string s = input;
+            foreach (SpeechRule rule in ordered)
+                s = ApplyOne(s, rule.Match.Trim(), rule.Replace ?? "", rule.Kind);
 
             // Collapse ordinary spaces only (pause marks are control chars, not space).
             s = Regex.Replace(s, @" {2,}", " ");

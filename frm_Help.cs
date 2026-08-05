@@ -268,7 +268,7 @@ namespace SpeakRect
             Tip(sb, "Ctrl+click FOLLOW on the overlay to open Follow size and offset settings.");
             Tip(sb, "Sidebar REGIONS buttons 1–8 switch slots for drawing (same as region hotkeys).");
             Tip(sb, "Leave Voice engine on Windows unless you installed a SAPI adapter; full steps are in README.md.");
-            Tip(sb, "Speech \u2192 Names: e.g. X-Men \u2192 Ex-Men. You can also force lowercase or title-case ALL CAPS. Use Reset for defaults.");
+            Tip(sb, "Speech \u2192 Names: e.g. X-Men \u2192 Ex-Men (any case). Click \u25b6 / Preview / Space to sample the Say as voice. Packs\u2026 lists NamePacks\\*.txt — pick one to import (rules start ON, A\u2013Z). Nothing auto-loads at startup.");
             Tip(sb, "Balloons: open a page or last capture — settings update the green boxes live. Speak (F6) reads them.");
             Tip(sb, "Image: cleanup preview matches what is used when speaking. Soften-for-find boxes is on Balloons only.");
             sb.Append(@"\par ");

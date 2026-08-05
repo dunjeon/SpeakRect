@@ -1,0 +1,775 @@
+; SpeakRect name pack
+; Drop .txt files in NamePacks\ next to SpeakRect.exe and import via
+; Settings -> Speech -> Names -> Packs...
+; Matching is always case-insensitive (X-Men, x-men, X-MEN all match).
+; Format: Find | Say as
+; Optional third field: Word (default) or Phrase
+; Imported rules start ON and are listed A–Z by Find.
+; Lines starting with ; or # are comments. Blank lines ignored.
+; Say-as text has no hyphens (TTS would speak them as syllable breaks).
+
+Id=x-men
+Name=X-Men
+Description=Phonetic codenames + real names (Silver Age through Krakoa / From the Ashes).
+; Say-as style: keep natural English; only light respell / spaces when TTS mangles it (X- prefix, silent letters, hard names).
+
+X-Treme X-Men | Ex Treem Ex Men
+X-Tinction Agenda | Ex Tinction Agenda
+X-Cutioner's Song | Ex Cutioner's Song
+X-Cutioner | Ex Cutioner
+X-Terminators | Ex Terminators
+X-Ternals | Ex Ternals
+X-Tinction | Ex Tinction
+X-Sanity | Ex Sanity
+X-Statix | Ex Statix
+X-Treme | Ex Treem
+X-Corporation | Ex Corporation
+X-Corp | Ex Corp
+X-Club | Ex Club
+X-Force | Ex Force
+X-Factor | Ex Factor
+X-Men 2099 | Ex Men Twenty Ninety Nine
+Uncanny X-Men | Uncanny Ex Men
+Astonishing X-Men | Astonishing Ex Men
+Extraordinary X-Men | Extraordinary Ex Men
+Exceptional X-Men | Exceptional Ex Men
+All-New X-Men | All New Ex Men
+Ultimate X-Men | Ultimate Ex Men
+New X-Men | New Ex Men
+X-Men | Ex Men
+X-Jet | Ex Jet
+X-Wing | Ex Wing
+X-Gene | Ex Gene
+Xgene | Ex gene
+X-23 | Ex Twenty Three
+X23 | Ex Twenty Three
+Generation X | Generation Ex
+New Mutants | New Mutants
+Brotherhood of Evil Mutants | Brotherhood of Evil Mutants
+Brotherhood of Mutants | Brotherhood of Mutants
+Hellfire Club | Hellfire Club
+Hellfire Gala | Hellfire Gala
+Quiet Council of Krakoa | Quiet Council of Kruh koa
+Quiet Council | Quiet Council
+Great Ring of Arakko | Great Ring of Uh racko
+Swordbearers of Arakko | Swordbearers of Uh racko
+Horsemen of Apocalypse | Horsemen of Apocalypse
+Four Horsemen | Four Horsemen
+Horseman of Death | Horseman of Death
+Horseman of War | Horseman of War
+Horseman of Famine | Horseman of Famine
+Horseman of Pestilence | Horseman of Pestilence
+Weapon X | Weapon Ex
+Weapon Plus | Weapon Plus
+Weapon Minus | Weapon Minus
+Alpha Flight | Alpha Flight
+Beta Flight | Beta Flight
+Gamma Flight | Gamma Flight
+Omega Flight | Omega Flight
+Department H | Department Aitch
+Department K | Department Kay
+Excalibur | Excalibur
+Exiles | Exiles
+Fallen Angels | Fallen Angels
+New Hellions | New Hellions
+Hellions | Hellions
+Purifiers | Purifiers
+Friends of Humanity | Friends of Humanity
+Human Council | Human Council
+Reavers | Reavers
+Genoshan Magistrates | Jen oshan Magistrates
+Genosha | Jen osha
+Krakoa | Kruh koa
+Krakoan Age | Kruh koe un Age
+Arakko | Uh racko
+Arrako | Uh racko
+Planet Arakko | Planet Uh racko
+Arakkii | Uh rackee
+Okkara | Oh kara
+Okkarans | Oh karuns
+Otherworld | Otherworld
+Asteroid M | Asteroid Em
+Island M | Island Em
+Savage Land | Savage Land
+Muir Island | Myoor Island
+Xavier Institute | Zavier Institute
+Xavier's School | Zavier's School
+Xavier's | Zavier's
+Jean Grey School | Jeen Gray School
+School for Gifted Youngsters | School for Gifted Youngsters
+Graymalkin | Graymalkin
+Alkali Lake | Alkali Lake
+Madripoor | Madri poor
+Latveria | Luh teeria
+Shi'ar Empire | Shee ar Empire
+Shi'ar | Shee ar
+Phalanx | Fay lanks
+Technarchy | Tek narchy
+Celestials | Celestials
+Eternals | Eternals
+Deviants | Deviants
+Inhumans | Inhumans
+Attilan | Attilan
+Cerebro | Seh ree bro
+Cerebra | Seh ree bruh
+Danger Room | Danger Room
+Blackbird | Blackbird
+Master Mold | Master Mold
+Mother Mold | Mother Mold
+Prime Sentinels | Prime Sentinels
+Wild Sentinels | Wild Sentinels
+Omega Sentinel | Omega Sentinel
+Sentinels | Sentinels
+Sentinel | Sentinel
+Nimrod | Nimrod
+Bastion | Bastion
+ORCHIS | Orkiss
+Feilong | Fay long
+Moira Engine | Moyra Engine
+Days of Future Past | Days of Future Past
+Age of Apocalypse | Age of Apocalypse
+House of M | House of Em
+Decimation | Decimation
+M-Day | Em Day
+Messiah Complex | Messiah Complex
+Second Coming | Second Coming
+Avengers vs. X-Men | Avengers versus Ex Men
+Mutant Massacre | Mutant Massacre
+Fall of the Mutants | Fall of the Mutants
+From the Ashes | From the Ashes
+Fall of X | Fall of Ex
+Sins of Sinister | Sins of Sinister
+Trial of Magneto | Trial of Magneeto
+Judgment Day | Judgment Day
+Blood Hunt | Blood Hunt
+Resurrection Protocols | Resurrection Protocols
+The Crucible | The Crucible
+Tournament of Swords | Tournament of Swords
+Marauders | Marauders
+Morlocks | Morlocks
+Acolytes | Acolytes
+Upstarts | Upstarts
+Externals | Externals
+Starjammers | Starjammers
+Imperial Guard | Imperial Guard
+Clan Akkaba | Clan Uh kahba
+U-Men | Yoo Men
+Stepford Cuckoos | Stepford Cuckoos
+Three-In-One | Three In One
+Five-In-One | Five In One
+Professor Xavier | Professor Zavier
+Professor X | Professor Ex
+Charles Francis Xavier | Charles Francis Zavier
+Charles Xavier | Charles Zavier
+Xavier | Zavier
+Onslaught | Onslaught
+Cyclops | Syclops
+Scott Summers | Scott Summers
+Slim Summers | Slim Summers
+Marvel Girl | Marvel Girl
+Phoenix Force | Feenix Force
+Dark Phoenix | Dark Feenix
+White Phoenix of the Crown | White Feenix of the Crown
+Phoenix | Feenix
+Jean Grey-Summers | Jeen Gray Summers
+Jean Elaine Grey | Jeen Elaine Gray
+Jean Grey | Jeen Gray
+Jean Gray | Jeen Gray
+Iceman | Iceman
+Bobby Drake | Bobby Drake
+Robert Drake | Robert Drake
+Archangel | Arkangel
+Warren Worthington III | Warren Worthington the Third
+Warren Worthington | Warren Worthington
+Worthington | Worthington
+Henry McCoy | Henry McCoy
+Hank McCoy | Hank McCoy
+McCoy | McCoy
+Beast | Beast
+Nightcrawler | Nightcrawler
+Kurt Wagner | Kurt Vagner
+Wolverine | Woolverine
+James Howlett | James Howlett
+Logan Howlett | Logan Howlett
+Old Man Logan | Old Man Logan
+Laura Kinney | Laura Kinney
+Akihiro | Ah kee hee ro
+Daken | Dah ken
+Ororo Munroe | Oh ror oh Munroe
+Ororo | Oh ror oh
+Storm | Storm
+Wind-Rider | Wind Rider
+Piotr Nikolaievitch Rasputin | Pyotr Nikolaievitch Rasputin
+Piotr Rasputin | Pyotr Rasputin
+Peter Rasputin | Peter Rasputin
+Mikhail Rasputin | Mee kile Rasputin
+Rasputina | Rasputeena
+Rasputin | Rasputin
+Colossus | Colossus
+John Proudstar | John Proudstar
+James Proudstar | James Proudstar
+Proudstar | Proudstar
+Thunderbird | Thunderbird
+Warpath | Warpath
+Sean Cassidy | Shawn Cassidy
+Theresa Maeve Rourke Cassidy | Theresa Maeve Rourke Cassidy
+Theresa Cassidy | Theresa Cassidy
+Banshee | Banshee
+Siryn | Sye rin
+Shiro Yoshida | Sheer oh Yoshida
+Leyu Yoshida | Lay oo Yoshida
+Yoshida | Yoshida
+Sunfire | Sunfire
+Sunpyre | Sunpire
+Alex Summers | Alex Summers
+Alexander Summers | Alexander Summers
+Havok | Havock
+Lorna Dane | Lorna Dane
+Polaris | Polaris
+Jamie Madrox | Jamie Madrox
+Madrox | Madrox
+Multiple Man | Multiple Man
+Anna Marie LeBeau | Anna Marie LeBow
+Marie D'Ancanto | Marie D Ancanto
+Anna Marie | Anna Marie
+Rogue | Roge
+Remy Etienne LeBeau | Remmy Etienne LeBow
+Remy LeBeau | Remmy LeBow
+LeBeau | LeBow
+Le Beau | LeBow
+Gambit | Gambit
+Jubilation Lee | Jubilation Lee
+Jubilee | Jubilee
+Elizabeth Braddock | Elizabeth Braddock
+Betsy Braddock | Betsy Braddock
+Brian Braddock | Brian Braddock
+Jamie Braddock | Jamie Braddock
+Braddock | Braddock
+Captain Britain | Captain Britain
+Captain Avalon | Captain Avalon
+Psylocke | Sye lock
+Kwannon | Kwah non
+Lady Mandarin | Lady Mandarin
+Alison Blaire | Alison Blair
+Dazzler | Dazzler
+Longshot | Longshot
+Gaveedra Seven | Guh vee druh Seven
+Benjamin Russell | Benjamin Russell
+Shatterstar | Shatterstar
+Jonathan Silvercloud | Jonathan Silvercloud
+Forge | Forge
+Julio Richter | Hoo lee oh Richter
+Rictor | Ricktor
+Tabitha Smith | Tabitha Smith
+Boom-Boom | Boom Boom
+Boomer | Boomer
+Meltdown | Meltdown
+Time Bomb | Time Bomb
+Samuel Guthrie | Samuel Guthree
+Sam Guthrie | Sam Guthree
+Paige Guthrie | Paige Guthree
+Jay Guthrie | Jay Guthree
+Crystal Guthrie | Crystal Guthree
+Guthrie | Guthree
+Cannonball | Cannonball
+Husk | Husk
+Icarus | Ickarus
+Rahne Sinclair | Rahn Sinclair
+Rahne | Rahn
+Wolfsbane | Wolfsbane
+Danielle Moonstar | Danielle Moonstar
+Dani Moonstar | Dani Moonstar
+Moonstar | Moonstar
+Mirage | Mirage
+Psyche | Sye kee
+Xi'an Coy Manh | See ahn Coy Mahn
+Shan Coy Manh | Shahn Coy Mahn
+Xi'an | See ahn
+Karma | Karma
+Illyana Rasputina | Ill yah nuh Rasputeena
+Illyana Rasputin | Ill yah nuh Rasputin
+Illyana | Ill yah nuh
+Magik | Majick
+Darkchilde | Darkchild
+Soulsword | Soulsword
+Amara Aquilla | Uh mara Uh quilla
+Allison Crestmere | Allison Crestmeer
+Magma | Magma
+Roberto da Costa | Roberto da Costa
+Bobby da Costa | Bobby da Costa
+Sunspot | Sunspot
+Douglas Ramsey | Douglas Ramsey
+Doug Ramsey | Doug Ramsey
+Cypher | Syfer
+Douglock | Douglock
+Warlock | Warlock
+Bird-Brain | Bird Brain
+Gosamyr | Go suh meer
+Brightwind | Brightwind
+Guido Carosella | Gwee doh Carosella
+Guido | Gwee doh
+Strong Guy | Strong Guy
+Nathan Christopher Charles Summers | Nathan Christopher Charles Summers
+Nathan Summers | Nathan Summers
+Nathan Dayspring | Nathan Dayspring
+Askani'son | Uss kah nee son
+Askani | Uss kah nee
+Mother Askani | Mother Uss kah nee
+Cable | Cable
+Stryfe | Strife
+Tyler Dayspring | Tyler Dayspring
+Lucas Bishop | Lucas Bishop
+Officer Bishop | Officer Bishop
+Bishop | Bishop
+Neena Thurman | Neena Thurman
+Domino | Domino
+Vanessa Carlysle | Vanessa Carlyle
+Copycat | Copycat
+Wade Wilson | Wade Wilson
+Deadpool | Deadpool
+Weapon XI | Weapon Eleven
+Charlie Cluster-7 | Charlie Cluster Seven
+Jean-Phillipe | Zhahn Fee leep
+Fantomex | Fantomex
+Monet St. Croix | Monay Saint Croy
+Monet St Croix | Monay Saint Croy
+Mariana St. Croix | Mariana Saint Croy
+Claudette St. Croix | Claw det Saint Croy
+Nicole St. Croix | Nicole Saint Croy
+Marijus St. Croix | Mah ree us Saint Croy
+Monet | Monay
+Penance | Penance
+Emplate | Emplate
+Everett Thomas | Everett Thomas
+Synch | Sink
+Angelo Espinosa | Anjelo Espinosa
+Skin | Skin
+Jonothon Starsmore | Jon uh thun Starsmore
+Jono Starsmore | Jo no Starsmore
+Chamber | Chamber
+Decibel | Decibel
+Clarice Ferguson | Clarice Ferguson
+Blink | Blink
+Sarah Rushman | Sarah Rushman
+Marrow | Marrow
+Cecilia Reyes | Seh seel ya Reyes
+Doctor Reyes | Doctor Reyes
+Japheth | Jay feth
+Maggott | Maggot
+Emma Grace Frost | Emma Grace Frost
+Emma Frost | Emma Frost
+White Queen | White Queen
+Sebastian Shaw | Sebastian Shaw
+Shinobi Shaw | Shin oh bee Shaw
+Black King | Black King
+Selene Gallio | Suh leen Gallio
+Selene | Suh leen
+Black Queen | Black Queen
+Black Priestess | Black Priestess
+Jason Wyngarde | Jason Wingard
+Martinique Jason | Martinique Jason
+Regan Wyngarde | Reegan Wingard
+Mastermind | Mastermind
+Lady Mastermind | Lady Mastermind
+Harry Leland | Harry Leland
+Donald Pierce | Donald Pierce
+Friedrich von Roehm | Freedrick fon Rome
+Tessa of the Hellfire Club | Tessa of the Hellfire Club
+Sage | Sayj
+Celeste Cuckoo | Celeste Cuckoo
+Mindee Cuckoo | Mindee Cuckoo
+Phoebe Cuckoo | Feebee Cuckoo
+Sophie Cuckoo | Sophie Cuckoo
+Esme Cuckoo | Ez may Cuckoo
+Irma Cuckoo | Irma Cuckoo
+Quentin Quire | Kwen tin Kwire
+Kid Omega | Kid Omega
+Glob Herman | Glob Herman
+Robert Herman | Robert Herman
+Barnell Bohusk | Barnell Bohusk
+Angel Salvadore | Angel Salvador ay
+Martha Johansson | Martha Yo han sun
+No-Girl | No Girl
+Noriko Ashida | Noh ree ko Ashida
+Surge | Surge
+Julian Keller | Julian Keller
+Hellion | Hellion
+Santo Vaccarro | Santo Vaccaro
+Rockslide | Rockslide
+Sooraya Qadir | Soo rye uh Kah deer
+Dust | Dust
+Cessily Kincaid | Sess ih lee Kincaid
+Mercury | Mercury
+Victor Borkowski | Victor Borkowski
+Anole | Uh nole
+Megan Gwynn | Megan Gwin
+Pixie | Pixie
+Hisako Ichiki | Hee sah ko Ee chee kee
+Armor | Armor
+Ruth Aldine | Ruth Aldeen
+Blindfold | Blindfold
+Nezhno Abidemi | Nezh no Ah bih demee
+Gentle | Gentle
+David Alleyne | David Alleyne
+Prodigy | Prodigy
+Ben Hamill | Ben Hamill
+Brian Cruz | Brian Cruz
+Hope Abbott | Hope Abbott
+Paras Gavaskar | Pah rahs Guh vas kar
+Indra | Indra
+Alani Ryan | Uh lah nee Ryan
+Loa | Loh uh
+Sidney Green | Sidney Green
+Onyxx | Onix
+Sarah Vale | Sarah Vale
+Edward Tancredi | Edward Tancredi
+Kenji Uedo | Ken jee Oo ay doh
+Gabriel Cohuelo | Gabriel Co way lo
+Velocidad | Vuh loss ih dahd
+Idie Okonkwo | Eye dee Oh kon kwo
+Oya | Oy uh
+Laurie Tromette | Laurie Tro met
+Transonic | Transonic
+Teon Macik | Tee on May sick
+Primal | Primal
+Josh Foley | Josh Foley
+Elixir | Ih lixer
+Kevin Ford | Kevin Ford
+Wither | Wither
+Sofia Mantega | Sofia Mantega
+Wind Dancer | Wind Dancer
+Laurie Collins | Laurie Collins
+Wallflower | Wallflower
+Mark Sheppard | Mark Sheppard
+Hope Summers | Hope Summers
+Mutant Messiah | Mutant Messiah
+David Haller | David Haller
+Legion | Legion
+Jemail Karami | Jeh mail Kuh rah mee
+Rachel Summers | Rachel Summers
+Rachel Grey | Rachel Gray
+Prestige | Prestige
+Nate Grey | Nate Gray
+X-Man | Ex Man
+Madelyne Pryor | Maddelyne Pryor
+Madelyne | Maddelyne
+Maddie Pryor | Maddie Pryor
+Goblin Queen | Goblin Queen
+Red Queen | Red Queen
+Anodyne | Anodyne
+Gabriel Summers | Gabriel Summers
+Vulcan | Vulcan
+Kid Vulcan | Kid Vulcan
+Armando Muñoz | Ar mahn doh Moon yohz
+Armando Munoz | Ar mahn doh Moon yohz
+Darwin | Darwin
+Marshall Stone III | Marshall Stone the Third
+Random | Random
+Kitty Pryde | Kitty Pride
+Katherine Pryde | Katherine Pride
+Kate Pryde | Kate Pride
+Captain Kate Pryde | Captain Kate Pride
+Shadowcat | Shadowcat
+Lockheed | Lockheed
+Meggan Puceanu | Meggan Poo chah noo
+Meggan | Meggan
+Gloriana | Gloriana
+Opal Luna Saturnyne | Opal Luna Saturnine
+Saturnyne | Saturnine
+Omniversal Majestrix | Omniversal Majestrix
+Absolon Mercator | Ab so lon Merkayter
+Mister M | Mister Em
+Mr. M | Mister Em
+Fabio Medina | Fah bee oh Medina
+Goldballs | Goldballs
+Eva Bell | Eva Bell
+Tempus | Tempus
+The Five | The Five
+Jean-Paul Beaubier | Zhahn Paul Bo bee ay
+Jeanne-Marie Beaubier | Zhahn Muh ree Bo bee ay
+Northstar | Northstar
+Aurora | Aurora
+Eugene Judd | Eugene Judd
+Puck | Puck
+Walter Langkowski | Walter Langkowski
+Sasquatch | Sasquatch
+Narya | Nar yuh
+Snowbird | Snowbird
+Michael Twoyoungmen | Michael Twoyoungmen
+Shaman | Shay mun
+James Hudson | James Hudson
+Heather Hudson | Heather Hudson
+Vindicator | Vindicator
+Guardian | Guardian
+Madison Jeffries | Madison Jeffries
+Lillian Crawley | Lillian Crawley
+Diamond Lil | Diamond Lil
+Kara Killgrave | Kara Killgrave
+Persuasion | Persuasion
+Purple Girl | Purple Girl
+Kyle Gibney | Kyle Gibney
+Wild Child | Wild Child
+Laura Dean | Laura Dean
+Pathway | Pathway
+Goblyn | Goblin
+Christopher Summers | Christopher Summers
+Major Christopher Summers | Major Christopher Summers
+Corsair | Corsair
+Hepzibah | Hep zih buh
+Ch'od | Chod
+Raza Longknife | Rah zuh Longknife
+Raza | Rah zuh
+Cr'reee | Cree
+Sikorsky | Sikorsky
+Keeyah | Kee yuh
+Lilandra Neramani | Li landra Nera mah nee
+Lilandra | Li landra
+Cal'syee Neramani | Kal see Nera mah nee
+Deathbird | Deathbird
+D'Ken Neramani | Duh Ken Nera mah nee
+D'Ken | Duh Ken
+Kallark | Kuh lark
+Gladiator | Gladiator
+Erik Magnus Lehnsherr | Eric Magnus Lensherr
+Erik Lehnsherr | Eric Lensherr
+Max Eisenhardt | Max Eisenhart
+Eisenhardt | Eisenhart
+Lehnsherr | Lensherr
+Magneto | Magneeto
+White King | White King
+Grey King | Gray King
+Wanda Django Maximoff | Wanda Django Maximoff
+Wanda Maximoff | Wanda Maximoff
+Scarlet Witch | Scarlet Witch
+Pietro Maximoff | Pee eh tro Maximoff
+Quicksilver | Quicksilver
+Maximoff | Maximoff
+Raven Darkhölme | Raven Darkholm
+Raven Darkholme | Raven Darkholm
+Darkhölme | Darkholm
+Darkholme | Darkholm
+Mystique | Mistique
+Irene Adler | Irene Adler
+Destiny | Destiny
+Mortimer Toynbee | Mortimer Toynbee
+Toad | Toad
+Frederick Dukes | Frederick Dukes
+Fred Dukes | Fred Dukes
+Blob | Blob
+Unus the Untouchable | Yoonus the Untouchable
+Gunther Bain | Gunther Bain
+Unus | Yoonus
+Telford Porter | Telford Porter
+Vanisher | Vanisher
+Cain Marko | Cane Marko
+Juggernaut | Juggernaut
+Cyttorak | Sit orack
+Crimson Gem of Cyttorak | Crimson Gem of Sit orack
+Victor Creed | Victor Creed
+Sabretooth | Sabertooth
+Dominikos Petrakis | Doh min ih kos Peh trah kiss
+Dominic Petros | Dominic Petros
+Avalanche | Avalanche
+St. John Allerdyce | Saint John Alerdice
+St John Allerdyce | Saint John Alerdice
+Pyro | Pyro
+Phantazia | Fan tay zha
+Eileen Harsaw | Eileen Harsaw
+Karl Lykos | Karl Lye kos
+Sauron | Sauron
+Mesmero | Mezmero
+Ahmet Abdol | Ahmet Abdol
+Living Monolith | Living Monolith
+Living Pharaoh | Living Pharaoh
+Moira MacTaggert | Moyra Mac Taggert
+Moira Kinross | Moyra Kinross
+Doctor MacTaggert | Doctor Mac Taggert
+MacTaggert | Mac Taggert
+Moira X | Moyra Ex
+Moira | Moyra
+Kevin MacTaggert | Kevin Mac Taggert
+Proteus | Proteus
+Mutant X | Mutant Ex
+Amahl Farouk | Ah mahl Fah rook
+Farouk | Fah rook
+Shadow King | Shadow King
+En Sabah Nur | En Suh bah Noor
+Apocalypse | Apocalypse
+The First One | The First One
+Ozymandias | Ozzi mandias
+Pestilence | Pestilence
+Mister Sinister | Mister Sinister
+Mr. Sinister | Mister Sinister
+Mr Sinister | Mister Sinister
+Nathaniel Essex | Nathaniel Essex
+Essex | Essex
+Sinister | Sinister
+Mother Righteous | Mother Righteous
+Orbis Stellaris | Orbis Stellaris
+Doctor Stasis | Doctor Staysis
+Mother Akkaba | Mother Uh kahba
+Outer Circle | Outer Circle
+William Stryker | William Stryker
+Reverend Stryker | Reverend Stryker
+Colonel Stryker | Colonel Stryker
+Stryker | Stryker
+Graydon Creed | Graydon Creed
+Bolivar Trask | Bolee var Trask
+Larry Trask | Larry Trask
+Donald Trask | Donald Trask
+Steven Lang | Steven Lang
+Sebastion Gilberti | Sebastian Jill bair tee
+Cameron Hodge | Cameron Hodge
+The Right | The Right
+Trevor Fitzroy | Trevor Fitzroy
+Fitzroy | Fitzroy
+Gamesmaster | Gamesmaster
+Fabian Cortez | Fay bee un Cortez
+Anne-Marie Cortez | Ann Marie Cortez
+Cortez | Cortez
+Bennet du Paris | Benet doo Pah ree
+Exodus | Exodus
+Holocaust | Holocaust
+Sugar Man | Sugar Man
+Amelia Voght | Amelia Vote
+Voght | Vote
+Candra | Candruh
+Marianna Stern | Marianna Stern
+Senyaka | Sen yah kuh
+Carmella Unuscione | Carmella Yoon us ee oh nee
+Unuscione | Yoon us ee oh nee
+Sarah Ryall | Sarah Rye ull
+Katu | Kah too
+Simon Hall | Simon Hall
+Sally Blevins | Sally Blevins
+Skids | Skids
+Cassandra Nova Xavier | Cassandra Nova Zavier
+Cassandra Nova | Cassandra Nova
+John Sublime | John Sublime
+Sublime | Sublime
+Philippa Sontag | Fih lip uh Sontag
+Arclight | Arklite
+Kim Il Sung | Kim Il Sung
+Scrambler | Scrambler
+Vertigo | Vertigo
+Malice | Malice
+Kodiak Noatak | Kodiak Noa tack
+Harpoon | Harpoon
+Janos Quested | Yah nosh Kwested
+Riptide | Riptide
+John Greycrow | John Graycrow
+Scalphunter | Scalphunter
+Michael Nowlan | Michael Nowlan
+Blockbuster | Blockbuster
+Yuriko Oyama | Yoo ree ko Oh yah muh
+Lady Deathstrike | Lady Deathstrike
+Deathstrike | Deathstrike
+Kenuichio Harada | Ken oo ee chee oh Huh rah duh
+Shingen Harada | Shingen Huh rah duh
+Silver Samurai | Silver Samurai
+Mariko Yashida | Muh ree ko Yah shee duh
+Yukio | Yoo kee oh
+Arkady Rossovich | Ar kuh dee Rosso vitch
+Omega Red | Omega Red
+Silas Burr | Silas Burr
+Cyber | Syber
+Romulus | Romulus
+Solem | Solem
+Silver Fox | Silver Fox
+Maureen Cassidy | Maureen Cassidy
+Rita Wayword | Rita Wayword
+Spiral | Spiral
+Ricochet Rita | Rick oh shay Rita
+Mojo | Mojo
+Major Domo | Major Doh mo
+Minor Domo | Minor Doh mo
+Callisto | Kuh lis toh
+Masque | Mask
+Sunder | Sunder
+Caliban | Caliban
+Annalee | Annalee
+Plague | Plague
+Tar Baby | Tar Baby
+Beautiful Dreamer | Beautiful Dreamer
+Erg | Erg
+Leech | Leech
+Berzerker | Burzerker
+Blow-Hard | Blow Hard
+Chickenwing | Chickenwing
+Fairy Tale | Fairy Tale
+Fever Pitch | Fever Pitch
+Humus Sapien | Hyoo mus Say pee un
+Litterbug | Litterbug
+Psynapse | Synapse
+Scaleface | Scaleface
+Lucia Callasantos | Loo see uh Callasantos
+Maria Callasantos | Maria Callasantos
+Thornn | Thorn
+Feral | Feerul
+Belasco | Buh las ko
+S'ym | Sim
+N'astirh | Nuh steer
+Witchfire | Witchfire
+Ananym | An uh nim
+The Demon Bear | The Demon Bear
+White Bishop | White Bishop
+Manuel de la Rocha | Mahn well deh lah Roe chuh
+Empath | Empath
+Jennifer Stavros | Jennifer Stavros
+Roulette | Roo let
+Haroun ibn Sallah al-Rashid | Huh roon ibun Suh lah al Ruh sheed
+Jetstream | Jetstream
+Sharon Smith | Sharon Smith
+Catseye | Catseye
+Marie-Ange Colbert | Muh ree Onzh Cole bair
+Tarot | Tuh ro
+Buford Wilson | Byoo ford Wilson
+Beef | Beef
+Fabian Marechal-Julbin | Fay bee un Marshal Jool bin
+Bevatron | Bevatron
+Angelica Jones | Angelica Jones
+Firestar | Firestar
+Kylun | Kylun
+Colin McKay | Colin McKay
+Cerise | Suh rees
+Feron | Fairon
+Widget | Widget
+Isca the Unbeaten | Iss kuh the Unbeaten
+Isca | Iss kuh
+Annihilation | Annihilation
+Annihilation Wave | Annihilation Wave
+Tarn the Uncaring | Tarn the Uncaring
+White Sword | White Sword
+Fisher King | Fisher King
+Ora Serrata | Ora Seh rah tuh
+Lodus Logos | Loh dus Loh gos
+Sobunar | Soh boo nar
+Xilo | Zy lo
+Lactuca | Lack too kuh
+Kobak Never-Held | Koh back Never Held
+Uqesh the Bridge | Oo kesh the Bridge
+High Mutant Prophet Idyll | High Mutant Prophet Eye dull
+Idyll | Eye dull
+Amenth | Uh menth
+Redroot | Redroot
+homo superior | ho mo soo peer ee or
+Homo sapiens superior | Ho mo say pee uns soo peer ee or
+adamantium | ad uh man tee um
+vibranium | vy bray nee um
+carbonadium | car buh nay dee um
+Muramasa blade | Moo ruh mah suh blade
+muramasa | moo ruh mah suh
+Terrigen Mist | Tair ih jen Mist
+Terrigen | Tair ih jen
+M-Pox | Em Pox
+NuHuman | New human
+Inhuman | Inhuman
+Kevin Sydney | Kevin Sydney
+Changeling | Changeling
+Calvin Rankin | Calvin Rankin
+Mimic | Mimick
+Suzanne Chan | Suzanne Chan
+Sway | Sway
+Ms. Marvel | Miz Marvel
+Ms Marvel | Miz Marvel
+Kamala Khan | Kuh mah luh Kahn
