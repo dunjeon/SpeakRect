@@ -9,9 +9,9 @@ namespace SpeakRect
 {
     /// <summary>
     /// Balloons preview surface: zoomed base image + interactive reading islands.
-    /// Non-POI base is the detect view (gray fog when on). POI base is tone
-    /// (Local-LLM / map canvas). Rects are <b>pipeline image coordinates</b>
-    /// (display-final grow + crop pad). List order is crop / reading order.
+    /// Base is the detect view when Find-boxes fog is on (so Softness is visible),
+    /// otherwise tone when POI markers are on. Rects are <b>pipeline image
+    /// coordinates</b> (display-final grow + crop pad). List order is crop / reading order.
     /// </summary>
     public sealed class RegionRefineSurface : Control
     {

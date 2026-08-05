@@ -1160,7 +1160,8 @@ namespace SpeakRect
         /// <summary>
         /// Build the Balloons detect-view bitmap (prep + optional gray fog) without
         /// running WinOCR. Same pixels WinOCR would see. Caller owns the return.
-        /// Used to refresh fog preview when boxes are locked (non-POI).
+        /// Used to refresh fog preview when boxes are locked, and whenever
+        /// Find-boxes fog is on so Softness is visible even with POI markers.
         /// </summary>
         public static Bitmap BuildComicDetectViewBitmap(Bitmap rawSnap)
         {
@@ -1187,8 +1188,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Build the Comic Book tone (Local-LLM / POI base) without WinOCR.
-        /// Caller owns the return. Used when POI is on so locked-box fog refreshes
-        /// never swap the refine surface onto detect fog (VL still reads tone).
+        /// Caller owns the return. Used for POI edit-map preview when Find-boxes
+        /// fog is off (VL still reads tone on speak either way).
         /// </summary>
         public static Bitmap BuildComicToneViewBitmap(Bitmap rawSnap)
         {
@@ -1259,24 +1260,31 @@ namespace SpeakRect
                     regions, pipeW, pipeH, TextRegionPadding);
                 var displayRects = previewBoxes.Select(r => r.Bounds).ToList();
 
-                // POI: preview base = TONE (edit map). VL is orange island / tone crop /
-                // full-page guide depending on Island canvases — not this full page when
-                // multi + canvases on. Non-POI: detect image so fog is visible.
+                // Balloons preview base:
+                // - Find-boxes fog on → detect image so Softness is visible (even with POI).
+                // - Fog off + POI → tone (edit map / VL base).
+                // - Fog off + non-POI → detect (= tone when fog off).
+                // Speak still reads tone / orange islands — never this fog bitmap.
                 bool poiMode = SpeakRunSettings.GetComicPoiMarkers();
+                bool fogOn = EnableWinOcrDetectGrayFog;
+                bool useDetectBase = !poiMode || fogOn;
                 bool poiCanvas = poiMode && SpeakRunSettings.GetComicPoiAutoStack();
+                string baseLabel = useDetectBase
+                    ? (fogOn ? "detect @ fog" : "detect (fog off)")
+                    : "TONE (POI edit map; not always VL)";
                 detail.AppendLine(
                     $"grow X/Y={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##} " +
                     $"cropPad={TextRegionPadding}px " +
                     $"(display boxes = grow + pad; " +
-                    $"preview base={(poiMode ? "TONE (POI edit map; not always VL)" : "detect @ fog")}; " +
+                    $"preview base={baseLabel}; " +
                     $"speak={(poiCanvas ? "orange island VL ×N" : poiMode ? "tone crop / full-page guide" : "per-island / crop-stack")}; " +
                     $"fogUsed={fogUsed:0.###})");
 
                 Bitmap detectForOverlay = detectImage;
-                overlay = BuildRegionsOverlayBitmap(
-                    poiMode ? toneOwned : detectForOverlay, previewBoxes);
+                Bitmap previewBaseSrc = useDetectBase ? detectForOverlay : toneOwned;
+                overlay = BuildRegionsOverlayBitmap(previewBaseSrc, previewBoxes);
 
-                Bitmap baseImage = new Bitmap(poiMode ? toneOwned : detectForOverlay);
+                Bitmap baseImage = new Bitmap(previewBaseSrc);
 
                 return new ComicRegionPreviewResult
                 {

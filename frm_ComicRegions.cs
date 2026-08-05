@@ -1336,8 +1336,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Rebuild prep base for the refine surface; keep existing boxes.
-        /// Non-POI: detect fog so fog slider is visible. POI: tone only (VL base) —
-        /// detect fog must not replace the POI map canvas.
+        /// Find-boxes fog on → detect view so Softness is visible (including with POI).
+        /// Fog off + POI → tone edit map. Speak still reads tone either way.
         /// </summary>
         private async Task RefreshDetectViewBaseAsync()
         {
@@ -1357,11 +1357,13 @@ namespace SpeakRect
                 bool poiOn = AppSettings.Current.ComicPoiMarkers;
                 bool fogOn = AppSettings.Current.ComicDetectFog;
                 float fogAmt = AppSettings.Current.ComicDetectFogAmount;
-                // POI VL / map base is always tone. Detect fog is WinOCR-only.
+                // Soften art when finding balloons: show detect fog in preview even if
+                // POI markers are on (speak still uses clear tone / island crops).
+                bool useDetectView = !poiOn || fogOn;
                 Bitmap baseView = await Task.Run(
-                    () => poiOn
-                        ? OcrProcessor.BuildComicToneViewBitmap(work)
-                        : OcrProcessor.BuildComicDetectViewBitmap(work),
+                    () => useDetectView
+                        ? OcrProcessor.BuildComicDetectViewBitmap(work)
+                        : OcrProcessor.BuildComicToneViewBitmap(work),
                     CancellationToken.None).ConfigureAwait(true);
 
                 if (IsDisposed || gen != _liveGeneration)
@@ -1373,22 +1375,23 @@ namespace SpeakRect
                 _refine.UpdateBaseKeepRegions(baseView);
                 // Locked-box fog view: fixed slider amount only (dyn needs full re-detect).
                 string fogHint;
-                if (poiOn)
-                {
-                    fogHint = "POI tone base (detect fog is WinOCR-only)";
-                }
-                else if (!fogOn)
-                {
-                    fogHint = "fog=off";
-                }
-                else
+                if (fogOn)
                 {
                     fogHint = $"fog={fogAmt:0.00}";
                 }
+                else if (poiOn)
+                {
+                    fogHint = "tone base (fog off)";
+                }
+                else
+                {
+                    fogHint = "fog=off";
+                }
+                string viewLabel = useDetectView ? "detect" : "tone";
                 _lblPreviewStatus.Text =
                     $"Source: {_sourceLabel}  ·  {_refine.RegionCount} region" +
                     (_refine.RegionCount == 1 ? "" : "s") +
-                    $"  ·  {(poiOn ? "tone" : "detect")} view ({fogHint})  ·  boxes locked";
+                    $"  ·  {viewLabel} view ({fogHint})  ·  boxes locked";
                 _lblPreviewStatus.ForeColor = UiTheme.Warn;
                 if (HasLockedRefine)
                 {
