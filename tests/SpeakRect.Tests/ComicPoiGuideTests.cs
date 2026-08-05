@@ -310,4 +310,48 @@ public class ComicPoiGuideTests
         Assert.True(grown.Height < ComicPoiGuide.IslandStripMinHeight ||
                     grown.Bottom <= lower.Top);
     }
+
+    [Fact]
+    public void Wide_ribbon_expands_up_when_bottom_blocked_by_neighbor()
+    {
+        // Tight island low in free band: little room below (neighbor), lots above.
+        // Old path centered then cut the bottom → short crop; must reclaim height upward.
+        var tight = new Rectangle(50, 500, 400, 80);   // 500..580
+        var lower = new Rectangle(50, 620, 400, 80);   // gap 40 below
+        const int minH = 400;
+        var grown = ComicPoiGuide.ExpandIslandCropToMinSize(
+            tight, frameW: 500, frameH: 900,
+            minWidth: 0,
+            minHeight: minH,
+            avoidIslands: new[] { tight, lower });
+
+        Assert.True(grown.Top <= tight.Top && grown.Bottom >= tight.Bottom,
+            $"must contain tight; grown={grown}");
+        Assert.True(grown.Bottom <= lower.Top - ComicPoiGuide.IslandExpandNeighborGapPx + 1 ||
+                    grown.Bottom <= lower.Top,
+            $"must stop before lower island; grown={grown} lower={lower}");
+        Assert.True(grown.Top < tight.Top,
+            $"must expand upward into free space; grown={grown}");
+        Assert.True(grown.Height >= minH - 1,
+            $"should reach min height by growing up; grown H={grown.Height}");
+    }
+
+    [Fact]
+    public void Wide_ribbon_expands_up_when_low_in_frame()
+    {
+        // Near frame bottom: no room down — full minH must come from above.
+        var tight = new Rectangle(20, 700, 450, 100); // bottom 800 on frame 850
+        const int minH = 400;
+        var grown = ComicPoiGuide.ExpandIslandCropToMinSize(
+            tight, frameW: 500, frameH: 850,
+            minWidth: 0,
+            minHeight: minH);
+
+        Assert.True(grown.Contains(tight) ||
+            (grown.Left <= tight.Left && grown.Right >= tight.Right &&
+             grown.Top <= tight.Top && grown.Bottom >= tight.Bottom));
+        Assert.Equal(minH, grown.Height);
+        Assert.True(grown.Top < tight.Top);
+        Assert.True(grown.Bottom <= 850);
+    }
 }

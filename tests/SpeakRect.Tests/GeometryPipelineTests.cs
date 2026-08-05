@@ -71,6 +71,45 @@ public class GeometryPipelineTests
     }
 
     [Fact]
+    public void Crop_pad_spends_budget_up_when_bottom_is_blocked()
+    {
+        // Core near bottom with a neighbor just below: pad down is tiny, so leftover
+        // pad budget must go up (stop short of any neighbor above / frame top).
+        var core = new Rectangle(100, 200, 40, 40);   // 200..240
+        var lower = new Rectangle(100, 250, 40, 40);  // 10px gap below
+        const int pad = 30;
+        var crop = OcrProcessor.ComputeSpeakCropRect(
+            core, pad, capW: 400, capH: 400, neighborCores: new[] { core, lower });
+
+        Assert.True(crop.Top <= core.Top && crop.Bottom >= core.Bottom);
+        Assert.True(crop.Bottom <= lower.Top,
+            $"must not invade lower; crop={crop} lower={lower}");
+        // Full vertical budget ≈ 2*pad when free; here bottom is blocked so top
+        // should take more than plain symmetric pad (core.Top - pad).
+        Assert.True(crop.Top < core.Top - pad,
+            $"expected extra upward pad; crop.Top={crop.Top} core.Top={core.Top}");
+        int topPad = core.Top - crop.Top;
+        int botPad = crop.Bottom - core.Bottom;
+        Assert.True(topPad + botPad >= pad,
+            $"should use available pad budget; topPad={topPad} botPad={botPad}");
+    }
+
+    [Fact]
+    public void Crop_pad_spends_budget_up_when_low_in_frame()
+    {
+        var core = new Rectangle(100, 360, 40, 30); // bottom 390 on 400 frame
+        const int pad = 40;
+        var crop = OcrProcessor.ComputeSpeakCropRect(
+            core, pad, capW: 400, capH: 400, neighborCores: null);
+
+        Assert.Equal(400, crop.Bottom); // hits frame bottom
+        Assert.True(crop.Top < core.Top - (400 - core.Bottom),
+            "leftover pad budget should extend upward past one-sided bottom clip");
+        Assert.True(crop.Top <= core.Top - pad || crop.Height >= core.Height + pad,
+            $"expected meaningful upward growth; crop={crop}");
+    }
+
+    [Fact]
     public void Dead_island_keeps_multiword_on_balloon()
     {
         using var bmp = new Bitmap(200, 200);

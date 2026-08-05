@@ -4927,16 +4927,41 @@ namespace SpeakRect
             return false;
         }
 
-        /// <summary>Asymmetric inflate - more vertical (stacked lines), less horizontal (side-by-side balloons).</summary>
+        /// <summary>
+        /// Inflate by frac/min pad, then keep as much of that size as the frame allows.
+        /// When the box sits low/right, unused pad is applied up/left instead of being
+        /// clipped away by a plain intersect.
+        /// </summary>
         private static Rectangle InflateRegionBoundsAsym(
             Rectangle b, int capW, int capH,
             double fracX, double fracY, int minPxX, int minPxY)
         {
             int padX = Math.Max(minPxX, (int)(b.Width * fracX));
             int padY = Math.Max(minPxY, (int)(b.Height * fracY));
-            var r = new Rectangle(
-                b.X - padX, b.Y - padY,
-                b.Width + padX * 2, b.Height + padY * 2);
+            int needW = b.Width + padX * 2;
+            int needH = b.Height + padY * 2;
+            needW = Math.Min(needW, Math.Max(1, capW));
+            needH = Math.Min(needH, Math.Max(1, capH));
+
+            int cx = b.X + b.Width / 2;
+            int cy = b.Y + b.Height / 2;
+            int x = cx - needW / 2;
+            int y = cy - needH / 2;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x + needW > capW) x = Math.Max(0, capW - needW);
+            if (y + needH > capH) y = Math.Max(0, capH - needH);
+
+            // Keep OCR core fully inside.
+            if (x > b.Left) x = b.Left;
+            if (y > b.Top) y = b.Top;
+            if (x + needW < b.Right) x = b.Right - needW;
+            if (y + needH < b.Bottom) y = b.Bottom - needH;
+            x = Math.Clamp(x, 0, Math.Max(0, capW - needW));
+            y = Math.Clamp(y, 0, Math.Max(0, capH - needH));
+
+            var r = new Rectangle(x, y, needW, needH);
+            r = Rectangle.Union(r, b);
             r.Intersect(new Rectangle(0, 0, capW, capH));
             return r.Width < 1 || r.Height < 1 ? b : r;
         }
@@ -8637,6 +8662,8 @@ namespace SpeakRect
         /// Pad <paramref name="bounds"/> but stop at neighbor edges / midlines so
         /// crops of stacked or side-by-side balloons do not include each other.
         /// Stacked balloons only clamp Y (not X); side-by-side only clamp X.
+        /// When one side is blocked (frame or neighbor), remaining pad budget is
+        /// spent on the free side — including upward when the bottom has no room.
         /// <b>Never shrinks inside the core detect box</b> - only the padding ring
         /// is clamped (fixes left-clipped "SPARTAN!" style crops).
         /// </summary>
@@ -8653,10 +8680,11 @@ namespace SpeakRect
             int coreR = bounds.Right;
             int coreB = bounds.Bottom;
 
-            int left = coreL - padding;
-            int top = coreT - padding;
-            int right = coreR + padding;
-            int bottom = coreB + padding;
+            // Free-band limits (crop edges may not cross these).
+            int limitL = 0;
+            int limitT = 0;
+            int limitR = capW;
+            int limitB = capH;
 
             if (neighbors != null && neighbors.Count > 0 && padding > 0)
             {
@@ -8685,45 +8713,85 @@ namespace SpeakRect
                     bool yNear = coreT - padding < o.Bottom &&
                                  coreB + padding > o.Top;
 
-                    // Stacked (or clearly above/below): only clamp vertical *padding*
+                    // Stacked (or clearly above/below): vertical free-band limits
                     if (xNear && (primarilyStacked || (!primarilySideBySide && dy > 0)))
                     {
                         if (ocy < acy)
                         {
                             // Neighbor above: do not pad into their box, but keep coreT
                             if (o.Bottom <= coreT)
-                                top = Math.Max(top, o.Bottom);
+                                limitT = Math.Max(limitT, o.Bottom);
                             else
-                                top = Math.Max(top, Math.Min(coreT, (o.Bottom + coreT) / 2));
+                                limitT = Math.Max(limitT, Math.Min(coreT, (o.Bottom + coreT) / 2));
                         }
                         else if (ocy > acy)
                         {
                             if (o.Top >= coreB)
-                                bottom = Math.Min(bottom, o.Top);
+                                limitB = Math.Min(limitB, o.Top);
                             else
-                                bottom = Math.Min(bottom, Math.Max(coreB, (coreB + o.Top) / 2));
+                                limitB = Math.Min(limitB, Math.Max(coreB, (coreB + o.Top) / 2));
                         }
                     }
 
-                    // Side-by-side only: clamp horizontal *padding*
+                    // Side-by-side only: horizontal free-band limits
                     if (yNear && primarilySideBySide)
                     {
                         if (ocx < acx)
                         {
                             if (o.Right <= coreL)
-                                left = Math.Max(left, o.Right);
+                                limitL = Math.Max(limitL, o.Right);
                             else
-                                left = Math.Max(left, Math.Min(coreL, (o.Right + coreL) / 2));
+                                limitL = Math.Max(limitL, Math.Min(coreL, (o.Right + coreL) / 2));
                         }
                         else if (ocx > acx)
                         {
                             if (o.Left >= coreR)
-                                right = Math.Min(right, o.Left);
+                                limitR = Math.Min(limitR, o.Left);
                             else
-                                right = Math.Min(right, Math.Max(coreR, (coreR + o.Left) / 2));
+                                limitR = Math.Min(limitR, Math.Max(coreR, (coreR + o.Left) / 2));
                         }
                     }
                 }
+            }
+
+            // Hard free-band: always allow containing the core.
+            limitL = Math.Clamp(limitL, 0, coreL);
+            limitT = Math.Clamp(limitT, 0, coreT);
+            limitR = Math.Clamp(limitR, coreR, Math.Max(coreR, capW));
+            limitB = Math.Clamp(limitB, coreB, Math.Max(coreB, capH));
+
+            // Ideal pad, then spend leftover budget on free sides when one side is short.
+            int left = Math.Max(limitL, coreL - padding);
+            int top = Math.Max(limitT, coreT - padding);
+            int right = Math.Min(limitR, coreR + padding);
+            int bottom = Math.Min(limitB, coreB + padding);
+
+            int wantV = padding * 2;
+            int haveV = (coreT - top) + (bottom - coreB);
+            if (haveV < wantV)
+            {
+                int miss = wantV - haveV;
+                int roomUp = top - limitT;
+                int roomDown = limitB - bottom;
+                int takeUp = Math.Min(miss, Math.Max(0, roomUp));
+                top -= takeUp;
+                miss -= takeUp;
+                int takeDown = Math.Min(miss, Math.Max(0, roomDown));
+                bottom += takeDown;
+            }
+
+            int wantH = padding * 2;
+            int haveH = (coreL - left) + (right - coreR);
+            if (haveH < wantH)
+            {
+                int miss = wantH - haveH;
+                int roomLeft = left - limitL;
+                int roomRight = limitR - right;
+                int takeLeft = Math.Min(miss, Math.Max(0, roomLeft));
+                left -= takeLeft;
+                miss -= takeLeft;
+                int takeRight = Math.Min(miss, Math.Max(0, roomRight));
+                right += takeRight;
             }
 
             // Hard floor: crop must always include the full detect island

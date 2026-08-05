@@ -133,10 +133,11 @@ namespace SpeakRect
         public const int IslandExpandNeighborGapPx = 4;
 
         /// <summary>
-        /// Grow <paramref name="hole"/> to min width/height when the frame allows.
-        /// Centered on the island, then clamped into the frame.
-        /// Optional <paramref name="avoidIslands"/>: shrink so the crop does not
-        /// enter other islands (keeps tight box fully inside).
+        /// Grow <paramref name="hole"/> to min width/height when free space allows.
+        /// Places the crop inside the free band (frame + neighbor gaps), always
+        /// containing the tight island. Prefer center on the island; when one side
+        /// is blocked (frame or neighbor), use the free side — including growing
+        /// <b>up</b> when the bottom has no room.
         /// </summary>
         public static Rectangle ExpandIslandCropToMinSize(
             Rectangle hole,
@@ -163,24 +164,164 @@ namespace SpeakRect
                 (avoidIslands == null || avoidIslands.Count == 0))
                 return tight;
 
+            // Free band that may host the crop (must still contain tight).
+            int limitL = 0;
+            int limitT = 0;
+            int limitR = frameW;
+            int limitB = frameH;
+            neighborGapPx = Math.Max(0, neighborGapPx);
+
+            if (avoidIslands != null)
+            {
+                foreach (var raw in avoidIslands)
+                {
+                    var n = Rectangle.Intersect(raw, frame);
+                    if (n.Width < 1 || n.Height < 1)
+                        continue;
+                    if (n.Equals(tight) ||
+                        (Math.Abs(n.X - tight.X) <= 1 &&
+                         Math.Abs(n.Y - tight.Y) <= 1 &&
+                         Math.Abs(n.Width - tight.Width) <= 2 &&
+                         Math.Abs(n.Height - tight.Height) <= 2))
+                        continue;
+
+                    var blocked = Rectangle.Inflate(n, neighborGapPx, neighborGapPx);
+                    blocked.Intersect(frame);
+                    if (blocked.Width < 1 || blocked.Height < 1)
+                        continue;
+
+                    // Neighbor clearly below / above / right / left of tight core.
+                    if (blocked.Top >= tight.Bottom - 1)
+                        limitB = Math.Min(limitB, Math.Max(tight.Bottom, blocked.Top));
+                    else if (blocked.Bottom <= tight.Top + 1)
+                        limitT = Math.Max(limitT, Math.Min(tight.Top, blocked.Bottom));
+
+                    if (blocked.Left >= tight.Right - 1)
+                        limitR = Math.Min(limitR, Math.Max(tight.Right, blocked.Left));
+                    else if (blocked.Right <= tight.Left + 1)
+                        limitL = Math.Max(limitL, Math.Min(tight.Left, blocked.Right));
+                }
+            }
+
+            // Crop must contain tight and stay in free band.
+            limitL = Math.Clamp(limitL, 0, tight.Left);
+            limitT = Math.Clamp(limitT, 0, tight.Top);
+            limitR = Math.Clamp(limitR, tight.Right, frameW);
+            limitB = Math.Clamp(limitB, tight.Bottom, frameH);
+
+            int availW = Math.Max(tight.Width, limitR - limitL);
+            int availH = Math.Max(tight.Height, limitB - limitT);
+            needW = Math.Min(needW, availW);
+            needH = Math.Min(needH, availH);
+            needW = Math.Max(needW, tight.Width);
+            needH = Math.Max(needH, tight.Height);
+
+            // Prefer center on tight; slide into free band when one side is short.
             int cx = tight.X + tight.Width / 2;
             int cy = tight.Y + tight.Height / 2;
             int x = cx - needW / 2;
             int y = cy - needH / 2;
-            if (x < 0) x = 0;
-            if (y < 0) y = 0;
-            if (x + needW > frameW) x = Math.Max(0, frameW - needW);
-            if (y + needH > frameH) y = Math.Max(0, frameH - needH);
-            needW = Math.Min(needW, frameW - x);
-            needH = Math.Min(needH, frameH - y);
-            var expanded = new Rectangle(x, y, Math.Max(1, needW), Math.Max(1, needH));
+            if (x < limitL) x = limitL;
+            if (y < limitT) y = limitT;
+            if (x + needW > limitR) x = Math.Max(limitL, limitR - needW);
+            if (y + needH > limitB) y = Math.Max(limitT, limitB - needH);
 
+            // Keep tight fully inside after slide.
+            if (x > tight.Left) x = tight.Left;
+            if (y > tight.Top) y = tight.Top;
+            if (x + needW < tight.Right) x = tight.Right - needW;
+            if (y + needH < tight.Bottom) y = tight.Bottom - needH;
+            x = Math.Clamp(x, limitL, Math.Max(limitL, limitR - needW));
+            y = Math.Clamp(y, limitT, Math.Max(limitT, limitB - needH));
+
+            var expanded = new Rectangle(
+                x, y, Math.Max(1, needW), Math.Max(1, needH));
+            expanded = Rectangle.Union(expanded, tight);
+            expanded.Intersect(frame);
+            if (expanded.Width < 1 || expanded.Height < 1)
+                return tight;
+
+            // Final safety: never invade neighbors (handles diagonal / nested).
             if (avoidIslands != null && avoidIslands.Count > 0)
             {
                 expanded = ClampCropAwayFromNeighbors(
                     tight, expanded, avoidIslands, frameW, frameH, neighborGapPx);
+                // After clamp, reclaim free room on the opposite side if min size
+                // was cut (e.g. bottom blocked → grow further up).
+                expanded = RecoverMinSizeInFreeBand(
+                    tight, expanded, needW, needH,
+                    limitL, limitT, limitR, limitB, frameW, frameH);
             }
 
+            return expanded;
+        }
+
+        /// <summary>
+        /// After neighbor clamp shrunk a crop, grow back toward <paramref name="needW"/>/
+        /// <paramref name="needH"/> using free band room (up/left when down/right blocked).
+        /// </summary>
+        private static Rectangle RecoverMinSizeInFreeBand(
+            Rectangle tight,
+            Rectangle expanded,
+            int needW,
+            int needH,
+            int limitL,
+            int limitT,
+            int limitR,
+            int limitB,
+            int frameW,
+            int frameH)
+        {
+            var frame = new Rectangle(0, 0, Math.Max(1, frameW), Math.Max(1, frameH));
+            tight = Rectangle.Intersect(tight, frame);
+            expanded = Rectangle.Intersect(expanded, frame);
+            if (tight.Width < 1 || tight.Height < 1)
+                return expanded;
+
+            expanded = Rectangle.Union(expanded, tight);
+            limitL = Math.Clamp(limitL, 0, tight.Left);
+            limitT = Math.Clamp(limitT, 0, tight.Top);
+            limitR = Math.Clamp(limitR, tight.Right, frameW);
+            limitB = Math.Clamp(limitB, tight.Bottom, frameH);
+
+            int deficitH = needH - expanded.Height;
+            if (deficitH > 0)
+            {
+                int roomUp = Math.Max(0, expanded.Top - limitT);
+                int roomDown = Math.Max(0, limitB - expanded.Bottom);
+                int takeUp = Math.Min(deficitH, roomUp);
+                if (takeUp > 0)
+                {
+                    expanded.Y -= takeUp;
+                    expanded.Height += takeUp;
+                    deficitH -= takeUp;
+                }
+                int takeDown = Math.Min(deficitH, roomDown);
+                if (takeDown > 0)
+                    expanded.Height += takeDown;
+            }
+
+            int deficitW = needW - expanded.Width;
+            if (deficitW > 0)
+            {
+                int roomLeft = Math.Max(0, expanded.Left - limitL);
+                int roomRight = Math.Max(0, limitR - expanded.Right);
+                int takeLeft = Math.Min(deficitW, roomLeft);
+                if (takeLeft > 0)
+                {
+                    expanded.X -= takeLeft;
+                    expanded.Width += takeLeft;
+                    deficitW -= takeLeft;
+                }
+                int takeRight = Math.Min(deficitW, roomRight);
+                if (takeRight > 0)
+                    expanded.Width += takeRight;
+            }
+
+            expanded = Rectangle.Union(expanded, tight);
+            expanded.Intersect(frame);
+            if (expanded.Width < 1 || expanded.Height < 1)
+                return tight;
             return expanded;
         }
 
