@@ -20,6 +20,14 @@ namespace SpeakRect
         private readonly CheckBox _chkPoiMarkers;
         private readonly CheckBox _chkPoiFogOutside;
         private readonly CheckBox _chkPoiAutoStack;
+        private readonly TrackBar _trkPoiAutoStackGap;
+        private readonly Label _lblPoiAutoStackGapVal;
+        private readonly TrackBar _trkPoiAutoStackMargin;
+        private readonly Label _lblPoiAutoStackMarginVal;
+        private readonly TrackBar _trkPoiStackBeef;
+        private readonly Label _lblPoiStackBeefVal;
+        private readonly TrackBar _trkPoiStackBottomPad;
+        private readonly Label _lblPoiStackBottomPadVal;
 
         private readonly CheckBox _chkFog;
         private readonly TrackBar _trkFogAmount;
@@ -280,12 +288,71 @@ namespace SpeakRect
                 ApplyControlsEnabled();
             };
             AddFull(_chkPoiAutoStack, 28);
-            // 3–4 wrapped lines + gap before §1 header.
+            _trkPoiAutoStackGap = MakeTrack(0, 64, ComicPoiGuide.DefaultAutoStackGapPx);
+            _lblPoiAutoStackGapVal = MakeValueLabel();
+            _trkPoiAutoStackGap.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Space between"),
+                WrapTrack(_trkPoiAutoStackGap, _lblPoiAutoStackGapVal),
+                42);
+            _trkPoiAutoStackMargin = MakeTrack(0, 64, ComicPoiGuide.LlmSendStackMarginPx);
+            _lblPoiAutoStackMarginVal = MakeValueLabel();
+            _trkPoiAutoStackMargin.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Canvas margin"),
+                WrapTrack(_trkPoiAutoStackMargin, _lblPoiAutoStackMarginVal),
+                42);
+            int defaultBeefPct = (int)Math.Round(
+                ComicPoiGuide.DefaultStackBeefExtra * 100.0);
+            _trkPoiStackBeef = MakeTrack(0, 100, defaultBeefPct);
+            _lblPoiStackBeefVal = MakeValueLabel();
+            _trkPoiStackBeef.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Extra canvas"),
+                WrapTrack(_trkPoiStackBeef, _lblPoiStackBeefVal),
+                42);
+            int defaultBotPct = (int)Math.Round(
+                ComicPoiGuide.DefaultStackBottomPadShare * 100.0);
+            _trkPoiStackBottomPad = MakeTrack(0, 100, defaultBotPct);
+            _lblPoiStackBottomPadVal = MakeValueLabel();
+            _trkPoiStackBottomPad.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Bottom bias"),
+                WrapTrack(_trkPoiStackBottomPad, _lblPoiStackBottomPadVal),
+                42);
+            // Multi-line hint + gap before §1 header.
             AddFull(MakeHint(
-                "On (recommended): each green box is read separately. " +
-                "The preview stays the full page so you can edit boxes. " +
-                "Off: several balloons are read as separate crops; a single box uses the full page."),
-                64);
+                "On (recommended): each green box is read on its own orange canvas. " +
+                "Margin and extra canvas pad that image for Local-LLM. " +
+                "Space between matters when several strips share one canvas. " +
+                "Bottom bias only shows when Extra canvas is above 0. " +
+                "Preview stays the full page so you can edit boxes. " +
+                "Off: several balloons are separate crops; a single box uses the full page."),
+                88);
 
             // 1) Detect fog
             AddFull(MakeSection("1 · FIND BOXES"), 28);
@@ -631,6 +698,10 @@ namespace SpeakRect
             Next(_chkPoiMarkers);
             Next(_chkPoiFogOutside);
             Next(_chkPoiAutoStack);
+            Next(_trkPoiAutoStackGap);
+            Next(_trkPoiAutoStackMargin);
+            Next(_trkPoiStackBeef);
+            Next(_trkPoiStackBottomPad);
             // 1) Detect fog
             Next(_chkFog);
             Next(_trkFogAmount);
@@ -886,6 +957,22 @@ namespace SpeakRect
                 _chkPoiMarkers.Checked = s.ComicPoiMarkers;
                 _chkPoiFogOutside.Checked = s.ComicPoiFogOutside;
                 _chkPoiAutoStack.Checked = s.ComicPoiAutoStack;
+                _trkPoiAutoStackGap.Value = Math.Clamp(
+                    s.ComicPoiAutoStackGapPx,
+                    _trkPoiAutoStackGap.Minimum,
+                    _trkPoiAutoStackGap.Maximum);
+                _trkPoiAutoStackMargin.Value = Math.Clamp(
+                    s.ComicPoiAutoStackMarginPx,
+                    _trkPoiAutoStackMargin.Minimum,
+                    _trkPoiAutoStackMargin.Maximum);
+                _trkPoiStackBeef.Value = Math.Clamp(
+                    (int)Math.Round(s.ComicPoiStackBeefExtra * 100.0),
+                    _trkPoiStackBeef.Minimum,
+                    _trkPoiStackBeef.Maximum);
+                _trkPoiStackBottomPad.Value = Math.Clamp(
+                    (int)Math.Round(s.ComicPoiStackBottomPadShare * 100.0),
+                    _trkPoiStackBottomPad.Minimum,
+                    _trkPoiStackBottomPad.Maximum);
                 _chkFog.Checked = s.ComicDetectFog;
                 _trkFogAmount.Value = FogToTick(s.ComicDetectFogAmount);
                 _trkInflateX.Value = InflateToTick(s.ComicInflateFracX);
@@ -1041,6 +1128,15 @@ namespace SpeakRect
             _chkPoiMarkers.Enabled = ready;
             _chkPoiFogOutside.Enabled = poiOn;
             _chkPoiAutoStack.Enabled = poiOn;
+            bool stackOn = poiOn && _chkPoiAutoStack.Checked;
+            _trkPoiAutoStackGap.Enabled = stackOn;
+            _lblPoiAutoStackGapVal.Enabled = stackOn;
+            _trkPoiAutoStackMargin.Enabled = stackOn;
+            _lblPoiAutoStackMarginVal.Enabled = stackOn;
+            _trkPoiStackBeef.Enabled = stackOn;
+            _lblPoiStackBeefVal.Enabled = stackOn;
+            _trkPoiStackBottomPad.Enabled = stackOn;
+            _lblPoiStackBottomPadVal.Enabled = stackOn;
             _chkFog.Enabled = ready;
             bool fogSliderOn = ready && _chkFog.Checked;
             _trkFogAmount.Enabled = fogSliderOn;
@@ -1144,6 +1240,10 @@ namespace SpeakRect
             s.ComicPoiMarkers = _chkPoiMarkers.Checked;
             s.ComicPoiFogOutside = _chkPoiFogOutside.Checked;
             s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
+            s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
+            s.ComicPoiAutoStackMarginPx = _trkPoiAutoStackMargin.Value;
+            s.ComicPoiStackBeefExtra = _trkPoiStackBeef.Value / 100.0;
+            s.ComicPoiStackBottomPadShare = _trkPoiStackBottomPad.Value / 100.0;
             // POI is a Comic Book attack — keep MODE row / sidebar in sync.
             // Only force Comic on when the user actually enables POI (not every Persist).
             if (s.ComicPoiMarkers && !comicWas)
@@ -1212,6 +1312,7 @@ namespace SpeakRect
                 _refine.ShowPoiOutsideFog = outside;
                 // Never swap preview to island canvas — user edits full page only.
                 _refine.ShowPoiAutoStack = false;
+                _refine.PoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
                 _refine.Invalidate();
             }
             catch { /* ignore */ }
@@ -2028,6 +2129,10 @@ namespace SpeakRect
             _lblInflateXVal.Text = TickToInflate(_trkInflateX.Value).ToString("0.00", inv);
             _lblInflateYVal.Text = TickToInflate(_trkInflateY.Value).ToString("0.00", inv);
             _lblPaddingVal.Text = $"{_trkPadding.Value}px";
+            _lblPoiAutoStackGapVal.Text = $"{_trkPoiAutoStackGap.Value}px";
+            _lblPoiAutoStackMarginVal.Text = $"{_trkPoiAutoStackMargin.Value}px";
+            _lblPoiStackBeefVal.Text = $"+{_trkPoiStackBeef.Value}%";
+            _lblPoiStackBottomPadVal.Text = $"{_trkPoiStackBottomPad.Value}% bot";
         }
 
         private static int FogToTick(float v) =>

@@ -13,7 +13,8 @@ namespace SpeakRect
     /// preview) on tone prep. Full-page map is for edit/Analytics — not always VL.
     /// Speak: Island canvases on → each island orange canvas VL one at a time;
     /// canvases off/fail multi → per-island tone crop VL; 1 island + canvases off →
-    /// full-page guide VL. Canvas compose fixed: gap 10, margin 12, beef 0, bottom 0.
+    /// full-page guide VL. Canvas compose knobs: Balloons gap / margin / beef / bottom pad
+    /// (stock 10 / 12 / 0 / 0).
     /// </summary>
     public static class ComicPoiGuide
     {
@@ -571,17 +572,18 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Fixed canvas beef knobs (not user-facing). gap/margin/beef/bottom = 10/12/0/0.
+        /// Resolve stack beef knobs from current settings (Balloons A/B).
+        /// Prefers frozen speak-run knobs when OCR is mid-pipeline.
         /// </summary>
         public static void ResolveStackBeefFromSettings(
             out double beefExtra,
             out double bottomPadShare)
         {
-            beefExtra = DefaultStackBeefExtra;
-            bottomPadShare = DefaultStackBottomPadShare;
+            beefExtra = SpeakRunSettings.GetComicPoiStackBeefExtra();
+            bottomPadShare = SpeakRunSettings.GetComicPoiStackBottomPadShare();
         }
 
-        /// <summary>Fixed gap (px) between multi-strip bands when composing (stock 10).</summary>
+        /// <summary>Default gap (px) between multi-strip island bands on the orange canvas.</summary>
         public const int DefaultAutoStackGapPx = 10;
 
         /// <summary>

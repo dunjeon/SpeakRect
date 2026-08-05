@@ -236,9 +236,38 @@ namespace SpeakRect
         /// When POI is on: lift each island onto its own orange canvas and send to
         /// Local-LLM one at a time (not one multi-strip image). Preview stays full page.
         /// Default on for Comic Book starting defaults.
-        /// Canvas compose knobs are fixed in <see cref="ComicPoiGuide"/> (gap 10, margin 12, beef 0, bottom 0).
+        /// Canvas compose knobs: gap / margin / beef / bottom pad (Balloons sliders).
         /// </summary>
         public bool ComicPoiAutoStack { get; set; } = true;
+
+        /// <summary>
+        /// Gap (px) between strips when composing a multi-strip canvas (non-POI
+        /// crop-stack / multi-strip). Per-island AutoStack send ignores this
+        /// (one island per canvas). Default 10.
+        /// </summary>
+        public int ComicPoiAutoStackGapPx { get; set; } =
+            ComicPoiGuide.DefaultAutoStackGapPx;
+
+        /// <summary>
+        /// Outer margin (px) on top/left/right/bottom of each Local-LLM island canvas.
+        /// Default 12.
+        /// </summary>
+        public int ComicPoiAutoStackMarginPx { get; set; } =
+            ComicPoiGuide.LlmSendStackMarginPx;
+
+        /// <summary>
+        /// Extra canvas size vs stacked content (0 = stock tight; 0.33 = ⅓ larger).
+        /// Pads only — lettering not scaled. A/B for Local-LLM vision headroom.
+        /// </summary>
+        public double ComicPoiStackBeefExtra { get; set; } =
+            ComicPoiGuide.DefaultStackBeefExtra;
+
+        /// <summary>
+        /// Share of vertical canvas beef placed below the content (0.5 = centered,
+        /// 0.85 = bottom-heavy). Horizontal pad stays centered.
+        /// </summary>
+        public double ComicPoiStackBottomPadShare { get; set; } =
+            ComicPoiGuide.DefaultStackBottomPadShare;
 
         /// <summary>Clamp comic-region detect options to safe ranges.</summary>
         public void NormalizeComicRegionSettings()
@@ -247,6 +276,11 @@ namespace SpeakRect
             ComicInflateFracX = Math.Clamp(ComicInflateFracX, 0.0, 0.80);
             ComicInflateFracY = Math.Clamp(ComicInflateFracY, 0.0, 0.80);
             ComicRegionPadding = Math.Clamp(ComicRegionPadding, 0, 64);
+            ComicPoiAutoStackGapPx = Math.Clamp(ComicPoiAutoStackGapPx, 0, 64);
+            ComicPoiAutoStackMarginPx = Math.Clamp(ComicPoiAutoStackMarginPx, 0, 64);
+            ComicPoiStackBeefExtra = Math.Clamp(ComicPoiStackBeefExtra, 0.0, 1.5);
+            ComicPoiStackBottomPadShare =
+                Math.Clamp(ComicPoiStackBottomPadShare, 0.0, 1.0);
         }
 
         /// <summary>
@@ -270,6 +304,10 @@ namespace SpeakRect
             ComicMergeOverlappingIslands = true;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
+            ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
+            ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
+            ComicPoiStackBottomPadShare = ComicPoiGuide.DefaultStackBottomPadShare;
             if (asComicBookMode)
             {
                 // Comic Book stock (fresh Comic Book path / Balloons reset in-mode).
@@ -1117,6 +1155,10 @@ namespace SpeakRect
             ComicPoiMarkers = true;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
+            ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
+            ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
+            ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
+            ComicPoiStackBottomPadShare = ComicPoiGuide.DefaultStackBottomPadShare;
             ImageLlmSendDownscale = false;
             ImageLlmSendMaxLongEdge = DefaultImageLlmSendMaxLongEdge;
             // Detect / island pipeline stock on-state (booleans only).
@@ -1493,7 +1535,21 @@ namespace SpeakRect
                 TryParseBool(poiStackRaw, out bool poiStack))
                 ComicPoiAutoStack = poiStack;
 
-            // Legacy canvas knobs ignored (fixed in ComicPoiGuide: gap 10, margin 12, beef 0, bottom 0).
+            if (map.TryGetValue("ComicPoiAutoStackGapPx", out string? poiGapRaw) &&
+                int.TryParse(poiGapRaw, System.Globalization.NumberStyles.Integer, inv, out int poiGap))
+                ComicPoiAutoStackGapPx = poiGap;
+
+            if (map.TryGetValue("ComicPoiAutoStackMarginPx", out string? poiMarRaw) &&
+                int.TryParse(poiMarRaw, System.Globalization.NumberStyles.Integer, inv, out int poiMar))
+                ComicPoiAutoStackMarginPx = poiMar;
+
+            if (map.TryGetValue("ComicPoiStackBeefExtra", out string? beefRaw) &&
+                double.TryParse(beefRaw, System.Globalization.NumberStyles.Float, inv, out double beef))
+                ComicPoiStackBeefExtra = beef;
+
+            if (map.TryGetValue("ComicPoiStackBottomPadShare", out string? botRaw) &&
+                double.TryParse(botRaw, System.Globalization.NumberStyles.Float, inv, out double botShare))
+                ComicPoiStackBottomPadShare = botShare;
 
             NormalizeComicRegionSettings();
             // After POI keys load: if file has Default mode + POI on, suspend POI
@@ -2348,7 +2404,7 @@ namespace SpeakRect
                 sb.AppendLine(";   Not multi-strip stack. Preview stays full page. Stack off/fail multi → per-island VL.");
                 sb.AppendLine(";   1 island + stack off → full-page guide VL.");
                 sb.AppendLine("; PoiFogOutside=true: thick gray fog outside boxes on the full-page map (not VL when canvases on).");
-                sb.AppendLine("; Canvas compose is fixed (gap=10, margin=12, beef=0, bottomPad=0) — not in ini.");
+                sb.AppendLine("; PoiAutoStackMarginPx=12 (outer pad per canvas). Gap/beef/bottomPad for canvas compose A/B.");
                 sb.AppendLine("; DetectFog=true + DetectFogAmount: fixed gray fog for WinOCR balloon detect.");
                 sb.AppendLine($"ComicDetectFog={ComicDetectFog.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicDetectFogAmount={ComicDetectFogAmount.ToString("0.###", inv)}");
@@ -2359,6 +2415,12 @@ namespace SpeakRect
                 sb.AppendLine($"ComicPoiMarkers={ComicPoiMarkers.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicPoiAutoStackGapPx={ComicPoiAutoStackGapPx}");
+                sb.AppendLine($"ComicPoiAutoStackMarginPx={ComicPoiAutoStackMarginPx}");
+                sb.AppendLine(
+                    $"ComicPoiStackBeefExtra={ComicPoiStackBeefExtra.ToString("0.###", inv)}");
+                sb.AppendLine(
+                    $"ComicPoiStackBottomPadShare={ComicPoiStackBottomPadShare.ToString("0.###", inv)}");
                 sb.AppendLine();
                 NormalizeImagePrepSettings();
                 sb.AppendLine("[IMAGE_PREP]");
@@ -2607,7 +2669,8 @@ namespace SpeakRect
                 or "ComicInflateFracX" or "ComicInflateFracY"
                 or "ComicRegionPadding" or "ComicMergeOverlappingIslands"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
-                or "ComicPoiAutoStack"
+                or "ComicPoiAutoStack" or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
+                or "ComicPoiStackBeefExtra" or "ComicPoiStackBottomPadShare"
                 or "ImagePrepEnabled"
                 or "ImageLlmSendDownscale" or "ImageLlmSendMaxLongEdge"
                 or "ImageLetterbox" or "ImageLetterboxPad"

@@ -118,14 +118,19 @@ namespace SpeakRect
             set { /* preview never swaps to island canvas */ }
         }
 
-        /// <summary>Dead API — canvas gap is fixed in <see cref="ComicPoiGuide"/> (10px).</summary>
+        /// <summary>
+        /// Kept for Balloons API compat. Preview never swaps to stack canvas, so this
+        /// is stored but unused for paint (Speak uses AppSettings / SpeakRunSettings).
+        /// </summary>
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int PoiAutoStackGapPx
         {
-            get => ComicPoiGuide.DefaultAutoStackGapPx;
-            set { /* ignored — fixed compose knobs */ }
+            get => _poiAutoStackGapPx;
+            set => _poiAutoStackGapPx = Math.Clamp(value, 0, 64);
         }
+
+        private int _poiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
 
         /// <summary>True when preview is showing the full-page POI guide (tone compose).</summary>
         public bool IsShowingPoiGuidePreview =>

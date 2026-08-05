@@ -101,8 +101,8 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiAutoStack);
             Assert.True(s.ComicDetectFog);
             Assert.False(s.ImageLlmSendDownscale);
-            Assert.Equal(0.0, ComicPoiGuide.DefaultStackBeefExtra);
-            Assert.Equal(0.0, ComicPoiGuide.DefaultStackBottomPadShare);
+            Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);
+            Assert.Equal(ComicPoiGuide.DefaultStackBottomPadShare, s.ComicPoiStackBottomPadShare);
         }
         finally
         {
@@ -253,12 +253,12 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiMarkers);
             Assert.True(s.ComicPoiFogOutside);
             Assert.True(s.ComicPoiAutoStack);
+            Assert.Equal(ComicPoiGuide.DefaultAutoStackGapPx, s.ComicPoiAutoStackGapPx);
+            Assert.Equal(ComicPoiGuide.LlmSendStackMarginPx, s.ComicPoiAutoStackMarginPx);
             Assert.False(s.ImageLlmSendDownscale);
             Assert.Equal(AppSettings.DefaultImageLlmSendMaxLongEdge, s.ImageLlmSendMaxLongEdge);
-            Assert.Equal(10, ComicPoiGuide.DefaultAutoStackGapPx);
-            Assert.Equal(12, ComicPoiGuide.LlmSendStackMarginPx);
-            Assert.Equal(0.0, ComicPoiGuide.DefaultStackBeefExtra);
-            Assert.Equal(0.0, ComicPoiGuide.DefaultStackBottomPadShare);
+            Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);
+            Assert.Equal(ComicPoiGuide.DefaultStackBottomPadShare, s.ComicPoiStackBottomPadShare);
             Assert.True(s.ComicDetectFog);
             Assert.True(s.ComicMergeOverlappingIslands);
         }
