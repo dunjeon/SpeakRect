@@ -80,13 +80,19 @@ Optional OCR fallback for very short text on busy art (settings-dependent).
 
 ```
 shared image prep → ComicDetectTonePair (fog on detect only; Local-LLM reads tone)
-  → BalloonOcrDetect multi-pass / line group
-  → grow/pad/merge/sort
+  → [if ComicRegionOverrideSession matches pipe size] use refined boxes (skip WinOCR)
+  → else BalloonOcrDetect multi-pass / line group → grow/pad/merge/sort
   → [if ComicPoiMarkers] RunComicPoiGuideAsync (see POI below)
   → else per-island OCR+TTS when islands found
   → else crop-stack best-of (empty / no islands)
   → SpeechCleaner → TTS
 ```
+
+**Balloons refine → live** (`ComicRegionOverrideSession`):
+- User deletes/draws boxes on Settings → Balloons preview; **Speak** and **live** both use those boxes when the live snap's pipeline size matches (exact or ~same aspect within 2%).
+- Override boxes are display-final → live sets pad=0 (no double crop pad).
+- Live that **uses** the override does **not** clear the session; a new snap that re-detects (size mismatch / no session) still calls `NotifyNewCapture`.
+- Overlay-hide one-shot speak still uses `TryConsumeOverlaySpeak` after a real edit.
 
 **POI guide** (`AppSettings.ComicPoiMarkers`, Balloons tab): Comic Book alternate.
 Forces Comic Book on. **Live + Balloons Speak share `RunComicPoiGuideAsync`.**

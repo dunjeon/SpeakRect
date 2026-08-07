@@ -675,9 +675,16 @@ namespace SpeakRect
         /// Per-host override for <see cref="AppSettings.ComicRegionPadding"/> (not static —
         /// concurrent live speak must not see Balloons override pad=0).
         /// Balloons override boxes already bake pad; set to 0 so pad is not applied twice.
-        /// Live leaves this null and uses settings pad.
+        /// Live leaves this null and uses settings pad, unless a Balloons refine session
+        /// matches this snap's pipeline size (then pad=0 like still Speak).
         /// </summary>
         private int? _forcedCropPadPx;
+
+        /// <summary>
+        /// When true, <see cref="WriteLastOcrDebug"/> must not clear
+        /// <see cref="ComicRegionOverrideSession"/> (live used the user's refined boxes).
+        /// </summary>
+        private bool _keepRefineSessionThisRun;
 
         /// <summary>
         /// Settings crop pad (no per-run override). Static helpers / merge tests use this.
@@ -2095,6 +2102,8 @@ namespace SpeakRect
             // Fresh analytics image list for this run (published via WriteLastOcrDebug).
             _runImages = new List<OcrResultImage>(16);
             ClearRunFogAnalytics();
+            _forcedCropPadPx = null;
+            _keepRefineSessionThisRun = false;
             try
             {
                 // -------------------------------------------------------------
@@ -2218,13 +2227,83 @@ namespace SpeakRect
 
                     // Shared detect (fixed fog when on) — same entry as Balloons.
                     // Local-LLM always reads ocrImage/tone; WinOCR detect may use fog.
+                    // Exception: Balloons refined boxes for this pipeline size → skip
+                    // WinOCR and use the user's list (same as Balloons Speak override).
                     sw.Restart();
                     var detectLog = new StringBuilder();
-                    List<DetectedTextRegion> regions;
-                    DetectionResult detection;
-                    bool fragmented;
-                    float fogUsedLive;
+                    List<DetectedTextRegion> regions = new();
+                    DetectionResult detection = new DetectionResult();
+                    bool fragmented = false;
+                    float fogUsedLive = 0f;
+                    bool usedRegionOverride = false;
+                    // Assigned in override branch or shared-detect branch below.
+                    detectImage = ocrImage;
+                    if (ComicRegionOverrideSession.TryGetForPipeline(
+                            ocrImage.Width, ocrImage.Height, out var overrideRects) &&
+                        overrideRects.Count > 0)
                     {
+                        var mapped = RegionsFromOverride(
+                            overrideRects, ocrImage.Width, ocrImage.Height);
+                        if (mapped.Count > 0)
+                        {
+                            // Display-final boxes from Balloons — do not pad again.
+                            _forcedCropPadPx = 0;
+                            _keepRefineSessionThisRun = true;
+                            usedRegionOverride = true;
+                            regions = mapped;
+                            fragmented = false;
+                            detection = new DetectionResult
+                            {
+                                Regions = regions,
+                                LowConfidence = false,
+                                LooksFragmented = false,
+                                Detail = "region-override (Balloons refine session)",
+                            };
+                            // Detect view for analytics only (fog when on) — no WinOCR.
+                            using (var toneDetect = ComicDetectTonePair.Create(
+                                ocrImage,
+                                EnableWinOcrDetectGrayFog,
+                                WinOcrDetectGrayFogAmount,
+                                WinOcrDetectGrayFogLevel,
+                                ApplyGrayFog))
+                            {
+                                if (toneDetect.DetectIsSeparateFog)
+                                {
+                                    fogOwned = toneDetect.ReleaseDetect();
+                                    fogUsedLive = WinOcrDetectGrayFogAmount;
+                                    detectLog.AppendLine(
+                                        $"region-override={regions.Count} " +
+                                        $"(skip WinOCR; fog amount={fogUsedLive:0.###} detect view only)");
+                                }
+                                else
+                                {
+                                    fogUsedLive = 0f;
+                                    detectLog.AppendLine(
+                                        $"region-override={regions.Count} " +
+                                        "(skip WinOCR; detect on tone)");
+                                }
+                            }
+                            detectImage = fogOwned ?? ocrImage;
+                            SetRunFogAnalytics(fogUsedLive);
+                            pipeTimer.Mark(
+                                $"region-override (n={regions.Count})", sw);
+                            Debug.WriteLine(
+                                $"[OCR] live using Balloons refine override " +
+                                $"regions={regions.Count} pipe={ocrImage.Width}x{ocrImage.Height}");
+                        }
+                    }
+
+                    if (!usedRegionOverride)
+                    {
+                        if (ComicRegionOverrideSession.IsActive)
+                        {
+                            // Session exists but framing differs — cannot map boxes.
+                            detectLog.AppendLine(
+                                "region-override ignored (pipeline size mismatch or empty; " +
+                                "re-detect; refine cleared after this snap)");
+                            Debug.WriteLine(
+                                "[OCR] Balloons refine session ignored — pipe size mismatch or empty map");
+                        }
                         var (regs, det, frag, detImg, ownsDet, fogAmt) =
                             await BuildComicRegionsSharedDetectAsync(
                                 ocrImage, detectLog, token).ConfigureAwait(false);
@@ -2236,10 +2315,10 @@ namespace SpeakRect
                         fragmented = frag;
                         fogUsedLive = fogAmt;
                         SetRunFogAnalytics(fogUsedLive);
+                        pipeTimer.Mark(
+                            $"detect-fog+regions (fog={fogUsedLive:0.00})",
+                            sw);
                     }
-                    pipeTimer.Mark(
-                        $"detect-fog+regions (fog={fogUsedLive:0.00})",
-                        sw);
 
                     sw.Restart();
                     // Analytics thumbs: capture → letterbox (if changed) → tone → detect fog.
@@ -2334,9 +2413,9 @@ namespace SpeakRect
                         // ComicBook ON: regions already ran WinOCR (reuse for TTS fallback).
                         List<DetectedTextRegion>? winOcrRegions = null;
 
-                        // ComicBook ON pipeline (shared detect already ran above):
+                        // ComicBook ON pipeline (shared detect or Balloons refine override):
                         //   1) prep already done (tone = Kobold; optional fog = WinOCR detect)
-                        //   2) regions from BuildComicRegionsSharedDetectAsync (dyn fog when on)
+                        //   2) regions from detect OR ComicRegionOverrideSession
                         //   3) POI / sequential / best-of on ocrImage (tone)
                         {
                             int pipeW = ocrImage.Width;
@@ -2344,6 +2423,8 @@ namespace SpeakRect
 
                             // Same boxes as Balloons preview: post-grow cores + crop pad
                             // on the detect view (fog when on). Crops still use clear tone.
+                            // Override boxes already include pad (SaveRegionDebugOverlay
+                            // skips re-pad when _forcedCropPadPx == 0).
                             SaveRegionDebugOverlay(detectImage, regions);
                             winOcrRegions = regions;
 
@@ -2366,15 +2447,19 @@ namespace SpeakRect
                                 : usePerIsland
                                     ? "detect+per-island"
                                     : "detect+crop-stack";
+                            if (usedRegionOverride)
+                                strategyHint = "override+" + strategyHint;
                             detail.AppendLine(
                                 $"strategy={strategyHint} " +
-                                $"(ComicBook; regions={regions.Count} fogUsed={fogUsedLive:0.###})");
+                                $"(ComicBook; regions={regions.Count} fogUsed={fogUsedLive:0.###}" +
+                                (usedRegionOverride ? "; region-override" : "") + ")");
                             Debug.WriteLine(
                                 $"[OCR] ComicBook full path: {strategyHint} " +
                                 $"(regions={regions.Count} fog={fogUsedLive:0.###})");
                             detail.AppendLine(
                                 $"(lowConf={detection.LowConfidence} frag={fragmented} " +
-                                $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count})");
+                                $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count}" +
+                                (usedRegionOverride ? " override=1" : "") + ")");
 
                             if (usePoi)
                             {
@@ -2623,6 +2708,8 @@ namespace SpeakRect
                     fogOwned?.Dispose();
                     // prepStages owns letterbox/upscale/gray/tone (aliases of *Owned).
                     prepStages?.Dispose();
+                    _forcedCropPadPx = null;
+                    _keepRefineSessionThisRun = false;
                 }
             }
             catch (OperationCanceledException)
@@ -8607,7 +8694,8 @@ namespace SpeakRect
                 LastResult = snapshot;
 
             // Live capture only — Balloons Speak must not wipe refine session.
-            if (notifyNewCapture)
+            // When live used the same refined boxes (pipe size match), keep them.
+            if (notifyNewCapture && !_keepRefineSessionThisRun)
                 ComicRegionOverrideSession.NotifyNewCapture();
 
 #if DEBUG
@@ -8942,9 +9030,12 @@ namespace SpeakRect
                 if (capture == null || regions == null)
                     return;
 
-                // Always use settings pad (not ActiveCropPadPx override) so Analytics shows
-                // the same solid crop boxes as Balloons even when Speak overrides pad to 0.
-                int pad = Math.Max(0, SpeakRunSettings.GetComicRegionPadding());
+                // Detect cores → expand once with settings pad. Override boxes from
+                // Balloons are already display-final (_forcedCropPadPx == 0) — do not
+                // pad again or Analytics/last_regions double-grow past the preview.
+                int pad = _forcedCropPadPx == 0
+                    ? 0
+                    : Math.Max(0, SpeakRunSettings.GetComicRegionPadding());
                 var boxes = ExpandRegionsByCropPad(
                     regions, capture.Width, capture.Height, pad);
 

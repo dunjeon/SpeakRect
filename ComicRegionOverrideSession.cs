@@ -158,6 +158,64 @@ namespace SpeakRect
             }
         }
 
+        /// <summary>
+        /// Live Comic Book path: refined boxes when the new snap's pipeline size
+        /// matches the session (exact), or scales cleanly (same aspect within 2%).
+        /// Boxes are display-final (crop pad already baked) — live must force pad=0.
+        /// Rejects unrelated framings so a different page does not inherit boxes.
+        /// </summary>
+        public static bool TryGetForPipeline(
+            int pipeW,
+            int pipeH,
+            out List<Rectangle> regions)
+        {
+            lock (Gate)
+            {
+                regions = new List<Rectangle>();
+                if (!_active || _regions.Count == 0)
+                    return false;
+                if (_pipeW <= 0 || _pipeH <= 0 || pipeW <= 0 || pipeH <= 0)
+                    return false;
+
+                if (_pipeW == pipeW && _pipeH == pipeH)
+                {
+                    regions = _regions.ToList();
+                    return regions.Count > 0;
+                }
+
+                // Slight re-frame of the same region (1–2 px letterbox drift, etc.).
+                double arS = (double)_pipeW / _pipeH;
+                double arL = (double)pipeW / pipeH;
+                if (Math.Abs(arS - arL) / arS > 0.02)
+                    return false;
+
+                double sx = (double)pipeW / _pipeW;
+                double sy = (double)pipeH / _pipeH;
+                // Require nearly uniform scale (not a stretched remap).
+                if (Math.Abs(sx - sy) / Math.Max(sx, sy) > 0.02)
+                    return false;
+
+                var scaled = new List<Rectangle>(_regions.Count);
+                foreach (var r in _regions)
+                {
+                    int x = (int)Math.Round(r.X * sx);
+                    int y = (int)Math.Round(r.Y * sy);
+                    int w = Math.Max(4, (int)Math.Round(r.Width * sx));
+                    int h = Math.Max(4, (int)Math.Round(r.Height * sy));
+                    x = Math.Clamp(x, 0, Math.Max(0, pipeW - 1));
+                    y = Math.Clamp(y, 0, Math.Max(0, pipeH - 1));
+                    w = Math.Clamp(w, 4, pipeW - x);
+                    h = Math.Clamp(h, 4, pipeH - y);
+                    if (w >= 4 && h >= 4)
+                        scaled.Add(new Rectangle(x, y, w, h));
+                }
+                if (scaled.Count == 0)
+                    return false;
+                regions = scaled;
+                return true;
+            }
+        }
+
         public static void Clear()
         {
             lock (Gate)
