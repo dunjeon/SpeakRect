@@ -177,6 +177,48 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Snap Concept Mode: one axis-aligned envelope from the top-left of the
+        /// highest/leftmost WinOCR island to the bottom-right of the lowest/rightmost.
+        /// Combined text is joined in Western reading order. Caller applies Extra
+        /// margin (<c>ComicRegionPadding</c>) as usual on the single box.
+        /// </summary>
+        public static List<DetectedTextRegion> CollapseToSnapEnvelope(
+            List<DetectedTextRegion> regions,
+            int capW,
+            int capH)
+        {
+            if (regions == null || regions.Count <= 1)
+                return regions ?? new List<DetectedTextRegion>();
+
+            var ordered = SortComicReadingOrderRegions(regions);
+            if (ordered.Count == 0)
+                return regions;
+
+            Rectangle bounds = ordered[0].Bounds;
+            var texts = new List<string>();
+            foreach (var r in ordered)
+            {
+                if (r.Bounds.Width > 0 && r.Bounds.Height > 0)
+                    bounds = Rectangle.Union(bounds, r.Bounds);
+                if (!string.IsNullOrWhiteSpace(r.WinOcrText))
+                    texts.Add(r.WinOcrText.Trim());
+            }
+
+            bounds.Intersect(new Rectangle(0, 0, capW, capH));
+            if (bounds.Width < 1 || bounds.Height < 1)
+                return regions;
+
+            return new List<DetectedTextRegion>
+            {
+                new DetectedTextRegion
+                {
+                    Bounds = bounds,
+                    WinOcrText = string.Join(" ", texts)
+                }
+            };
+        }
+
+        /// <summary>
         /// Western comic order (geometry only): rows top→bottom, left→right in each row.
         /// Greedy row pick from the current topmost island; same-row is vertical
         /// geometry only (Y overlap / top proximity) so grow-pad X-overlap cannot

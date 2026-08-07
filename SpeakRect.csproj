@@ -21,8 +21,8 @@
 		<StartupObject>SpeakRect.Program</StartupObject>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-		<Version>1.5.3</Version>
-		<InformationalVersion>1.5.3</InformationalVersion>
+		<Version>1.5.4</Version>
+		<InformationalVersion>1.5.4</InformationalVersion>
 	</PropertyGroup>
 
 	<!-- Local Build: no RID, normal multi-file output under bin\x64\… -->

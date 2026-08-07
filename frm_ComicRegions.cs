@@ -43,6 +43,7 @@ namespace SpeakRect
         private readonly Label _lblPaddingVal;
 
         private readonly CheckBox _chkMergeOverlap;
+        private readonly CheckBox _chkSnapConceptEnvelope;
 
         private readonly RegionRefineSurface _refine;
         private readonly Label _lblPreviewHeader;
@@ -442,6 +443,26 @@ namespace SpeakRect
                 "Off: they are nudged apart instead."),
                 48);
 
+            // 4) Snap Concept Mode (test — one envelope for all WinOCR islands)
+            AddFull(MakeSection("4 · SNAP CONCEPT (TEST)"), 28);
+            _chkSnapConceptEnvelope = new CheckBox
+            {
+                Text = "One envelope box for all text",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = false,
+            };
+            _chkSnapConceptEnvelope.CheckedChanged += (_, _) => OnFieldChanged();
+            AddFull(_chkSnapConceptEnvelope, 28);
+            AddFull(MakeHint(
+                "On: every found box becomes one large rectangle from the " +
+                "highest-left text to the lowest-right text. Speak / POI focus " +
+                "on that single snap. Extra margin grows it further " +
+                "(Wider / Taller still apply first). Off = normal multi-box detect."),
+                72);
+
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
 
@@ -736,6 +757,8 @@ namespace SpeakRect
             Next(_trkPadding);
             // 3) Merge overlap
             Next(_chkMergeOverlap);
+            // 4) Snap Concept envelope (test)
+            Next(_chkSnapConceptEnvelope);
             // Actions (left → right for user)
             Next(_btnOpenImage);
             Next(_btnUseLast);
@@ -872,6 +895,7 @@ namespace SpeakRect
                 s.ComicInflateFracY.ToString("0.###", inv),
                 s.ComicRegionPadding.ToString(inv),
                 s.ComicMergeOverlappingIslands ? "1" : "0",
+                s.ComicSnapConceptEnvelope ? "1" : "0",
                 DevCaptureCache.PrepSettingsSignature());
         }
 
@@ -1005,6 +1029,7 @@ namespace SpeakRect
                 _trkInflateY.Value = InflateToTick(s.ComicInflateFracY);
                 _trkPadding.Value = Math.Clamp(s.ComicRegionPadding, _trkPadding.Minimum, _trkPadding.Maximum);
                 _chkMergeOverlap.Checked = s.ComicMergeOverlappingIslands;
+                _chkSnapConceptEnvelope.Checked = s.ComicSnapConceptEnvelope;
 
                 RefreshValueLabels();
                 ApplyFogUiState();
@@ -1176,6 +1201,7 @@ namespace SpeakRect
             // Crop pad sizes islands for POI (green boxes + outside fog).
             _trkPadding.Enabled = ready;
             _chkMergeOverlap.Enabled = ready;
+            _chkSnapConceptEnvelope.Enabled = ready;
 
             _btnPreview.Enabled = ready && !_snapBusy;
             _btnSpeak.Enabled = ready && !_snapBusy;
@@ -1283,6 +1309,7 @@ namespace SpeakRect
             s.ComicInflateFracY = TickToInflate(_trkInflateY.Value);
             s.ComicRegionPadding = _trkPadding.Value;
             s.ComicMergeOverlappingIslands = _chkMergeOverlap.Checked;
+            s.ComicSnapConceptEnvelope = _chkSnapConceptEnvelope.Checked;
             s.NormalizeComicRegionSettings();
             // If user left Comic Book (POI suspended), do not let a stale checkbox
             // rewrite POI on via Persist before Reload — honor mode.

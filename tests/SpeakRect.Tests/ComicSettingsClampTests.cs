@@ -46,6 +46,13 @@ public class ComicSettingsClampTests
         Assert.True(AppSettings.Current.ComicMergeOverlappingIslands);
     }
 
+    [Fact]
+    public void Snap_concept_envelope_defaults_off()
+    {
+        AppSettings.Current.ResetComicRegionSettingsToDefaults();
+        Assert.False(AppSettings.Current.ComicSnapConceptEnvelope);
+    }
+
 
 
 

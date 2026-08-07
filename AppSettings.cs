@@ -215,6 +215,14 @@ namespace SpeakRect
         public bool ComicMergeOverlappingIslands { get; set; } = true;
 
         /// <summary>
+        /// Snap Concept Mode (test toggle, default off): collapse every WinOCR
+        /// island into one envelope box (top-left of highest/leftmost text →
+        /// bottom-right of lowest/rightmost). Extra margin then pads that single
+        /// box so Local-LLM / POI focus on one large snap region.
+        /// </summary>
+        public bool ComicSnapConceptEnvelope { get; set; } = false;
+
+        /// <summary>
         /// Comic Book alternate: tone + green region boxes (± outside fog map).
         /// Stock: <see cref="ComicPoiAutoStack"/> on → each island orange canvas VL
         /// one at a time (not multi-strip stack). Stack off/fail multi → per-island
@@ -309,6 +317,7 @@ namespace SpeakRect
             ComicInflateFracY = DefaultComicInflateFracY;
             ComicRegionPadding = DefaultComicRegionPadding;
             ComicMergeOverlappingIslands = true;
+            ComicSnapConceptEnvelope = false;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicIslandZoom = true;
@@ -1532,6 +1541,10 @@ namespace SpeakRect
                 TryParseBool(mergeRaw, out bool merge))
                 ComicMergeOverlappingIslands = merge;
 
+            if (map.TryGetValue("ComicSnapConceptEnvelope", out string? snapEnvRaw) &&
+                TryParseBool(snapEnvRaw, out bool snapEnv))
+                ComicSnapConceptEnvelope = snapEnv;
+
             if (map.TryGetValue("ComicPoiMarkers", out string? poiRaw) &&
                 TryParseBool(poiRaw, out bool poi))
                 ComicPoiMarkers = poi;
@@ -2412,6 +2425,8 @@ namespace SpeakRect
                 sb.AppendLine("; InflateFrac* / RegionPadding = box pad around islands.");
                 sb.AppendLine("; MergeOverlappingIslands=true (default): union islands that overlap after Grow + pad.");
                 sb.AppendLine(";   false = nudge grow-overlaps apart instead.");
+                sb.AppendLine("; SnapConceptEnvelope=false (test): one envelope box around all WinOCR islands;");
+                sb.AppendLine(";   Extra margin (RegionPadding) expands that single snap focus.");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine("; PoiAutoStack=true (stock): each island → own orange canvas → Local-LLM one at a time.");
                 sb.AppendLine(";   Not multi-strip stack. Preview stays full page. Stack off/fail multi → per-island VL.");
@@ -2427,6 +2442,7 @@ namespace SpeakRect
                 sb.AppendLine($"ComicInflateFracY={ComicInflateFracY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicRegionPadding={ComicRegionPadding}");
                 sb.AppendLine($"ComicMergeOverlappingIslands={ComicMergeOverlappingIslands.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicSnapConceptEnvelope={ComicSnapConceptEnvelope.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiMarkers={ComicPoiMarkers.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
@@ -2684,6 +2700,7 @@ namespace SpeakRect
                 or "CommaPauseMs" or "SentencePauseMs" or "OtherPauseMs" or "BubblePauseMs"
                 or "ComicInflateFracX" or "ComicInflateFracY"
                 or "ComicRegionPadding" or "ComicMergeOverlappingIslands"
+                or "ComicSnapConceptEnvelope"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
                 or "ComicPoiAutoStack" or "ComicIslandZoom"
                 or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
