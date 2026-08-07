@@ -14,7 +14,8 @@ namespace SpeakRect
     /// Speak: Island canvases on → each island orange canvas VL one at a time;
     /// canvases off/fail multi → per-island tone crop VL; 1 island + canvases off →
     /// full-page guide VL. Canvas compose knobs: Balloons gap / margin / beef / bottom pad
-    /// (stock 10 / 12 / 0 / 0).
+    /// (stock 10 / 12 / 0 / 0). Optional Island Zoom enlarges small crops (Mag-style)
+    /// before the orange canvas / VL send.
     /// </summary>
     public static class ComicPoiGuide
     {
@@ -74,6 +75,66 @@ namespace SpeakRect
         /// send downscale). Always applied so huge multi-strip stacks stay VL-safe.
         /// </summary>
         public const int StackComposeMaxLongEdge = 2560;
+
+        /// <summary>
+        /// Mag-style island zoom: enlarge small balloon crops so lettering uses more
+        /// of the Local-LLM pixel budget. Only scales up; large crops are unchanged.
+        /// </summary>
+        public const int IslandZoomTargetLongEdge = 1280;
+
+        /// <summary>
+        /// Cap enlargement so mushy 10×+ stays rare. Hi-res letterbox crops usually
+        /// need less factor because they already have more native pixels.
+        /// </summary>
+        public const double IslandZoomMaxFactor = 6.0;
+
+        /// <summary>Mild unsharp after zoom (0 = off). Slightly stronger than stock prep.</summary>
+        public const float IslandZoomSharpenAmount = 0.55f;
+
+        /// <summary>
+        /// Map a rectangle from one image size to another (uniform letterbox→tone scale).
+        /// Uses floor/ceil so glyph edges are not clipped on the low side.
+        /// </summary>
+        public static Rectangle MapRectBetweenImages(
+            Rectangle r,
+            int fromW,
+            int fromH,
+            int toW,
+            int toH)
+        {
+            if (fromW < 1 || fromH < 1 || toW < 1 || toH < 1)
+                return r;
+            if (fromW == toW && fromH == toH)
+            {
+                return Rectangle.Intersect(r, new Rectangle(0, 0, toW, toH));
+            }
+
+            double sx = (double)toW / fromW;
+            double sy = (double)toH / fromH;
+            int x = (int)Math.Floor(r.X * sx);
+            int y = (int)Math.Floor(r.Y * sy);
+            int x2 = (int)Math.Ceiling((r.X + r.Width) * sx);
+            int y2 = (int)Math.Ceiling((r.Y + r.Height) * sy);
+            x = Math.Clamp(x, 0, Math.Max(0, toW - 1));
+            y = Math.Clamp(y, 0, Math.Max(0, toH - 1));
+            x2 = Math.Clamp(x2, x + 1, toW);
+            y2 = Math.Clamp(y2, y + 1, toH);
+            return new Rectangle(x, y, x2 - x, y2 - y);
+        }
+
+        /// <summary>
+        /// True when <paramref name="hiRes"/> has meaningfully more pixels than
+        /// <paramref name="pipe"/> (page was downscaled in Image prep).
+        /// </summary>
+        public static bool HiResIsRicher(Bitmap pipe, Bitmap hiRes)
+        {
+            if (pipe == null || hiRes == null)
+                return false;
+            int pipeLong = Math.Max(pipe.Width, pipe.Height);
+            int hiLong = Math.Max(hiRes.Width, hiRes.Height);
+            // Need at least ~12% more long-edge (or 64px) to beat re-upscaling tone.
+            return hiLong >= pipeLong + 64 && hiLong > pipeLong * 1.12;
+        }
 
         /// <summary>
         /// Min tone-crop height for a panel-spanning wide ribbon (not compact balloons).
@@ -782,6 +843,213 @@ namespace SpeakRect
         }
 
         /// <summary>
+        /// Mag-style zoom for a single island crop. When <see cref="SpeakRunSettings.GetComicIslandZoom"/>
+        /// is on and the crop long edge is below <see cref="IslandZoomTargetLongEdge"/>,
+        /// returns a new upscaled bitmap (input is disposed). Otherwise returns
+        /// <paramref name="strip"/> unchanged. Cap at <see cref="IslandZoomMaxFactor"/>.
+        /// Progressive =2× steps keep lettering sharper than one huge jump.
+        /// Live OCR prefers <c>OcrProcessor</c> Lanczos zoom when available; this is the
+        /// shared fallback (tests + compose helpers).
+        /// </summary>
+        /// <param name="scaleToSize">
+        /// Optional high-quality scaler (destW, destH) → new bitmap. When null, uses
+        /// progressive high-quality bicubic.
+        /// </param>
+        public static Bitmap ApplyIslandZoomIfEnabled(
+            Bitmap strip,
+            StringBuilder? detail = null,
+            string? logTag = null,
+            Func<Bitmap, int, int, Bitmap>? scaleToSize = null)
+        {
+            if (strip == null)
+                throw new ArgumentNullException(nameof(strip));
+
+            if (!SpeakRunSettings.GetComicIslandZoom())
+                return strip;
+
+            int w = strip.Width;
+            int h = strip.Height;
+            if (w < 4 || h < 4)
+                return strip;
+
+            int srcLong = Math.Max(w, h);
+            int target = IslandZoomTargetLongEdge;
+            if (srcLong >= target)
+            {
+                detail?.AppendLine(
+                    $"  {logTag ?? "island-zoom"}: skip {w}x{h} (long≥{target})");
+                return strip;
+            }
+
+            double scale = (double)target / srcLong;
+            if (scale > IslandZoomMaxFactor)
+                scale = IslandZoomMaxFactor;
+            if (scale <= 1.01)
+                return strip;
+
+            int tw = Math.Max(1, (int)Math.Round(w * scale));
+            int th = Math.Max(1, (int)Math.Round(h * scale));
+            // Never exceed stack long-edge safety (canvas compose has its own cap too).
+            int outLong = Math.Max(tw, th);
+            if (outLong > StackComposeMaxLongEdge)
+            {
+                double edgeFit = (double)StackComposeMaxLongEdge / outLong;
+                tw = Math.Max(1, (int)Math.Round(tw * edgeFit));
+                th = Math.Max(1, (int)Math.Round(th * edgeFit));
+                scale *= edgeFit;
+            }
+
+            Bitmap zoomed = scaleToSize != null
+                ? scaleToSize(strip, tw, th)
+                : ScaleBitmapProgressiveBicubic(strip, tw, th);
+
+            Bitmap result = zoomed;
+            if (IslandZoomSharpenAmount > 0.001f &&
+                result.Width >= 3 && result.Height >= 3)
+            {
+                var sharp = LightUnsharp(result, IslandZoomSharpenAmount);
+                if (!ReferenceEquals(sharp, result))
+                {
+                    result.Dispose();
+                    result = sharp;
+                }
+            }
+
+            detail?.AppendLine(
+                $"  {logTag ?? "island-zoom"}: {w}x{h} → {result.Width}x{result.Height} " +
+                $"(×{scale:F2} targetLong={target}" +
+                (scaleToSize != null ? " lanczos" : " progressive-bicubic") + ")");
+
+            try { strip.Dispose(); } catch { /* ignore */ }
+            return result;
+        }
+
+        /// <summary>
+        /// Progressive =2× high-quality bicubic, then final step to exact size.
+        /// Better than one big GDI DrawImage for comic lettering.
+        /// </summary>
+        public static Bitmap ScaleBitmapProgressiveBicubic(Bitmap source, int destW, int destH)
+        {
+            if (destW < 1 || destH < 1)
+                return (Bitmap)source.Clone();
+            if (source.Width == destW && source.Height == destH)
+                return (Bitmap)source.Clone();
+
+            Bitmap current = (Bitmap)source.Clone();
+            try
+            {
+                while (current.Width * 2 < destW || current.Height * 2 < destH)
+                {
+                    int nw = Math.Min(destW, Math.Max(current.Width + 1, current.Width * 2));
+                    int nh = Math.Min(destH, Math.Max(current.Height + 1, current.Height * 2));
+                    if (current.Width >= destW) nw = destW;
+                    if (current.Height >= destH) nh = destH;
+                    var next = ScaleBitmapBicubicOnce(current, nw, nh);
+                    current.Dispose();
+                    current = next;
+                }
+
+                if (current.Width != destW || current.Height != destH)
+                {
+                    var final = ScaleBitmapBicubicOnce(current, destW, destH);
+                    current.Dispose();
+                    current = final;
+                }
+
+                var result = current;
+                current = null!;
+                return result;
+            }
+            finally
+            {
+                try { current?.Dispose(); } catch { /* ignore */ }
+            }
+        }
+
+        private static Bitmap ScaleBitmapBicubicOnce(Bitmap source, int w, int h)
+        {
+            var scaled = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(scaled))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.DrawImage(source, new Rectangle(0, 0, w, h));
+            }
+            return scaled;
+        }
+
+        /// <summary>
+        /// Mild unsharp for post-zoom lettering (same idea as pipeline unsharp).
+        /// </summary>
+        private static Bitmap LightUnsharp(Bitmap source, float amount)
+        {
+            if (source.Width < 3 || source.Height < 3)
+                return source;
+            amount = Math.Clamp(amount, 0.01f, 2.0f);
+
+            var result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            var rect = new Rectangle(0, 0, source.Width, source.Height);
+            var srcData = source.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            var dstData = result.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                unsafe
+                {
+                    byte* s0 = (byte*)srcData.Scan0;
+                    byte* d0 = (byte*)dstData.Scan0;
+                    int sStride = srcData.Stride;
+                    int dStride = dstData.Stride;
+                    int w = source.Width;
+                    int h = source.Height;
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            int sumB = 0, sumG = 0, sumR = 0, count = 0;
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                int yy = Math.Clamp(y + dy, 0, h - 1);
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    int xx = Math.Clamp(x + dx, 0, w - 1);
+                                    byte* p = s0 + yy * sStride + xx * 4;
+                                    sumB += p[0];
+                                    sumG += p[1];
+                                    sumR += p[2];
+                                    count++;
+                                }
+                            }
+
+                            byte* sp = s0 + y * sStride + x * 4;
+                            byte* dp = d0 + y * dStride + x * 4;
+                            double blurB = sumB / (double)count;
+                            double blurG = sumG / (double)count;
+                            double blurR = sumR / (double)count;
+                            dp[0] = ClampByte(sp[0] + amount * (sp[0] - blurB));
+                            dp[1] = ClampByte(sp[1] + amount * (sp[1] - blurG));
+                            dp[2] = ClampByte(sp[2] + amount * (sp[2] - blurR));
+                            dp[3] = sp[3];
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                source.UnlockBits(srcData);
+                result.UnlockBits(dstData);
+            }
+
+            return result;
+        }
+
+        private static byte ClampByte(double v) =>
+            (byte)(v < 0 ? 0 : (v > 255 ? 255 : (int)Math.Round(v)));
+
+        /// <summary>
         /// POI path: clone island boxes from <paramref name="source"/>, then
         /// <see cref="ComposeVerticalStripStack"/> (orange canvas + Balloons beef).
         /// Caller owns result.
@@ -790,6 +1058,18 @@ namespace SpeakRect
         /// All page islands (optional). When per-island VL passes a single box,
         /// pass the full island list so wide-ribbon expand cannot swallow neighbors.
         /// </param>
+        /// <param name="hiResSource">
+        /// Optional pre-downscale letterbox (richer pixels). When Zoom is on and
+        /// this is richer than <paramref name="source"/>, islands are cut here first.
+        /// </param>
+        /// <param name="prepareHiResCropOwned">
+        /// Owns the hi-res color crop and returns gray/tone-prepped strip for VL.
+        /// Required when cutting from <paramref name="hiResSource"/> (letterbox is
+        /// not already toned).
+        /// </param>
+        /// <param name="scaleToSize">
+        /// Optional Lanczos (or other) scaler for Zoom; default progressive bicubic.
+        /// </param>
         public static Bitmap? BuildVerticalStack(
             Bitmap source,
             IReadOnlyList<Rectangle> boxes,
@@ -797,13 +1077,22 @@ namespace SpeakRect
             bool paintBullseyes = true,
             int stripGapPx = StackStripGapPx,
             int marginPx = 0,
-            IReadOnlyList<Rectangle>? avoidIslands = null)
+            IReadOnlyList<Rectangle>? avoidIslands = null,
+            Bitmap? hiResSource = null,
+            Func<Bitmap, Bitmap>? prepareHiResCropOwned = null,
+            Func<Bitmap, int, int, Bitmap>? scaleToSize = null)
         {
             if (source == null || boxes == null || boxes.Count == 0)
                 return null;
 
             // paintBullseyes kept for call-site compat; stacks use green boxes instead.
             _ = paintBullseyes;
+
+            bool useHiRes =
+                SpeakRunSettings.GetComicIslandZoom() &&
+                hiResSource != null &&
+                HiResIsRicher(source, hiResSource) &&
+                prepareHiResCropOwned != null;
 
             var strips = new List<Bitmap>();
             try
@@ -852,7 +1141,47 @@ namespace SpeakRect
                             avoidIslands: others.Count > 0 ? others : null);
                     }
 
-                    var strip = source.Clone(hole, PixelFormat.Format32bppArgb);
+                    Bitmap strip;
+                    string srcNote;
+                    if (useHiRes)
+                    {
+                        // Mag-like: cut native letterbox pixels, prep, then zoom.
+                        var hiHole = MapRectBetweenImages(
+                            hole,
+                            source.Width, source.Height,
+                            hiResSource!.Width, hiResSource.Height);
+                        // Slight pad so stroked glyph edges survive mapping.
+                        hiHole = Rectangle.Inflate(hiHole, 2, 2);
+                        hiHole = Rectangle.Intersect(
+                            hiHole,
+                            new Rectangle(0, 0, hiResSource.Width, hiResSource.Height));
+                        if (hiHole.Width < 4 || hiHole.Height < 4)
+                        {
+                            strip = source.Clone(hole, PixelFormat.Format32bppArgb);
+                            srcNote = "tone-fallback";
+                        }
+                        else
+                        {
+                            var rawCrop = hiResSource.Clone(
+                                hiHole, PixelFormat.Format32bppArgb);
+                            strip = prepareHiResCropOwned!(rawCrop);
+                            srcNote =
+                                $"hires {hiHole.Width}x{hiHole.Height}" +
+                                $"@{hiHole.X},{hiHole.Y}";
+                        }
+                    }
+                    else
+                    {
+                        strip = source.Clone(hole, PixelFormat.Format32bppArgb);
+                        srcNote = "tone";
+                    }
+
+                    // Mag-style: enlarge tiny balloon crops before orange canvas.
+                    strip = ApplyIslandZoomIfEnabled(
+                        strip,
+                        detail,
+                        logTag: $"poi-stack strip[{i + 1}] zoom",
+                        scaleToSize: scaleToSize);
                     if (hole != tight)
                     {
                         string clampNote = hole.Height < IslandStripMinHeight
@@ -860,7 +1189,7 @@ namespace SpeakRect
                             : "";
                         detail?.AppendLine(
                             $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
-                            $"@({hole.X},{hole.Y}) " +
+                            $"@({hole.X},{hole.Y}) src={srcNote} " +
                             $"(wide-ribbon tight {tight.Width}x{tight.Height} " +
                             $"→ minH={IslandStripMinHeight}{clampNote})");
                     }
@@ -868,7 +1197,7 @@ namespace SpeakRect
                     {
                         detail?.AppendLine(
                             $"  poi-stack strip[{i + 1}]: {strip.Width}x{strip.Height} " +
-                            $"@({hole.X},{hole.Y})");
+                            $"@({hole.X},{hole.Y}) src={srcNote}");
                     }
                     strips.Add(strip);
                 }

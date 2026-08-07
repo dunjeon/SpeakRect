@@ -24,6 +24,7 @@ namespace SpeakRect
         public bool ComicPoiMarkers { get; init; }
         public bool ComicPoiFogOutside { get; init; }
         public bool ComicPoiAutoStack { get; init; }
+        public bool ComicIslandZoom { get; init; }
         public int ComicPoiAutoStackGapPx { get; init; }
         public int ComicPoiAutoStackMarginPx { get; init; }
         public double ComicPoiStackBeefExtra { get; init; }
@@ -99,6 +100,7 @@ namespace SpeakRect
                 ComicPoiMarkers = s.ComicPoiMarkers,
                 ComicPoiFogOutside = s.ComicPoiFogOutside,
                 ComicPoiAutoStack = s.ComicPoiAutoStack,
+                ComicIslandZoom = s.ComicIslandZoom,
                 ComicPoiAutoStackGapPx = s.ComicPoiAutoStackGapPx,
                 ComicPoiAutoStackMarginPx = s.ComicPoiAutoStackMarginPx,
                 ComicPoiStackBeefExtra = s.ComicPoiStackBeefExtra,
@@ -195,6 +197,9 @@ namespace SpeakRect
 
         public static bool GetComicPoiAutoStack() =>
             Active?.ComicPoiAutoStack ?? AppSettings.Current.ComicPoiAutoStack;
+
+        public static bool GetComicIslandZoom() =>
+            Active?.ComicIslandZoom ?? AppSettings.Current.ComicIslandZoom;
 
         public static int GetComicPoiAutoStackGapPx() =>
             Active?.ComicPoiAutoStackGapPx ?? AppSettings.Current.ComicPoiAutoStackGapPx;

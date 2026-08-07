@@ -156,6 +156,7 @@ public class ComicPoiGuideTests
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
+        Assert.True(AppSettings.Current.ComicIslandZoom);
         Assert.Equal(10, AppSettings.Current.ComicPoiAutoStackGapPx);
         Assert.Equal(12, AppSettings.Current.ComicPoiAutoStackMarginPx);
         Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBeefExtra);
@@ -163,30 +164,163 @@ public class ComicPoiGuideTests
     }
 
     [Fact]
+    public void ApplyIslandZoom_enlarges_small_crop()
+    {
+        bool prev = AppSettings.Current.ComicIslandZoom;
+        AppSettings.Current.ComicIslandZoom = true;
+        try
+        {
+            using var small = new Bitmap(80, 40);
+            using (var g = Graphics.FromImage(small))
+                g.Clear(Color.White);
+
+            // ApplyIslandZoomIfEnabled disposes input when it returns a new bitmap.
+            var owned = (Bitmap)small.Clone();
+            var zoomed = ComicPoiGuide.ApplyIslandZoomIfEnabled(owned);
+            try
+            {
+                Assert.True(zoomed.Width > 80 || zoomed.Height > 40);
+                int longEdge = Math.Max(zoomed.Width, zoomed.Height);
+                Assert.True(longEdge <= ComicPoiGuide.IslandZoomTargetLongEdge + 1);
+                // Max factor on 80 long
+                Assert.True(longEdge <= (int)Math.Ceiling(80 * ComicPoiGuide.IslandZoomMaxFactor) + 1);
+            }
+            finally
+            {
+                if (!ReferenceEquals(zoomed, owned))
+                    zoomed.Dispose();
+                else
+                    owned.Dispose();
+            }
+        }
+        finally
+        {
+            AppSettings.Current.ComicIslandZoom = prev;
+        }
+    }
+
+    [Fact]
+    public void MapRectBetweenImages_scales_and_clamps()
+    {
+        // tone 100x100 → letterbox 200x200
+        var r = ComicPoiGuide.MapRectBetweenImages(
+            new Rectangle(10, 20, 30, 40), 100, 100, 200, 200);
+        Assert.Equal(20, r.X);
+        Assert.Equal(40, r.Y);
+        Assert.Equal(60, r.Width);
+        Assert.Equal(80, r.Height);
+    }
+
+    [Fact]
+    public void HiResIsRicher_requires_meaningful_gain()
+    {
+        using var pipe = new Bitmap(900, 600);
+        using var same = new Bitmap(900, 600);
+        using var richer = new Bitmap(1800, 1200);
+        using var tinyGain = new Bitmap(920, 620);
+        Assert.False(ComicPoiGuide.HiResIsRicher(pipe, same));
+        Assert.True(ComicPoiGuide.HiResIsRicher(pipe, richer));
+        Assert.False(ComicPoiGuide.HiResIsRicher(pipe, tinyGain));
+    }
+
+    [Fact]
+    public void BuildVerticalStack_hires_crop_path_uses_prepare()
+    {
+        bool prevZoom = AppSettings.Current.ComicIslandZoom;
+        AppSettings.Current.ComicIslandZoom = true;
+        try
+        {
+            using var tone = new Bitmap(100, 100);
+            using (var g = Graphics.FromImage(tone))
+                g.Clear(Color.Gray);
+            // 2× letterbox — richer native pixels
+            using var letterbox = new Bitmap(200, 200);
+            using (var g = Graphics.FromImage(letterbox))
+            {
+                g.Clear(Color.White);
+                using var ink = new SolidBrush(Color.Black);
+                g.FillRectangle(ink, 20, 20, 60, 40);
+            }
+
+            bool prepCalled = false;
+            var boxes = new List<Rectangle> { new(10, 10, 30, 20) };
+            using var stack = ComicPoiGuide.BuildVerticalStack(
+                tone,
+                boxes,
+                stripGapPx: 0,
+                marginPx: 4,
+                hiResSource: letterbox,
+                prepareHiResCropOwned: crop =>
+                {
+                    prepCalled = true;
+                    // Echo crop size; own and return
+                    var copy = (Bitmap)crop.Clone();
+                    crop.Dispose();
+                    return copy;
+                });
+            Assert.True(prepCalled);
+            Assert.NotNull(stack);
+            // Zoom should enlarge beyond the tiny tone 30×20 crop
+            Assert.True(stack!.Width > 40 || stack.Height > 30);
+        }
+        finally
+        {
+            AppSettings.Current.ComicIslandZoom = prevZoom;
+        }
+    }
+
+    [Fact]
+    public void ApplyIslandZoom_skips_when_disabled()
+    {
+        bool prev = AppSettings.Current.ComicIslandZoom;
+        AppSettings.Current.ComicIslandZoom = false;
+        try
+        {
+            var bmp = new Bitmap(50, 30);
+            var same = ComicPoiGuide.ApplyIslandZoomIfEnabled(bmp);
+            Assert.Same(bmp, same);
+            bmp.Dispose();
+        }
+        finally
+        {
+            AppSettings.Current.ComicIslandZoom = prev;
+        }
+    }
+
+    [Fact]
     public void BuildVerticalStack_uses_orange_canvas()
     {
-        using var src = new Bitmap(80, 80);
-        using (var g = Graphics.FromImage(src))
+        bool prevZoom = AppSettings.Current.ComicIslandZoom;
+        AppSettings.Current.ComicIslandZoom = false;
+        try
         {
-            g.Clear(Color.White);
-            using var ink = new SolidBrush(Color.Black);
-            g.FillRectangle(ink, 8, 8, 28, 16);
-            g.FillRectangle(ink, 8, 48, 28, 16);
-        }
+            using var src = new Bitmap(80, 80);
+            using (var g = Graphics.FromImage(src))
+            {
+                g.Clear(Color.White);
+                using var ink = new SolidBrush(Color.Black);
+                g.FillRectangle(ink, 8, 8, 28, 16);
+                g.FillRectangle(ink, 8, 48, 28, 16);
+            }
 
-        var boxes = new List<Rectangle>
+            var boxes = new List<Rectangle>
+            {
+                new(5, 5, 34, 22),
+                new(5, 45, 34, 22),
+            };
+            using var stack = ComicPoiGuide.BuildVerticalStack(
+                src, boxes, stripGapPx: 8, marginPx: 12);
+            Assert.NotNull(stack);
+            // Corner is margin fill — orange canvas, not white balloon paper.
+            Color corner = stack!.GetPixel(0, 0);
+            Assert.Equal(ComicPoiGuide.StackCanvasColor.R, corner.R);
+            Assert.Equal(ComicPoiGuide.StackCanvasColor.G, corner.G);
+            Assert.Equal(ComicPoiGuide.StackCanvasColor.B, corner.B);
+        }
+        finally
         {
-            new(5, 5, 34, 22),
-            new(5, 45, 34, 22),
-        };
-        using var stack = ComicPoiGuide.BuildVerticalStack(
-            src, boxes, stripGapPx: 8, marginPx: 12);
-        Assert.NotNull(stack);
-        // Corner is margin fill — orange canvas, not white balloon paper.
-        Color corner = stack!.GetPixel(0, 0);
-        Assert.Equal(ComicPoiGuide.StackCanvasColor.R, corner.R);
-        Assert.Equal(ComicPoiGuide.StackCanvasColor.G, corner.G);
-        Assert.Equal(ComicPoiGuide.StackCanvasColor.B, corner.B);
+            AppSettings.Current.ComicIslandZoom = prevZoom;
+        }
     }
 
     [Fact]
@@ -231,20 +365,29 @@ public class ComicPoiGuideTests
     [Fact]
     public void BuildVerticalStack_canvas_includes_margin_around_content()
     {
-        using var src = new Bitmap(200, 100);
-        using (var g = Graphics.FromImage(src))
+        bool prevZoom = AppSettings.Current.ComicIslandZoom;
+        AppSettings.Current.ComicIslandZoom = false;
+        try
         {
-            g.Clear(Color.White);
-            using var ink = new SolidBrush(Color.Black);
-            g.FillRectangle(ink, 10, 10, 80, 30);
-        }
+            using var src = new Bitmap(200, 100);
+            using (var g = Graphics.FromImage(src))
+            {
+                g.Clear(Color.White);
+                using var ink = new SolidBrush(Color.Black);
+                g.FillRectangle(ink, 10, 10, 80, 30);
+            }
 
-        var boxes = new List<Rectangle> { new(5, 5, 100, 50) };
-        using var stack = ComicPoiGuide.BuildVerticalStack(
-            src, boxes, stripGapPx: 8, marginPx: 12);
-        Assert.NotNull(stack);
-        Assert.True(stack!.Width >= 100 + 24);
-        Assert.True(stack.Height >= 50);
+            var boxes = new List<Rectangle> { new(5, 5, 100, 50) };
+            using var stack = ComicPoiGuide.BuildVerticalStack(
+                src, boxes, stripGapPx: 8, marginPx: 12);
+            Assert.NotNull(stack);
+            Assert.True(stack!.Width >= 100 + 24);
+            Assert.True(stack.Height >= 50);
+        }
+        finally
+        {
+            AppSettings.Current.ComicIslandZoom = prevZoom;
+        }
     }
 
     [Fact]

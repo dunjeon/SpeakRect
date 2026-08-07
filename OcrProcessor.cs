@@ -687,6 +687,17 @@ namespace SpeakRect
         private bool _keepRefineSessionThisRun;
 
         /// <summary>
+        /// Optional pre-downscale letterbox for Island Zoom (not owned; valid for
+        /// the duration of a speak push via <see cref="PushIslandZoomHiRes"/>).
+        /// </summary>
+        private Bitmap? _islandZoomHiRes;
+
+        /// <summary>Pipeline (tone) size matching island boxes while hi-res push is active.</summary>
+        private int _islandZoomPipeW;
+
+        private int _islandZoomPipeH;
+
+        /// <summary>
         /// Settings crop pad (no per-run override). Static helpers / merge tests use this.
         /// </summary>
         private static int TextRegionPadding =>
@@ -1594,7 +1605,8 @@ namespace SpeakRect
                         await RunComicPoiGuideAsync(
                             toneOwned, regions, pipeW, pipeH,
                             detail, pipeTimer, token,
-                            speakNow: true, alreadyDucked: ducked)
+                            speakNow: true, alreadyDucked: ducked,
+                            letterboxHiRes: letterboxOwned)
                         .ConfigureAwait(false);
                     spokenParts = poiParts;
                     chosenTag = poiTag;
@@ -1604,14 +1616,17 @@ namespace SpeakRect
                 }
                 else if (usePerIsland)
                 {
-                    var (seqParts, seqTag, seqDucked) =
-                        await RunSequentialRegionsSpeakAsync(
-                            toneOwned, regions, detail, pipeTimer, token,
-                            speakNow: true, alreadyDucked: ducked)
-                        .ConfigureAwait(false);
-                    spokenParts = seqParts;
-                    chosenTag = seqTag;
-                    ducked = seqDucked;
+                    using (PushIslandZoomHiRes(letterboxOwned, pipeW, pipeH))
+                    {
+                        var (seqParts, seqTag, seqDucked) =
+                            await RunSequentialRegionsSpeakAsync(
+                                toneOwned, regions, detail, pipeTimer, token,
+                                speakNow: true, alreadyDucked: ducked)
+                            .ConfigureAwait(false);
+                        spokenParts = seqParts;
+                        chosenTag = seqTag;
+                        ducked = seqDucked;
+                    }
                     detail.AppendLine(
                         $"speak-plan units={spokenParts.Count} tag={chosenTag}");
                 }
@@ -2467,7 +2482,8 @@ namespace SpeakRect
                                     await RunComicPoiGuideAsync(
                                         ocrImage, regions, pipeW, pipeH,
                                         detail, pipeTimer, token,
-                                        speakNow: true, alreadyDucked: ducked)
+                                        speakNow: true, alreadyDucked: ducked,
+                                        letterboxHiRes: letterboxOwned)
                                     .ConfigureAwait(false);
                                 spokenParts = poiParts;
                                 chosen = poiParts;
@@ -2497,14 +2513,17 @@ namespace SpeakRect
                                     $"[OCR] ComicBook per-island regions " +
                                     $"(count={regions.Count})");
 
-                                var (seqParts, seqTag, seqDucked) =
-                                    await RunSequentialRegionsSpeakAsync(
-                                        ocrImage, regions, detail, pipeTimer, token,
-                                        speakNow: true, alreadyDucked: ducked);
-                                spokenParts = seqParts;
-                                chosen = seqParts;
-                                chosenTag = seqTag;
-                                ducked = seqDucked;
+                                using (PushIslandZoomHiRes(letterboxOwned, pipeW, pipeH))
+                                {
+                                    var (seqParts, seqTag, seqDucked) =
+                                        await RunSequentialRegionsSpeakAsync(
+                                            ocrImage, regions, detail, pipeTimer, token,
+                                            speakNow: true, alreadyDucked: ducked);
+                                    spokenParts = seqParts;
+                                    chosen = seqParts;
+                                    chosenTag = seqTag;
+                                    ducked = seqDucked;
+                                }
 
                                 detail.AppendLine(
                                     $"speak-plan units={spokenParts.Count} tag={chosenTag}");
@@ -3582,8 +3601,14 @@ namespace SpeakRect
         /// its own orange canvas → VL (+ TTS) one at a time (<c>comic-poi-stack</c>).</item>
         /// <item>Stack off/fail + multi-island: per-island VL+TTS on tone.</item>
         /// <item>1 island + stack off/fail: full-page guide VL.</item>
+        /// <item>Island Zoom: prefer pre-downscale letterbox crop when richer, then
+        /// Lanczos enlarge to target long-edge (Mag-style).</item>
         /// </list>
         /// </summary>
+        /// <param name="letterboxHiRes">
+        /// Image-prep letterbox (before page long-edge scale). When Zoom is on and
+        /// this is richer than tone, each island is cut from here first.
+        /// </param>
         private async Task<(List<string> Parts, string Tag, bool Ducked)> RunComicPoiGuideAsync(
             Bitmap toneImage,
             List<DetectedTextRegion> regions,
@@ -3593,7 +3618,8 @@ namespace SpeakRect
             PipelineTimer pipeTimer,
             CancellationToken token,
             bool speakNow,
-            bool alreadyDucked)
+            bool alreadyDucked,
+            Bitmap? letterboxHiRes = null)
         {
             var sw = Stopwatch.StartNew();
             bool poiFogOutside = SpeakRunSettings.GetComicPoiFogOutside();
@@ -3619,12 +3645,22 @@ namespace SpeakRect
                     $"poi-boxes: cropPad={ActiveCropPadPx}px → {boxes.Count} (expanded once)");
             }
 
+            bool zoomOn = SpeakRunSettings.GetComicIslandZoom();
+            bool hiResZoom =
+                zoomOn &&
+                letterboxHiRes != null &&
+                ComicPoiGuide.HiResIsRicher(toneImage, letterboxHiRes);
             detail.AppendLine(
                 $"strategy=comic-poi (tone base; islands={boxes.Count}; " +
                 $"outsideFog={poiFogOutside}; " +
                 $"llmStack={poiAutoStack} " +
                 $"gap={poiStackGap}px " +
-                $"margin={poiStackMargin}px)");
+                $"margin={poiStackMargin}px; " +
+                $"islandZoom={zoomOn}" +
+                (hiResZoom
+                    ? $" hires={letterboxHiRes!.Width}x{letterboxHiRes.Height}"
+                    : zoomOn ? " hires=off" : "") +
+                ")");
 
             // Full-page guide on TONE — same DrawRegionGuides as Balloons POI preview.
             // Always published for Analytics; Speak may use island stack instead.
@@ -3681,6 +3717,8 @@ namespace SpeakRect
                             {
                                 sw.Restart();
                                 // One island → one orange canvas (green box + margin/beef).
+                                // Zoom: cut from pre-downscale letterbox when richer,
+                                // tone-prep that crop, Lanczos enlarge (Mag-style).
                                 islandCanvas = ComicPoiGuide.BuildVerticalStack(
                                     toneImage,
                                     new[] { boxes[i] },
@@ -3690,7 +3728,10 @@ namespace SpeakRect
                                     marginPx: margin,
                                     // Full page islands: wide-ribbon expand must not
                                     // grow into other balloons (double-speak).
-                                    avoidIslands: boxes);
+                                    avoidIslands: boxes,
+                                    hiResSource: letterboxHiRes,
+                                    prepareHiResCropOwned: PrepHiResIslandCropOwned,
+                                    scaleToSize: IslandZoomScaleToSize);
                                 pipeTimer.Add(
                                     $"llm-island-canvas[{i + 1}]",
                                     sw.ElapsedMilliseconds);
@@ -3860,19 +3901,22 @@ namespace SpeakRect
                         "poi-speak: per-island on tone (island-canvas off/fail)");
                     Debug.WriteLine(
                         $"[OCR] ComicBook POI multi → per-island islands={boxes.Count}");
-                    var (seqParts, seqTag, seqDucked) =
-                        await RunSequentialRegionsSpeakAsync(
-                            toneImage, regions, detail, pipeTimer, token,
-                            speakNow: speakNow, alreadyDucked: alreadyDucked)
-                        .ConfigureAwait(false);
-                    string tag = seqTag.StartsWith("per-island", StringComparison.Ordinal) ||
-                                 seqTag.StartsWith("sequential", StringComparison.Ordinal)
-                        ? "comic-poi-per-island"
-                        : $"comic-poi-per-island/{seqTag}";
-                    detail.AppendLine(
-                        $"winner={tag} parts={seqParts.Count} " +
-                        $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
-                    return (seqParts, tag, seqDucked);
+                    using (PushIslandZoomHiRes(letterboxHiRes, pipeW, pipeH))
+                    {
+                        var (seqParts, seqTag, seqDucked) =
+                            await RunSequentialRegionsSpeakAsync(
+                                toneImage, regions, detail, pipeTimer, token,
+                                speakNow: speakNow, alreadyDucked: alreadyDucked)
+                            .ConfigureAwait(false);
+                        string tag = seqTag.StartsWith("per-island", StringComparison.Ordinal) ||
+                                     seqTag.StartsWith("sequential", StringComparison.Ordinal)
+                            ? "comic-poi-per-island"
+                            : $"comic-poi-per-island/{seqTag}";
+                        detail.AppendLine(
+                            $"winner={tag} parts={seqParts.Count} " +
+                            $"words={seqParts.Sum(ComicRegionGeometry.CountWords)}");
+                        return (seqParts, tag, seqDucked);
+                    }
                 }
 
                 // Single island fallback: VL input = full-page guideBmp.
@@ -4800,12 +4844,13 @@ namespace SpeakRect
 
             async Task<(string? Clean, string Raw)> TryKoboldOnBounds(Rectangle b, string tag)
             {
-                using var crop = CropRegionClamped(
-                    capture, b, ActiveCropPadPx, neighborBoxes);
+                // Island Zoom: prefer pre-downscale letterbox crop when richer.
+                using var crop = CropIslandForVl(
+                    capture, b, neighborBoxes, detail, tag);
                 if (crop == null)
                     return (null, "");
 
-                // Passthrough unless legacy EnableCropScaleAndSharpen is re-enabled.
+                // Mag-style zoom (Lanczos) unless legacy EnableCropScaleAndSharpen.
                 using var prepared = PrepareCropForLocalLlmOcr(crop);
                 if (prepared.Width != crop.Width || prepared.Height != crop.Height)
                 {
@@ -9088,13 +9133,21 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Region crop for Kobold: default is a plain clone of the cut from the
-        /// fully prepped tone image (no second upscale/tone — Image prep already
-        /// did letterbox/upscale/gray/tone). Optional legacy scale+unsharp when
-        /// <see cref="EnableCropScaleAndSharpen"/> is re-enabled.
+        /// Region crop for Local-LLM: plain clone of the tone cut, then optional
+        /// Balloons <see cref="AppSettings.ComicIslandZoom"/> (Mag-style enlarge).
+        /// Legacy full scale+unsharp only when <see cref="EnableCropScaleAndSharpen"/>
+        /// is re-enabled (and Zoom is off).
         /// </summary>
         private static Bitmap PrepareCropForLocalLlmOcr(Bitmap source)
         {
+            // Mag-style zoom for per-island / recovery crops (Lanczos progressive).
+            if (SpeakRunSettings.GetComicIslandZoom())
+            {
+                return ComicPoiGuide.ApplyIslandZoomIfEnabled(
+                    (Bitmap)source.Clone(),
+                    scaleToSize: IslandZoomScaleToSize);
+            }
+
             if (!EnableCropScaleAndSharpen)
                 return (Bitmap)source.Clone();
 
@@ -9106,6 +9159,151 @@ namespace SpeakRect
                 CropSharpenPasses,
                 upscaleOnly: true,
                 maxUpscale: MaxCropUpscale);
+        }
+
+        /// <summary>
+        /// Install letterbox as Island Zoom hi-res source for the duration of a
+        /// per-island speak path (not owned). Nested pushes restore the previous.
+        /// </summary>
+        private IDisposable PushIslandZoomHiRes(Bitmap? letterbox, int pipeW, int pipeH)
+        {
+            var prevSrc = _islandZoomHiRes;
+            int prevW = _islandZoomPipeW;
+            int prevH = _islandZoomPipeH;
+            _islandZoomHiRes = letterbox;
+            _islandZoomPipeW = pipeW;
+            _islandZoomPipeH = pipeH;
+            return new IslandZoomHiResScope(this, prevSrc, prevW, prevH);
+        }
+
+        private sealed class IslandZoomHiResScope : IDisposable
+        {
+            private readonly OcrProcessor _host;
+            private readonly Bitmap? _prevSrc;
+            private readonly int _prevW;
+            private readonly int _prevH;
+            private bool _done;
+
+            public IslandZoomHiResScope(
+                OcrProcessor host, Bitmap? prevSrc, int prevW, int prevH)
+            {
+                _host = host;
+                _prevSrc = prevSrc;
+                _prevW = prevW;
+                _prevH = prevH;
+            }
+
+            public void Dispose()
+            {
+                if (_done) return;
+                _done = true;
+                _host._islandZoomHiRes = _prevSrc;
+                _host._islandZoomPipeW = _prevW;
+                _host._islandZoomPipeH = _prevH;
+            }
+        }
+
+        /// <summary>
+        /// Lanczos progressive scaler for Island Zoom (sharper comic lettering than
+        /// GDI bicubic). Pixel/UI crops use nearest-neighbor.
+        /// </summary>
+        private static Bitmap IslandZoomScaleToSize(Bitmap source, int destW, int destH)
+        {
+            if (destW < 1 || destH < 1)
+                return (Bitmap)source.Clone();
+            if (source.Width == destW && source.Height == destH)
+                return (Bitmap)source.Clone();
+
+            double up = Math.Max(
+                (double)destW / Math.Max(1, source.Width),
+                (double)destH / Math.Max(1, source.Height));
+            if (up >= 2.2 && LooksLikePixelOrUiText(source))
+                return ScaleBitmapNearestNeighbor(source, destW, destH);
+            if (up >= 1.35)
+                return ScaleBitmapLanczosProgressive(source, destW, destH);
+            return ScaleBitmapBicubic(source, destW, destH);
+        }
+
+        /// <summary>
+        /// Gray + tone prep for a hi-res letterbox island crop. Takes ownership of
+        /// <paramref name="colorCrop"/> and returns a new prepped bitmap.
+        /// Denoise is skipped on small crops (speed); levels + sharpen still run.
+        /// </summary>
+        private static Bitmap PrepHiResIslandCropOwned(Bitmap colorCrop)
+        {
+            if (colorCrop == null)
+                throw new ArgumentNullException(nameof(colorCrop));
+
+            Bitmap? gray = null;
+            try
+            {
+                Bitmap work = colorCrop;
+                if (EnablePipelineGrayscale)
+                {
+                    gray = ConvertToInkGrayscale(colorCrop);
+                    work = gray;
+                }
+
+                // skipDenoise: island crops are small; denoise is expensive and
+                // can soft-blur thin comic strokes before we upscale.
+                var tone = ApplyPipelineTonePrep(work, skipDenoise: true);
+                return tone;
+            }
+            finally
+            {
+                try { gray?.Dispose(); } catch { /* ignore */ }
+                try { colorCrop.Dispose(); } catch { /* ignore */ }
+            }
+        }
+
+        /// <summary>
+        /// Crop an island for VL: when Zoom + richer letterbox is pushed, cut from
+        /// letterbox, prep tone, return. Else plain tone crop (caller still zooms).
+        /// </summary>
+        private Bitmap? CropIslandForVl(
+            Bitmap pipeCapture,
+            Rectangle pipeBounds,
+            IReadOnlyList<Rectangle> neighborBoxes,
+            StringBuilder detail,
+            string tag)
+        {
+            var hi = _islandZoomHiRes;
+            int pipeW = pipeCapture.Width;
+            int pipeH = pipeCapture.Height;
+            if (SpeakRunSettings.GetComicIslandZoom() &&
+                hi != null &&
+                _islandZoomPipeW == pipeW &&
+                _islandZoomPipeH == pipeH &&
+                ComicPoiGuide.HiResIsRicher(pipeCapture, hi))
+            {
+                var hiBounds = ComicPoiGuide.MapRectBetweenImages(
+                    pipeBounds, pipeW, pipeH, hi.Width, hi.Height);
+                var hiNeighbors = new List<Rectangle>(neighborBoxes.Count);
+                foreach (var n in neighborBoxes)
+                {
+                    hiNeighbors.Add(ComicPoiGuide.MapRectBetweenImages(
+                        n, pipeW, pipeH, hi.Width, hi.Height));
+                }
+
+                double scale = (double)hi.Width / Math.Max(1, pipeW);
+                int pad = Math.Max(0, (int)Math.Round(ActiveCropPadPx * scale));
+                var raw = CropRegionClamped(hi, hiBounds, pad, hiNeighbors);
+                if (raw != null && raw.Width >= 4 && raw.Height >= 4)
+                {
+                    detail.AppendLine(
+                        $"      {tag} hires-crop {raw.Width}x{raw.Height} " +
+                        $"(pipe {pipeBounds.Width}x{pipeBounds.Height} → " +
+                        $"letterbox {hi.Width}x{hi.Height})");
+                    return PrepHiResIslandCropOwned(raw);
+                }
+
+                try { raw?.Dispose(); } catch { /* ignore */ }
+                detail.AppendLine(
+                    $"      {tag} hires-crop failed → tone crop");
+            }
+
+            return CropRegionClamped(
+                pipeCapture, pipeBounds, ActiveCropPadPx, neighborBoxes);
         }
 
         /// <summary>

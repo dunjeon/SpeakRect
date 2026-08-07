@@ -84,6 +84,7 @@ public class ComicSettingsClampTests
         // Sub-options ready for when user enables POI under Comic Book.
         Assert.True(AppSettings.Current.ComicPoiFogOutside);
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
+        Assert.True(AppSettings.Current.ComicIslandZoom);
     }
 
     [Fact]
@@ -99,6 +100,7 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiMarkers);
             Assert.True(s.ComicPoiFogOutside);
             Assert.True(s.ComicPoiAutoStack);
+            Assert.True(s.ComicIslandZoom);
             Assert.True(s.ComicDetectFog);
             Assert.False(s.ImageLlmSendDownscale);
             Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);

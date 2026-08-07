@@ -20,6 +20,7 @@ namespace SpeakRect
         private readonly CheckBox _chkPoiMarkers;
         private readonly CheckBox _chkPoiFogOutside;
         private readonly CheckBox _chkPoiAutoStack;
+        private readonly CheckBox _chkIslandZoom;
         private readonly TrackBar _trkPoiAutoStackGap;
         private readonly Label _lblPoiAutoStackGapVal;
         private readonly TrackBar _trkPoiAutoStackMargin;
@@ -288,6 +289,28 @@ namespace SpeakRect
                 ApplyControlsEnabled();
             };
             AddFull(_chkPoiAutoStack, 28);
+            _chkIslandZoom = new CheckBox
+            {
+                Text = "    Zoom small balloons",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = true,
+            };
+            _chkIslandZoom.CheckedChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                OnFieldChanged();
+            };
+            AddFull(_chkIslandZoom, 28);
+            AddFull(MakeHint(
+                "Enlarge tiny balloon crops before Local-LLM (like Magnifier). " +
+                "Cuts from the full-res capture when the page was scaled down, " +
+                "then sharp-scales lettering up. Helps missed or wrong words. " +
+                "Already-large balloons are left alone."),
+                64);
             _trkPoiAutoStackGap = MakeTrack(0, 64, ComicPoiGuide.DefaultAutoStackGapPx);
             _lblPoiAutoStackGapVal = MakeValueLabel();
             _trkPoiAutoStackGap.ValueChanged += (_, _) =>
@@ -350,6 +373,7 @@ namespace SpeakRect
                 "Margin and extra canvas pad that image for Local-LLM. " +
                 "Space between matters when several strips share one canvas. " +
                 "Bottom bias only shows when Extra canvas is above 0. " +
+                "Zoom enlarges small crops on that canvas. " +
                 "Preview stays the full page so you can edit boxes. " +
                 "Off: several balloons are separate crops; a single box uses the full page."),
                 88);
@@ -698,6 +722,7 @@ namespace SpeakRect
             Next(_chkPoiMarkers);
             Next(_chkPoiFogOutside);
             Next(_chkPoiAutoStack);
+            Next(_chkIslandZoom);
             Next(_trkPoiAutoStackGap);
             Next(_trkPoiAutoStackMargin);
             Next(_trkPoiStackBeef);
@@ -957,6 +982,7 @@ namespace SpeakRect
                 _chkPoiMarkers.Checked = s.ComicPoiMarkers;
                 _chkPoiFogOutside.Checked = s.ComicPoiFogOutside;
                 _chkPoiAutoStack.Checked = s.ComicPoiAutoStack;
+                _chkIslandZoom.Checked = s.ComicIslandZoom;
                 _trkPoiAutoStackGap.Value = Math.Clamp(
                     s.ComicPoiAutoStackGapPx,
                     _trkPoiAutoStackGap.Minimum,
@@ -1128,6 +1154,8 @@ namespace SpeakRect
             _chkPoiMarkers.Enabled = ready;
             _chkPoiFogOutside.Enabled = poiOn;
             _chkPoiAutoStack.Enabled = poiOn;
+            // Zoom helps per-island VL (orange canvas and plain tone crops).
+            _chkIslandZoom.Enabled = ready;
             bool stackOn = poiOn && _chkPoiAutoStack.Checked;
             _trkPoiAutoStackGap.Enabled = stackOn;
             _lblPoiAutoStackGapVal.Enabled = stackOn;
@@ -1240,6 +1268,7 @@ namespace SpeakRect
             s.ComicPoiMarkers = _chkPoiMarkers.Checked;
             s.ComicPoiFogOutside = _chkPoiFogOutside.Checked;
             s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
+            s.ComicIslandZoom = _chkIslandZoom.Checked;
             s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
             s.ComicPoiAutoStackMarginPx = _trkPoiAutoStackMargin.Value;
             s.ComicPoiStackBeefExtra = _trkPoiStackBeef.Value / 100.0;
