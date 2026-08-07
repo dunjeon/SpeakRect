@@ -33,6 +33,9 @@ koboldcpp/ocr.runtime.kcpps
 scripts/
 publish/
 
+## Local design / architecture notes (not product source)
+docs/
+
 ## Legacy nested docs face (pre-public full source)
 public-repo/
 
