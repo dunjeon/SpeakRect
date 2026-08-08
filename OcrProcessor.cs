@@ -805,11 +805,21 @@ namespace SpeakRect
         private const byte WinOcrDetectGrayFogLevel = 128;
 
         /// <summary>
-        /// Union overlapping inflated islands instead of nudging them apart.
+        /// Union overlapping inflated islands (Balloons §3).
         /// From <see cref="AppSettings.ComicMergeOverlappingIslands"/> (default on).
+        /// Mutually exclusive with <see cref="EnableSeparateOverlappingIslands"/>.
         /// </summary>
         private static bool EnableMergeOverlappingIslands =>
             SpeakRunSettings.GetComicMergeOverlappingIslands();
+
+        /// <summary>
+        /// Shrink grow-overlaps so boxes do not share pixels (Balloons §4 test).
+        /// From <see cref="AppSettings.ComicSeparateOverlappingIslands"/> (default off).
+        /// Mutually exclusive with merge (merge wins when both set).
+        /// </summary>
+        private static bool EnableSeparateOverlappingIslands =>
+            SpeakRunSettings.GetComicSeparateOverlappingIslands() &&
+            !SpeakRunSettings.GetComicMergeOverlappingIslands();
 
         /// <summary>
         /// Combined letterbox dark bar threshold.
@@ -1245,7 +1255,7 @@ namespace SpeakRect
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
+                $" overlapMode={OverlapModeLabel()}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
 
             ImagePrepStages? prepStages = null;
@@ -1432,7 +1442,7 @@ namespace SpeakRect
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
+                $" overlapMode={OverlapModeLabel()}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
             bool useOverride = regionOverride != null && regionOverride.Count > 0;
             if (useOverride)
@@ -7398,10 +7408,13 @@ namespace SpeakRect
         /// Grow each island for crop padding (background-agnostic). Coalescing of
         /// line scraps is separate. After inflate (Grow X/Y):
         /// <list type="bullet">
-        /// <item><see cref="EnableMergeOverlappingIslands"/> on (default): union any
-        /// islands whose boxes would overlap after Grow and Crop pad into one island
-        /// large enough to cover all text.</item>
-        /// <item>Off: nudge grow-overlaps apart (carve larger island; never below OCR core).</item>
+        /// <item><see cref="EnableMergeOverlappingIslands"/> (Balloons §3, default):
+        /// union any islands whose boxes would overlap after Grow and Crop pad.</item>
+        /// <item><see cref="EnableSeparateOverlappingIslands"/> (Balloons §4 test):
+        /// shrink grow-overlaps so each box stops at the other's border; keep
+        /// separate islands for Local-LLM (never below OCR core).</item>
+        /// <item>Both off: leave grown boxes as-is (overlaps ok; crop pad still
+        /// neighbor-clamps).</item>
         /// </list>
         /// <para>
         /// Uses live <see cref="RegionInflateFractionX"/> / Y from Settings → Balloons
@@ -7410,7 +7423,7 @@ namespace SpeakRect
         /// </para>
         /// </summary>
         /// <param name="growOnlyNoMergeNoNudge">
-        /// Inflate only — do not merge or nudge (legacy trial path).
+        /// Inflate only — do not merge or separate (legacy trial path).
         /// </param>
         private static List<DetectedTextRegion> ImproveDetectedRegions(
             List<DetectedTextRegion> regions,
@@ -7469,10 +7482,21 @@ namespace SpeakRect
 
             if (EnableMergeOverlappingIslands)
                 inflated = MergeOverlappingIslands(inflated, capW, capH);
-            else
-                inflated = NudgeApartOverlappingRegions(inflated, cores, capW, capH);
+            else if (EnableSeparateOverlappingIslands)
+                inflated = SeparateOverlappingIslands(inflated, cores, capW, capH);
+            // else: leave grown boxes as-is (both knobs off)
 
             return SortComicReadingOrderRegions(inflated);
+        }
+
+        /// <summary>Detail-log label for Balloons §3/§4 overlap handling.</summary>
+        private static string OverlapModeLabel()
+        {
+            if (EnableMergeOverlappingIslands)
+                return "merge";
+            if (EnableSeparateOverlappingIslands)
+                return "separate";
+            return "leave";
         }
 
         /// <summary>
@@ -8144,204 +8168,16 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// When two inflated islands overlap, shrink them so each crop owns distinct
-        /// pixels. Prefer carving the <b>larger</b> island. Never shrink past each
-        /// region's WinOCR <paramref name="cores"/> (keeps "ARE THE" on the left).
+        /// Balloons §4: shrink grow-overlaps so each crop owns distinct pixels.
+        /// Prefer carving the larger island; never shrink past WinOCR cores.
+        /// Pure geometry lives in <see cref="ComicRegionGeometry.SeparateOverlappingIslands"/>.
         /// </summary>
-        private static List<DetectedTextRegion> NudgeApartOverlappingRegions(
+        private static List<DetectedTextRegion> SeparateOverlappingIslands(
             List<DetectedTextRegion> regions,
             List<Rectangle> cores,
             int capW,
             int capH)
-        {
-            if (regions.Count <= 1)
-                return regions;
-
-            var boxes = regions.Select(r => r.Bounds).ToArray();
-            if (cores.Count != boxes.Length)
-            {
-                // Fallback: treat current box as core
-                cores = boxes.ToList();
-            }
-
-            Rectangle Floor(int idx, Rectangle proposed)
-            {
-                var c = cores[idx];
-                int l = Math.Min(proposed.Left, c.Left);
-                int t = Math.Min(proposed.Top, c.Top);
-                int r = Math.Max(proposed.Right, c.Right);
-                int b = Math.Max(proposed.Bottom, c.Bottom);
-                var u = Rectangle.FromLTRB(l, t, r, b);
-                u.Intersect(new Rectangle(0, 0, capW, capH));
-                return u.Width >= 1 && u.Height >= 1 ? u : proposed;
-            }
-
-            // Pairwise; a few passes so multi-way overlaps settle
-            for (int pass = 0; pass < 3; pass++)
-            {
-                bool changed = false;
-                for (int i = 0; i < boxes.Length; i++)
-                {
-                    for (int j = i + 1; j < boxes.Length; j++)
-                    {
-                        var a = boxes[i];
-                        var b = boxes[j];
-                        var inter = Rectangle.Intersect(a, b);
-                        if (inter.Width <= 0 || inter.Height <= 0)
-                            continue;
-
-                        double acx = a.Left + a.Width / 2.0;
-                        double acy = a.Top + a.Height / 2.0;
-                        double bcx = b.Left + b.Width / 2.0;
-                        double bcy = b.Top + b.Height / 2.0;
-                        double dx = Math.Abs(acx - bcx);
-                        double dy = Math.Abs(acy - bcy);
-
-                        long aArea = (long)a.Width * a.Height;
-                        long bArea = (long)b.Width * b.Height;
-                        bool preferShrinkA = aArea >= bArea * 3 / 2;
-                        bool preferShrinkB = bArea >= aArea * 3 / 2;
-
-                        if (dy >= dx)
-                        {
-                            if (acy <= bcy)
-                            {
-                                if (preferShrinkA && !preferShrinkB)
-                                {
-                                    int newABottom = Math.Min(a.Bottom, Math.Max(b.Top, cores[i].Bottom));
-                                    if (newABottom - a.Top >= 8)
-                                    {
-                                        boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, a.Top, a.Right, newABottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                if (preferShrinkB && !preferShrinkA)
-                                {
-                                    int newBTop = Math.Max(b.Top, Math.Min(a.Bottom, cores[j].Top));
-                                    if (b.Bottom - newBTop >= 8)
-                                    {
-                                        boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, newBTop, b.Right, b.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                int midY = inter.Top + inter.Height / 2;
-                                boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, a.Top, a.Right, Math.Min(a.Bottom, midY)));
-                                boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, Math.Max(b.Top, midY), b.Right, b.Bottom));
-                                changed = true;
-                            }
-                            else
-                            {
-                                if (preferShrinkB && !preferShrinkA)
-                                {
-                                    int newBBottom = Math.Min(b.Bottom, Math.Max(a.Top, cores[j].Bottom));
-                                    if (newBBottom - b.Top >= 8)
-                                    {
-                                        boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, b.Top, b.Right, newBBottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                if (preferShrinkA && !preferShrinkB)
-                                {
-                                    int newATop = Math.Max(a.Top, Math.Min(b.Bottom, cores[i].Top));
-                                    if (a.Bottom - newATop >= 8)
-                                    {
-                                        boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, newATop, a.Right, a.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                int midY = inter.Top + inter.Height / 2;
-                                boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, b.Top, b.Right, Math.Min(b.Bottom, midY)));
-                                boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, Math.Max(a.Top, midY), a.Right, a.Bottom));
-                                changed = true;
-                            }
-                        }
-                        else
-                        {
-                            // Side-by-side - protect left edge of right balloon (ARE THE-)
-                            if (acx <= bcx)
-                            {
-                                if (preferShrinkA && !preferShrinkB)
-                                {
-                                    int newARight = Math.Min(a.Right, Math.Max(b.Left, cores[i].Right));
-                                    if (newARight - a.Left >= 8)
-                                    {
-                                        boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, a.Top, newARight, a.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                if (preferShrinkB && !preferShrinkA)
-                                {
-                                    int newBLeft = Math.Max(b.Left, Math.Min(a.Right, cores[j].Left));
-                                    if (b.Right - newBLeft >= 8)
-                                    {
-                                        boxes[j] = Floor(j, Rectangle.FromLTRB(newBLeft, b.Top, b.Right, b.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                // Default: shrink the LEFT (usually larger) island only
-                                int midX = inter.Left + inter.Width / 2;
-                                int aRight = Math.Min(a.Right, Math.Max(midX, cores[i].Right));
-                                boxes[i] = Floor(i, Rectangle.FromLTRB(a.Left, a.Top, aRight, a.Bottom));
-                                // Right island keeps at least its OCR core left
-                                boxes[j] = Floor(j, b);
-                                changed = true;
-                            }
-                            else
-                            {
-                                if (preferShrinkB && !preferShrinkA)
-                                {
-                                    int newBRight = Math.Min(b.Right, Math.Max(a.Left, cores[j].Right));
-                                    if (newBRight - b.Left >= 8)
-                                    {
-                                        boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, b.Top, newBRight, b.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                if (preferShrinkA && !preferShrinkB)
-                                {
-                                    int newALeft = Math.Max(a.Left, Math.Min(b.Right, cores[i].Left));
-                                    if (a.Right - newALeft >= 8)
-                                    {
-                                        boxes[i] = Floor(i, Rectangle.FromLTRB(newALeft, a.Top, a.Right, a.Bottom));
-                                        changed = true;
-                                        continue;
-                                    }
-                                }
-                                int midX = inter.Left + inter.Width / 2;
-                                int bRight = Math.Min(b.Right, Math.Max(midX, cores[j].Right));
-                                boxes[j] = Floor(j, Rectangle.FromLTRB(b.Left, b.Top, bRight, b.Bottom));
-                                boxes[i] = Floor(i, a);
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-                if (!changed)
-                    break;
-            }
-
-            var result = new List<DetectedTextRegion>(regions.Count);
-            for (int i = 0; i < regions.Count; i++)
-            {
-                var b = Floor(i, boxes[i]);
-                b.Intersect(new Rectangle(0, 0, capW, capH));
-                if (b.Width < 1 || b.Height < 1)
-                    continue;
-                result.Add(new DetectedTextRegion
-                {
-                    Bounds = b,
-                    WinOcrText = regions[i].WinOcrText
-                });
-            }
-            return result;
-        }
+            => ComicRegionGeometry.SeparateOverlappingIslands(regions, cores, capW, capH);
 
         /// <summary>
         /// True when WinOCR boxes look like word scraps (not full speech balloons).
@@ -10046,8 +9882,8 @@ namespace SpeakRect
 
         /// <summary>
         /// Smoke helper: Western comic reading order on geometry only
-        /// (L→R within row, top→bottom bands). Returns ordered copies of
-        /// <paramref name="boxes"/>.
+        /// (proximity chain: upper-left seed, tight stacks + L→R peers).
+        /// Returns ordered copies of <paramref name="boxes"/>.
         /// </summary>
         public static List<Rectangle> SmokeSortComicReadingOrder(
             IEnumerable<Rectangle> boxes)
@@ -10076,6 +9912,27 @@ namespace SpeakRect
                 .Select(b => new DetectedTextRegion { Bounds = b, WinOcrText = "" })
                 .ToList();
             return MergeOverlappingIslands(regions, capW, capH, cropPadPx)
+                .Select(r => r.Bounds)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Smoke helper: Balloons §4 separate — shrink grow-overlaps so boxes do
+        /// not share positive-area pixels. <paramref name="cores"/> defaults to
+        /// the same as <paramref name="boxes"/> when null.
+        /// </summary>
+        public static List<Rectangle> SmokeSeparateOverlappingIslands(
+            IEnumerable<Rectangle> boxes,
+            IReadOnlyList<Rectangle>? cores = null,
+            int capW = 2000,
+            int capH = 2000)
+        {
+            var boxList = (boxes ?? Array.Empty<Rectangle>()).ToList();
+            var regions = boxList
+                .Select(b => new DetectedTextRegion { Bounds = b, WinOcrText = "" })
+                .ToList();
+            var coreList = cores ?? boxList;
+            return SeparateOverlappingIslands(regions, coreList.ToList(), capW, capH)
                 .Select(r => r.Bounds)
                 .ToList();
         }

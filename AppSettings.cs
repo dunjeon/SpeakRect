@@ -210,9 +210,20 @@ namespace SpeakRect
         /// effective boxes overlap are merged into one union rectangle (covers all
         /// text; no crop cutoff). Helps dense OCR island scenes where close
         /// balloons inflate/pad into each other.
-        /// When false: overlapping grow-inflated islands are nudged apart instead.
+        /// Mutually exclusive with <see cref="ComicSeparateOverlappingIslands"/>
+        /// (Normalize turns separate off when both are true; merge wins).
         /// </summary>
         public bool ComicMergeOverlappingIslands { get; set; } = true;
+
+        /// <summary>
+        /// Test setting (Balloons §4): after Grow X/Y, shrink overlapping island
+        /// boxes so each stops at the other's border (no positive-area overlap).
+        /// Keeps separate islands for Local-LLM instead of joining them.
+        /// Mutually exclusive with <see cref="ComicMergeOverlappingIslands"/>.
+        /// When both merge and separate are off: leave grown boxes as-is (overlaps ok).
+        /// Default off.
+        /// </summary>
+        public bool ComicSeparateOverlappingIslands { get; set; } = false;
 
         /// <summary>
         /// Comic Book alternate: tone + green region boxes (± outside fog map).
@@ -288,6 +299,9 @@ namespace SpeakRect
             ComicPoiStackBeefExtra = Math.Clamp(ComicPoiStackBeefExtra, 0.0, 1.5);
             ComicPoiStackBottomPadShare =
                 Math.Clamp(ComicPoiStackBottomPadShare, 0.0, 1.0);
+            // Merge and separate are mutually exclusive; merge wins when both set.
+            if (ComicMergeOverlappingIslands && ComicSeparateOverlappingIslands)
+                ComicSeparateOverlappingIslands = false;
         }
 
         /// <summary>
@@ -309,6 +323,7 @@ namespace SpeakRect
             ComicInflateFracY = DefaultComicInflateFracY;
             ComicRegionPadding = DefaultComicRegionPadding;
             ComicMergeOverlappingIslands = true;
+            ComicSeparateOverlappingIslands = false;
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicIslandZoom = true;
@@ -1174,6 +1189,7 @@ namespace SpeakRect
             ComicDetectFog = true;
             ComicDetectFogAmount = DefaultComicDetectFogAmount;
             ComicMergeOverlappingIslands = true;
+            ComicSeparateOverlappingIslands = false;
             ClearComicOnlyModeStash();
             NormalizeComicRegionSettings();
         }
@@ -1531,6 +1547,17 @@ namespace SpeakRect
             if (map.TryGetValue("ComicMergeOverlappingIslands", out string? mergeRaw) &&
                 TryParseBool(mergeRaw, out bool merge))
                 ComicMergeOverlappingIslands = merge;
+
+            // Separate key (Balloons §4). Legacy: merge=false used to mean "nudge
+            // apart" — when the new key is absent, map that to separate=true so
+            // old profiles keep the same geometry behavior.
+            bool hadSeparateKey = map.TryGetValue(
+                "ComicSeparateOverlappingIslands", out string? sepRaw) &&
+                sepRaw != null;
+            if (hadSeparateKey && TryParseBool(sepRaw!, out bool separate))
+                ComicSeparateOverlappingIslands = separate;
+            else if (!hadSeparateKey && !ComicMergeOverlappingIslands)
+                ComicSeparateOverlappingIslands = true;
 
             if (map.TryGetValue("ComicPoiMarkers", out string? poiRaw) &&
                 TryParseBool(poiRaw, out bool poi))
@@ -2411,7 +2438,9 @@ namespace SpeakRect
                 sb.AppendLine("; DetectFog softens art for OCR detect; Local-LLM still reads the clear tone image.");
                 sb.AppendLine("; InflateFrac* / RegionPadding = box pad around islands.");
                 sb.AppendLine("; MergeOverlappingIslands=true (default): union islands that overlap after Grow + pad.");
-                sb.AppendLine(";   false = nudge grow-overlaps apart instead.");
+                sb.AppendLine("; SeparateOverlappingIslands=false (test): shrink grow-overlaps so boxes do not share pixels.");
+                sb.AppendLine(";   Mutually exclusive with Merge (Normalize turns Separate off when both true).");
+                sb.AppendLine(";   Both off = leave grown boxes as-is (overlaps ok; crop pad still neighbor-clamps).");
                 sb.AppendLine("; PoiMarkers=true: Comic Book alternate — tone + green region boxes. Forces ComicBook on.");
                 sb.AppendLine("; PoiAutoStack=true (stock): each island → own orange canvas → Local-LLM one at a time.");
                 sb.AppendLine(";   Not multi-strip stack. Preview stays full page. Stack off/fail multi → per-island VL.");
@@ -2427,6 +2456,7 @@ namespace SpeakRect
                 sb.AppendLine($"ComicInflateFracY={ComicInflateFracY.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicRegionPadding={ComicRegionPadding}");
                 sb.AppendLine($"ComicMergeOverlappingIslands={ComicMergeOverlappingIslands.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"ComicSeparateOverlappingIslands={ComicSeparateOverlappingIslands.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiMarkers={ComicPoiMarkers.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
@@ -2684,6 +2714,7 @@ namespace SpeakRect
                 or "CommaPauseMs" or "SentencePauseMs" or "OtherPauseMs" or "BubblePauseMs"
                 or "ComicInflateFracX" or "ComicInflateFracY"
                 or "ComicRegionPadding" or "ComicMergeOverlappingIslands"
+                or "ComicSeparateOverlappingIslands"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
                 or "ComicPoiAutoStack" or "ComicIslandZoom"
                 or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"

@@ -43,6 +43,7 @@ namespace SpeakRect
         private readonly Label _lblPaddingVal;
 
         private readonly CheckBox _chkMergeOverlap;
+        private readonly CheckBox _chkSeparateOverlap;
 
         private readonly RegionRefineSurface _refine;
         private readonly Label _lblPreviewHeader;
@@ -424,8 +425,8 @@ namespace SpeakRect
                 "They stop short of neighboring balloons."),
                 48);
 
-            // 3) Merge overlapping (default on)
-            AddFull(MakeSection("3 · OVERLAPPING BOXES"), 28);
+            // 3 / 4: create both checkboxes before wiring mutual-exclusion handlers
+            // so neither field is null if CheckedChanged fires during layout.
             _chkMergeOverlap = new CheckBox
             {
                 Text = "Join boxes that overlap",
@@ -435,12 +436,52 @@ namespace SpeakRect
                 AutoSize = false,
                 Checked = true,
             };
-            _chkMergeOverlap.CheckedChanged += (_, _) => OnFieldChanged();
+            _chkSeparateOverlap = new CheckBox
+            {
+                Text = "Split boxes so they do not overlap",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.Fg,
+                BackColor = UiTheme.Bg,
+                AutoSize = false,
+                Checked = false,
+            };
+            _chkMergeOverlap.CheckedChanged += (_, _) =>
+            {
+                if (!_loading && _chkMergeOverlap.Checked && _chkSeparateOverlap.Checked)
+                {
+                    _loading = true;
+                    try { _chkSeparateOverlap.Checked = false; }
+                    finally { _loading = false; }
+                }
+                OnFieldChanged();
+            };
+            _chkSeparateOverlap.CheckedChanged += (_, _) =>
+            {
+                if (!_loading && _chkSeparateOverlap.Checked && _chkMergeOverlap.Checked)
+                {
+                    _loading = true;
+                    try { _chkMergeOverlap.Checked = false; }
+                    finally { _loading = false; }
+                }
+                OnFieldChanged();
+            };
+
+            // 3) Merge overlapping (default on) — mutually exclusive with §4
+            AddFull(MakeSection("3 · OVERLAPPING BOXES"), 28);
             AddFull(_chkMergeOverlap, 28);
             AddFull(MakeHint(
-                "On: overlapping boxes become one. " +
-                "Off: they are nudged apart instead."),
-                48);
+                "On: overlapping boxes become one big island. " +
+                "Turns off Setting 4. Both off leaves grown boxes as-is."),
+                40);
+
+            // 4) Separate overlapping (test; default off) — mutually exclusive with §3
+            AddFull(MakeSection("4 · SEPARATE OVERLAPS (TEST)"), 28);
+            AddFull(_chkSeparateOverlap, 28);
+            AddFull(MakeHint(
+                "On: each box stops at the other's border (no shared pixels). " +
+                "Keeps small islands separate for Local-LLM and reduces repeated text. " +
+                "Turns off Setting 3."),
+                56);
 
             scroll.Controls.Add(body);
             root.Controls.Add(scroll, 0, 0);
@@ -734,8 +775,9 @@ namespace SpeakRect
             Next(_trkInflateX);
             Next(_trkInflateY);
             Next(_trkPadding);
-            // 3) Merge overlap
+            // 3) Merge overlap · 4) Separate overlap (test)
             Next(_chkMergeOverlap);
+            Next(_chkSeparateOverlap);
             // Actions (left → right for user)
             Next(_btnOpenImage);
             Next(_btnUseLast);
@@ -872,6 +914,7 @@ namespace SpeakRect
                 s.ComicInflateFracY.ToString("0.###", inv),
                 s.ComicRegionPadding.ToString(inv),
                 s.ComicMergeOverlappingIslands ? "1" : "0",
+                s.ComicSeparateOverlappingIslands ? "1" : "0",
                 DevCaptureCache.PrepSettingsSignature());
         }
 
@@ -1005,6 +1048,7 @@ namespace SpeakRect
                 _trkInflateY.Value = InflateToTick(s.ComicInflateFracY);
                 _trkPadding.Value = Math.Clamp(s.ComicRegionPadding, _trkPadding.Minimum, _trkPadding.Maximum);
                 _chkMergeOverlap.Checked = s.ComicMergeOverlappingIslands;
+                _chkSeparateOverlap.Checked = s.ComicSeparateOverlappingIslands;
 
                 RefreshValueLabels();
                 ApplyFogUiState();
@@ -1176,6 +1220,7 @@ namespace SpeakRect
             // Crop pad sizes islands for POI (green boxes + outside fog).
             _trkPadding.Enabled = ready;
             _chkMergeOverlap.Enabled = ready;
+            _chkSeparateOverlap.Enabled = ready;
 
             _btnPreview.Enabled = ready && !_snapBusy;
             _btnSpeak.Enabled = ready && !_snapBusy;
@@ -1283,7 +1328,21 @@ namespace SpeakRect
             s.ComicInflateFracY = TickToInflate(_trkInflateY.Value);
             s.ComicRegionPadding = _trkPadding.Value;
             s.ComicMergeOverlappingIslands = _chkMergeOverlap.Checked;
+            s.ComicSeparateOverlappingIslands = _chkSeparateOverlap.Checked;
             s.NormalizeComicRegionSettings();
+            // Normalize may clear separate when both were set — mirror UI.
+            if (s.ComicMergeOverlappingIslands && _chkSeparateOverlap.Checked)
+            {
+                _loading = true;
+                try { _chkSeparateOverlap.Checked = false; }
+                finally { _loading = false; }
+            }
+            else if (s.ComicSeparateOverlappingIslands && _chkMergeOverlap.Checked)
+            {
+                _loading = true;
+                try { _chkMergeOverlap.Checked = false; }
+                finally { _loading = false; }
+            }
             // If user left Comic Book (POI suspended), do not let a stale checkbox
             // rewrite POI on via Persist before Reload — honor mode.
             if (!s.ComicBook && s.ComicPoiMarkers)

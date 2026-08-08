@@ -44,6 +44,35 @@ public class ComicSettingsClampTests
     {
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
         Assert.True(AppSettings.Current.ComicMergeOverlappingIslands);
+        Assert.False(AppSettings.Current.ComicSeparateOverlappingIslands);
+    }
+
+    [Fact]
+    public void Merge_and_separate_are_mutually_exclusive_merge_wins()
+    {
+        var s = AppSettings.Current;
+        bool prevMerge = s.ComicMergeOverlappingIslands;
+        bool prevSep = s.ComicSeparateOverlappingIslands;
+        try
+        {
+            s.ComicMergeOverlappingIslands = true;
+            s.ComicSeparateOverlappingIslands = true;
+            s.NormalizeComicRegionSettings();
+            Assert.True(s.ComicMergeOverlappingIslands);
+            Assert.False(s.ComicSeparateOverlappingIslands);
+
+            s.ComicMergeOverlappingIslands = false;
+            s.ComicSeparateOverlappingIslands = true;
+            s.NormalizeComicRegionSettings();
+            Assert.False(s.ComicMergeOverlappingIslands);
+            Assert.True(s.ComicSeparateOverlappingIslands);
+        }
+        finally
+        {
+            s.ComicMergeOverlappingIslands = prevMerge;
+            s.ComicSeparateOverlappingIslands = prevSep;
+            s.NormalizeComicRegionSettings();
+        }
     }
 
 

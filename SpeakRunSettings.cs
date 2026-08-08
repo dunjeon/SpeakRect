@@ -35,6 +35,7 @@ namespace SpeakRect
         public double ComicInflateFracY { get; init; }
         public int ComicRegionPadding { get; init; }
         public bool ComicMergeOverlappingIslands { get; init; }
+        public bool ComicSeparateOverlappingIslands { get; init; }
 
         // ---- Image prep ----
         public bool ImagePrepEnabled { get; init; }
@@ -111,6 +112,7 @@ namespace SpeakRect
                 ComicInflateFracY = s.ComicInflateFracY,
                 ComicRegionPadding = s.ComicRegionPadding,
                 ComicMergeOverlappingIslands = s.ComicMergeOverlappingIslands,
+                ComicSeparateOverlappingIslands = s.ComicSeparateOverlappingIslands,
 
                 ImagePrepEnabled = s.ImagePrepEnabled,
                 ImageLetterbox = s.ImageLetterbox,
@@ -232,6 +234,10 @@ namespace SpeakRect
         public static bool GetComicMergeOverlappingIslands() =>
             Active?.ComicMergeOverlappingIslands ??
             AppSettings.Current.ComicMergeOverlappingIslands;
+
+        public static bool GetComicSeparateOverlappingIslands() =>
+            Active?.ComicSeparateOverlappingIslands ??
+            AppSettings.Current.ComicSeparateOverlappingIslands;
 
         public static bool GetImagePrepEnabled() =>
             Active?.ImagePrepEnabled ?? AppSettings.Current.ImagePrepEnabled;
