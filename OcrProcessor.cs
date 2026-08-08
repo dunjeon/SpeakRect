@@ -812,13 +812,6 @@ namespace SpeakRect
             SpeakRunSettings.GetComicMergeOverlappingIslands();
 
         /// <summary>
-        /// Snap Concept Mode: collapse all islands into one envelope box.
-        /// From <see cref="AppSettings.ComicSnapConceptEnvelope"/> (default off).
-        /// </summary>
-        private static bool EnableSnapConceptEnvelope =>
-            SpeakRunSettings.GetComicSnapConceptEnvelope();
-
-        /// <summary>
         /// Combined letterbox dark bar threshold.
         /// From <see cref="AppSettings.ImageLetterboxBlack"/>.
         /// </summary>
@@ -1252,8 +1245,7 @@ namespace SpeakRect
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
                 $" grow={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" cropPad={TextRegionPadding}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}" +
-                $" snapEnvelope={(EnableSnapConceptEnvelope ? "on" : "off")}");
+                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
 
             ImagePrepStages? prepStages = null;
@@ -1440,8 +1432,7 @@ namespace SpeakRect
                 $" amount={WinOcrDetectGrayFogAmount:0.###}" +
                 $" inflate={RegionInflateFractionX:0.##}/{RegionInflateFractionY:0.##}" +
                 $" pad={TextRegionPadding}" +
-                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}" +
-                $" snapEnvelope={(EnableSnapConceptEnvelope ? "on" : "off")}");
+                $" mergeOverlap={(EnableMergeOverlappingIslands ? "on" : "off")}");
             detail.AppendLine($"source {rawSnap.Width}x{rawSnap.Height}");
             bool useOverride = regionOverride != null && regionOverride.Count > 0;
             if (useOverride)
@@ -7411,9 +7402,6 @@ namespace SpeakRect
         /// islands whose boxes would overlap after Grow and Crop pad into one island
         /// large enough to cover all text.</item>
         /// <item>Off: nudge grow-overlaps apart (carve larger island; never below OCR core).</item>
-        /// <item><see cref="EnableSnapConceptEnvelope"/> on (test): collapse every
-        /// island into one envelope (highest-left → lowest-right). Extra margin
-        /// then pads that single snap focus.</item>
         /// </list>
         /// <para>
         /// Uses live <see cref="RegionInflateFractionX"/> / Y from Settings → Balloons
@@ -7476,9 +7464,6 @@ namespace SpeakRect
             if (growOnlyNoMergeNoNudge)
             {
                 // Dyn-fog trial: leave grown boxes as-is (overlaps ok for area score).
-                // Still honor Snap Concept when testing full envelope focus.
-                if (EnableSnapConceptEnvelope)
-                    inflated = CollapseToSnapEnvelope(inflated, capW, capH);
                 return SortComicReadingOrderRegions(inflated);
             }
 
@@ -7487,20 +7472,8 @@ namespace SpeakRect
             else
                 inflated = NudgeApartOverlappingRegions(inflated, cores, capW, capH);
 
-            if (EnableSnapConceptEnvelope)
-                inflated = CollapseToSnapEnvelope(inflated, capW, capH);
-
             return SortComicReadingOrderRegions(inflated);
         }
-
-        /// <summary>
-        /// Snap Concept: one envelope from highest-left to lowest-right island.
-        /// </summary>
-        private static List<DetectedTextRegion> CollapseToSnapEnvelope(
-            List<DetectedTextRegion> regions,
-            int capW,
-            int capH)
-            => ComicRegionGeometry.CollapseToSnapEnvelope(regions, capW, capH);
 
         /// <summary>
         /// When <see cref="EnableMergeOverlappingIslands"/> is on, union any islands
