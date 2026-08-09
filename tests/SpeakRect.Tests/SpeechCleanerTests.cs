@@ -35,6 +35,45 @@ public class SpeechCleanerTests
             OcrProcessor.SmokeCleanForSpeech("No!", comicBook: true)));
     }
 
+    /// <summary>
+    /// Refusal gate must not treat ordinary "I can't …" dialogue as VL junk.
+    /// The old can/can't + see|read|… arm matched "seem" as a "see" prefix and
+    /// dropped the second sentence after pause-split (Default + ComicBook).
+    /// </summary>
+    [Fact]
+    public void Cant_seem_dialogue_is_usable_and_expands()
+    {
+        const string raw =
+            "stay up late tonight?\nI can't seem to fall back asleep.";
+        string cleaned = OcrProcessor.SmokeCleanForSpeech(raw, comicBook: true);
+        Assert.False(SpeechCleaner.IsUnusable(cleaned));
+        Assert.False(SpeechCleaner.IsUnusable("i can't seem to fall back asleep."));
+
+        var units = OcrProcessor.SmokeExpandSpeakUnits(new[] { cleaned });
+        Assert.True(units.Count >= 2, $"expected ≥2 speak units, got {units.Count}: [{string.Join(" | ", units)}]");
+        Assert.Contains(units, u => u.Contains("stay up late tonight", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(units, u => u.Contains("seem", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(units, u => u.Contains("asleep", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Sorry_i_cant_dialogue_is_usable()
+    {
+        // Old "sorry.? I can't/could not…" arm killed common balloon lines.
+        Assert.False(SpeechCleaner.IsUnusable("sorry, i can't."));
+        Assert.False(SpeechCleaner.IsUnusable("sorry. i can't go with you"));
+        Assert.False(SpeechCleaner.IsUnusable(
+            OcrProcessor.SmokeCleanForSpeech("Sorry, I can't.", comicBook: true)));
+    }
+
+    [Fact]
+    public void Short_refusal_tokens_still_unusable()
+    {
+        Assert.True(SpeechCleaner.IsUnusable("unreadable"));
+        Assert.True(SpeechCleaner.IsUnusable("no text found"));
+        Assert.True(SpeechCleaner.IsUnusable("there is no text"));
+    }
+
     [Fact]
     public void StripMarkdownLlmJunk_removes_fence_and_keeps_dialogue()
     {

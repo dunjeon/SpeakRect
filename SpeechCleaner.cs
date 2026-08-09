@@ -297,14 +297,16 @@ namespace SpeakRect
             if (IsPromptEcho(t))
                 return true;
 
-            // Common VL refusals / empty-result phrasings (after CleanForSpeech lowercases)
+            // Common VL refusals / empty-result phrasings (after CleanForSpeech lowercases).
+            // No "I can't see/read/…" or "sorry I can't…" arms: both collide with ordinary
+            // dialogue (e.g. "I can't seem…", "Sorry, I can't go"). Empty/word gates +
+            // IsPromptEcho still cover junk; short fixed tokens and "no text…" shapes
+            // below rarely appear as balloons.
             if (Regex.IsMatch(t,
                     @"^(?:unreadable|n/?a|none|null|nothing|empty|" +
                     @"no\s+(?:text|content|readable\s+text)(?:\s+found)?|" +
-                    @"(?:i\s+)?(?:can(?:not|'t)|could not|unable to)\s+(?:read|see|find|extract|detect).{0,40}|" +
                     @"there is no (?:visible\s+)?text|" +
-                    @"no text (?:is )?(?:visible|detected|present|found)|" +
-                    @"sorry.? (?:i )?(?:can(?:not|'t)|could not).{0,40})$",
+                    @"no text (?:is )?(?:visible|detected|present|found))$",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                 return true;
 
