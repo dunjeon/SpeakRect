@@ -33,6 +33,32 @@ public class ComicSettingsClampTests
     }
 
     [Fact]
+    public void Island_zoom_factor_clamps_and_target_is_1800()
+    {
+        Assert.Equal(1800, ComicPoiGuide.IslandZoomTargetLongEdge);
+        Assert.Equal(1.25, ComicPoiGuide.IslandZoomFactorMin);
+        Assert.Equal(10.0, ComicPoiGuide.IslandZoomFactorMax);
+
+        var s = AppSettings.Current;
+        double prev = s.ComicIslandZoomFactor;
+        try
+        {
+            s.ComicIslandZoomFactor = 99.0;
+            s.NormalizeComicRegionSettings();
+            Assert.Equal(ComicPoiGuide.IslandZoomFactorMax, s.ComicIslandZoomFactor);
+
+            s.ComicIslandZoomFactor = 0.5;
+            s.NormalizeComicRegionSettings();
+            Assert.Equal(ComicPoiGuide.IslandZoomFactorMin, s.ComicIslandZoomFactor);
+        }
+        finally
+        {
+            s.ComicIslandZoomFactor = prev;
+            s.NormalizeComicRegionSettings();
+        }
+    }
+
+    [Fact]
     public void Image_llm_send_downscale_defaults_off()
     {
         AppSettings.Current.ResetImagePrepSettingsToDefaults();
@@ -111,6 +137,9 @@ public class ComicSettingsClampTests
         Assert.True(AppSettings.Current.ComicPoiFogOutside);
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
         Assert.True(AppSettings.Current.ComicIslandZoom);
+        Assert.Equal(
+            ComicPoiGuide.IslandZoomMaxFactor,
+            AppSettings.Current.ComicIslandZoomFactor);
     }
 
     [Fact]
@@ -127,6 +156,7 @@ public class ComicSettingsClampTests
             Assert.True(s.ComicPoiFogOutside);
             Assert.True(s.ComicPoiAutoStack);
             Assert.True(s.ComicIslandZoom);
+            Assert.Equal(ComicPoiGuide.IslandZoomMaxFactor, s.ComicIslandZoomFactor);
             Assert.True(s.ComicDetectFog);
             Assert.False(s.ImageLlmSendDownscale);
             Assert.Equal(ComicPoiGuide.DefaultStackBeefExtra, s.ComicPoiStackBeefExtra);

@@ -21,6 +21,8 @@ namespace SpeakRect
         private readonly CheckBox _chkPoiFogOutside;
         private readonly CheckBox _chkPoiAutoStack;
         private readonly CheckBox _chkIslandZoom;
+        private readonly TrackBar _trkIslandZoomFactor;
+        private readonly Label _lblIslandZoomFactorVal;
         private readonly TrackBar _trkPoiAutoStackGap;
         private readonly Label _lblPoiAutoStackGapVal;
         private readonly TrackBar _trkPoiAutoStackMargin;
@@ -303,15 +305,43 @@ namespace SpeakRect
             {
                 if (_loading)
                     return;
+                ApplyControlsEnabled();
                 OnFieldChanged();
             };
             AddFull(_chkIslandZoom, 28);
+            // Mag-style percent: 125%–1000% (factor 1.25–10). Stock 600%.
+            int defaultZoomPct = (int)Math.Round(
+                ComicPoiGuide.IslandZoomMaxFactor * 100.0);
+            _trkIslandZoomFactor = MakeTrack(125, 1000, defaultZoomPct);
+            _trkIslandZoomFactor.SmallChange = 25;
+            _trkIslandZoomFactor.LargeChange = 100;
+            _lblIslandZoomFactorVal = MakeValueLabel();
+            _trkIslandZoomFactor.ValueChanged += (_, _) =>
+            {
+                if (_loading)
+                    return;
+                // Snap to 25% steps so the label stays Mag-clean (150%, 200%…).
+                int snapped = (int)(Math.Round(_trkIslandZoomFactor.Value / 25.0) * 25);
+                snapped = Math.Clamp(snapped, 125, 1000);
+                if (snapped != _trkIslandZoomFactor.Value)
+                {
+                    _trkIslandZoomFactor.Value = snapped;
+                    return;
+                }
+                RefreshValueLabels();
+                OnFieldChanged();
+            };
+            AddRow(
+                MakeLabel("    Zoom amount"),
+                WrapTrack(_trkIslandZoomFactor, _lblIslandZoomFactorVal),
+                42);
             AddFull(MakeHint(
                 "Enlarge tiny balloon crops before Local-LLM (like Magnifier). " +
+                "Zoom amount is a Mag-style percent (125%–1000%). " +
                 "Cuts from the full-res capture when the page was scaled down, " +
                 "then sharp-scales lettering up. Helps missed or wrong words. " +
                 "Already-large balloons are left alone."),
-                64);
+                76);
             _trkPoiAutoStackGap = MakeTrack(0, 64, ComicPoiGuide.DefaultAutoStackGapPx);
             _lblPoiAutoStackGapVal = MakeValueLabel();
             _trkPoiAutoStackGap.ValueChanged += (_, _) =>
@@ -764,6 +794,7 @@ namespace SpeakRect
             Next(_chkPoiFogOutside);
             Next(_chkPoiAutoStack);
             Next(_chkIslandZoom);
+            Next(_trkIslandZoomFactor);
             Next(_trkPoiAutoStackGap);
             Next(_trkPoiAutoStackMargin);
             Next(_trkPoiStackBeef);
@@ -1026,6 +1057,12 @@ namespace SpeakRect
                 _chkPoiFogOutside.Checked = s.ComicPoiFogOutside;
                 _chkPoiAutoStack.Checked = s.ComicPoiAutoStack;
                 _chkIslandZoom.Checked = s.ComicIslandZoom;
+                int zoomPct = (int)Math.Round(s.ComicIslandZoomFactor * 100.0);
+                zoomPct = (int)(Math.Round(zoomPct / 25.0) * 25);
+                _trkIslandZoomFactor.Value = Math.Clamp(
+                    zoomPct,
+                    _trkIslandZoomFactor.Minimum,
+                    _trkIslandZoomFactor.Maximum);
                 _trkPoiAutoStackGap.Value = Math.Clamp(
                     s.ComicPoiAutoStackGapPx,
                     _trkPoiAutoStackGap.Minimum,
@@ -1200,6 +1237,9 @@ namespace SpeakRect
             _chkPoiAutoStack.Enabled = poiOn;
             // Zoom helps per-island VL (orange canvas and plain tone crops).
             _chkIslandZoom.Enabled = ready;
+            bool zoomOn = ready && _chkIslandZoom.Checked;
+            _trkIslandZoomFactor.Enabled = zoomOn;
+            _lblIslandZoomFactorVal.Enabled = zoomOn;
             bool stackOn = poiOn && _chkPoiAutoStack.Checked;
             _trkPoiAutoStackGap.Enabled = stackOn;
             _lblPoiAutoStackGapVal.Enabled = stackOn;
@@ -1314,6 +1354,7 @@ namespace SpeakRect
             s.ComicPoiFogOutside = _chkPoiFogOutside.Checked;
             s.ComicPoiAutoStack = _chkPoiAutoStack.Checked;
             s.ComicIslandZoom = _chkIslandZoom.Checked;
+            s.ComicIslandZoomFactor = _trkIslandZoomFactor.Value / 100.0;
             s.ComicPoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
             s.ComicPoiAutoStackMarginPx = _trkPoiAutoStackMargin.Value;
             s.ComicPoiStackBeefExtra = _trkPoiStackBeef.Value / 100.0;
@@ -2217,6 +2258,7 @@ namespace SpeakRect
             _lblInflateXVal.Text = TickToInflate(_trkInflateX.Value).ToString("0.00", inv);
             _lblInflateYVal.Text = TickToInflate(_trkInflateY.Value).ToString("0.00", inv);
             _lblPaddingVal.Text = $"{_trkPadding.Value}px";
+            _lblIslandZoomFactorVal.Text = $"{_trkIslandZoomFactor.Value}%";
             _lblPoiAutoStackGapVal.Text = $"{_trkPoiAutoStackGap.Value}px";
             _lblPoiAutoStackMarginVal.Text = $"{_trkPoiAutoStackMargin.Value}px";
             _lblPoiStackBeefVal.Text = $"+{_trkPoiStackBeef.Value}%";

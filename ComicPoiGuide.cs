@@ -79,14 +79,21 @@ namespace SpeakRect
         /// <summary>
         /// Mag-style island zoom: enlarge small balloon crops so lettering uses more
         /// of the Local-LLM pixel budget. Only scales up; large crops are unchanged.
+        /// Grow toward this long-edge (px); already-at-or-above are left alone.
         /// </summary>
-        public const int IslandZoomTargetLongEdge = 1280;
+        public const int IslandZoomTargetLongEdge = 1800;
 
         /// <summary>
-        /// Cap enlargement so mushy 10×+ stays rare. Hi-res letterbox crops usually
-        /// need less factor because they already have more native pixels.
+        /// Stock Mag-style max zoom factor (600%). User can raise up to
+        /// <see cref="IslandZoomFactorMax"/> via the Balloons slider.
         /// </summary>
         public const double IslandZoomMaxFactor = 6.0;
+
+        /// <summary>Mag zoom floor (125%).</summary>
+        public const double IslandZoomFactorMin = 1.25;
+
+        /// <summary>Mag zoom ceiling (1000%).</summary>
+        public const double IslandZoomFactorMax = 10.0;
 
         /// <summary>Mild unsharp after zoom (0 = off). Slightly stronger than stock prep.</summary>
         public const float IslandZoomSharpenAmount = 0.55f;
@@ -846,7 +853,8 @@ namespace SpeakRect
         /// Mag-style zoom for a single island crop. When <see cref="SpeakRunSettings.GetComicIslandZoom"/>
         /// is on and the crop long edge is below <see cref="IslandZoomTargetLongEdge"/>,
         /// returns a new upscaled bitmap (input is disposed). Otherwise returns
-        /// <paramref name="strip"/> unchanged. Cap at <see cref="IslandZoomMaxFactor"/>.
+        /// <paramref name="strip"/> unchanged. Cap at the user Mag factor
+        /// (<see cref="SpeakRunSettings.GetComicIslandZoomFactor"/>, stock 6× / 600%).
         /// Progressive =2× steps keep lettering sharper than one huge jump.
         /// Live OCR prefers <c>OcrProcessor</c> Lanczos zoom when available; this is the
         /// shared fallback (tests + compose helpers).
@@ -881,9 +889,10 @@ namespace SpeakRect
                 return strip;
             }
 
+            double maxFactor = SpeakRunSettings.GetComicIslandZoomFactor();
             double scale = (double)target / srcLong;
-            if (scale > IslandZoomMaxFactor)
-                scale = IslandZoomMaxFactor;
+            if (scale > maxFactor)
+                scale = maxFactor;
             if (scale <= 1.01)
                 return strip;
 

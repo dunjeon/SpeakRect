@@ -259,6 +259,14 @@ namespace SpeakRect
         public bool ComicIslandZoom { get; set; } = true;
 
         /// <summary>
+        /// Mag-style max zoom factor when <see cref="ComicIslandZoom"/> is on
+        /// (1.25–10.0 = 125%–1000%). Caps how hard tiny crops are enlarged toward
+        /// <see cref="ComicPoiGuide.IslandZoomTargetLongEdge"/>. Stock 6.0 (600%).
+        /// </summary>
+        public double ComicIslandZoomFactor { get; set; } =
+            ComicPoiGuide.IslandZoomMaxFactor;
+
+        /// <summary>
         /// Gap (px) between strips when composing a multi-strip canvas (non-POI
         /// crop-stack / multi-strip). Per-island AutoStack send ignores this
         /// (one island per canvas). Default 10.
@@ -299,6 +307,10 @@ namespace SpeakRect
             ComicPoiStackBeefExtra = Math.Clamp(ComicPoiStackBeefExtra, 0.0, 1.5);
             ComicPoiStackBottomPadShare =
                 Math.Clamp(ComicPoiStackBottomPadShare, 0.0, 1.0);
+            ComicIslandZoomFactor = Math.Clamp(
+                ComicIslandZoomFactor,
+                ComicPoiGuide.IslandZoomFactorMin,
+                ComicPoiGuide.IslandZoomFactorMax);
             // Merge and separate are mutually exclusive; merge wins when both set.
             if (ComicMergeOverlappingIslands && ComicSeparateOverlappingIslands)
                 ComicSeparateOverlappingIslands = false;
@@ -327,6 +339,7 @@ namespace SpeakRect
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicIslandZoom = true;
+            ComicIslandZoomFactor = ComicPoiGuide.IslandZoomMaxFactor;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
             ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
             ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
@@ -1179,6 +1192,7 @@ namespace SpeakRect
             ComicPoiFogOutside = true;
             ComicPoiAutoStack = true;
             ComicIslandZoom = true;
+            ComicIslandZoomFactor = ComicPoiGuide.IslandZoomMaxFactor;
             ComicPoiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
             ComicPoiAutoStackMarginPx = ComicPoiGuide.LlmSendStackMarginPx;
             ComicPoiStackBeefExtra = ComicPoiGuide.DefaultStackBeefExtra;
@@ -1574,6 +1588,14 @@ namespace SpeakRect
             if (map.TryGetValue("ComicIslandZoom", out string? islandZoomRaw) &&
                 TryParseBool(islandZoomRaw, out bool islandZoom))
                 ComicIslandZoom = islandZoom;
+
+            if (map.TryGetValue("ComicIslandZoomFactor", out string? islandZoomFacRaw) &&
+                double.TryParse(
+                    islandZoomFacRaw,
+                    System.Globalization.NumberStyles.Float,
+                    inv,
+                    out double islandZoomFac))
+                ComicIslandZoomFactor = islandZoomFac;
 
             if (map.TryGetValue("ComicPoiAutoStackGapPx", out string? poiGapRaw) &&
                 int.TryParse(poiGapRaw, System.Globalization.NumberStyles.Integer, inv, out int poiGap))
@@ -2446,7 +2468,8 @@ namespace SpeakRect
                 sb.AppendLine(";   Not multi-strip stack. Preview stays full page. Stack off/fail multi → per-island VL.");
                 sb.AppendLine(";   1 island + stack off → full-page guide VL.");
                 sb.AppendLine("; IslandZoom=true (stock): enlarge small island crops before orange canvas / Local-LLM.");
-                sb.AppendLine(";   Mag-style: more pixels on tiny balloon lettering. No-op when crop already large.");
+                sb.AppendLine(";   Mag-style percent via IslandZoomFactor (1.25–10 = 125%–1000%, stock 6 = 600%).");
+                sb.AppendLine(";   Grows toward ~1800px long edge; no-op when crop already large. Cap stops mushy 10×+.");
                 sb.AppendLine("; PoiFogOutside=true: thick gray fog outside boxes on the full-page map (not VL when canvases on).");
                 sb.AppendLine("; PoiAutoStackMarginPx=12 (outer pad per canvas). Gap/beef/bottomPad for canvas compose A/B.");
                 sb.AppendLine("; DetectFog=true + DetectFogAmount: fixed gray fog for WinOCR balloon detect.");
@@ -2461,6 +2484,8 @@ namespace SpeakRect
                 sb.AppendLine($"ComicPoiFogOutside={ComicPoiFogOutside.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicPoiAutoStack={ComicPoiAutoStack.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"ComicIslandZoom={ComicIslandZoom.ToString().ToLowerInvariant()}");
+                sb.AppendLine(
+                    $"ComicIslandZoomFactor={ComicIslandZoomFactor.ToString("0.###", inv)}");
                 sb.AppendLine($"ComicPoiAutoStackGapPx={ComicPoiAutoStackGapPx}");
                 sb.AppendLine($"ComicPoiAutoStackMarginPx={ComicPoiAutoStackMarginPx}");
                 sb.AppendLine(
@@ -2717,6 +2742,7 @@ namespace SpeakRect
                 or "ComicSeparateOverlappingIslands"
                 or "ComicPoiMarkers" or "ComicPoiFogOutside"
                 or "ComicPoiAutoStack" or "ComicIslandZoom"
+                or "ComicIslandZoomFactor"
                 or "ComicPoiAutoStackGapPx" or "ComicPoiAutoStackMarginPx"
                 or "ComicPoiStackBeefExtra" or "ComicPoiStackBottomPadShare"
                 or "ImagePrepEnabled"

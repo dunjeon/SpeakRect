@@ -157,6 +157,9 @@ public class ComicPoiGuideTests
         AppSettings.Current.ResetComicRegionSettingsToDefaults();
         Assert.True(AppSettings.Current.ComicPoiAutoStack);
         Assert.True(AppSettings.Current.ComicIslandZoom);
+        Assert.Equal(
+            ComicPoiGuide.IslandZoomMaxFactor,
+            AppSettings.Current.ComicIslandZoomFactor);
         Assert.Equal(10, AppSettings.Current.ComicPoiAutoStackGapPx);
         Assert.Equal(12, AppSettings.Current.ComicPoiAutoStackMarginPx);
         Assert.Equal(0.0, AppSettings.Current.ComicPoiStackBeefExtra);
@@ -284,6 +287,42 @@ public class ComicPoiGuideTests
         finally
         {
             AppSettings.Current.ComicIslandZoom = prev;
+        }
+    }
+
+    [Fact]
+    public void ApplyIslandZoom_respects_mag_factor_cap()
+    {
+        bool prevOn = AppSettings.Current.ComicIslandZoom;
+        double prevFac = AppSettings.Current.ComicIslandZoomFactor;
+        AppSettings.Current.ComicIslandZoom = true;
+        AppSettings.Current.ComicIslandZoomFactor = 2.0; // 200%
+        try
+        {
+            using var small = new Bitmap(100, 50);
+            using (var g = Graphics.FromImage(small))
+                g.Clear(Color.White);
+
+            var owned = (Bitmap)small.Clone();
+            var zoomed = ComicPoiGuide.ApplyIslandZoomIfEnabled(owned);
+            try
+            {
+                // 100 long × 2.0 = 200; must not race toward full 1800 target.
+                Assert.Equal(200, zoomed.Width);
+                Assert.Equal(100, zoomed.Height);
+            }
+            finally
+            {
+                if (!ReferenceEquals(zoomed, owned))
+                    zoomed.Dispose();
+                else
+                    owned.Dispose();
+            }
+        }
+        finally
+        {
+            AppSettings.Current.ComicIslandZoom = prevOn;
+            AppSettings.Current.ComicIslandZoomFactor = prevFac;
         }
     }
 
