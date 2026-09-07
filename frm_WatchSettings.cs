@@ -157,9 +157,9 @@ namespace SpeakRect
             _chkEnabled.CheckedChanged += (_, _) => OnFieldChanged();
             AddFull(_chkEnabled, 32);
             AddFull(MakeHint(
-                "Watch runs on its own background thread. Opening the overlay stops it immediately " +
-                "(no snap, no UI fight). Hide the overlay (Escape) to resume. It also waits while " +
-                "Settings is open or anything is already speaking."), 52);
+                "Watch runs on its own background thread. Toggle with Key Map (default Ctrl+Shift+W) " +
+                "or the checkbox below. Opening the overlay stops it immediately. Hide the overlay " +
+                "(Escape) to resume. It also waits while Settings is open or anything is already speaking."), 56);
 
             AddFull(MakeSection("REGION"), 28);
             _cmbRegion = new ComboBox

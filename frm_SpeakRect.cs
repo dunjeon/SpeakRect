@@ -72,6 +72,7 @@ namespace SpeakRect
         private const int HOTKEY_DEFAULT_MODE = 9019;
         private const int HOTKEY_COMIC = 9020;
         private const int HOTKEY_STOP_TTS = 9021;    // abort in-progress speech
+        private const int HOTKEY_TOGGLE_WATCH = 9022; // Watch on/off
         /// <summary>Custom system actions: 9100 + index into CustomHotkeys.</summary>
         private const int HOTKEY_CUSTOM_BASE = 9100;
         private const int HOTKEY_CUSTOM_MAX = CustomHotkeyBinding.MaxBindings;
@@ -686,6 +687,7 @@ namespace SpeakRect
             TryRegister(HOTKEY_DEFAULT_MODE, s.HotkeyToggleDefaultMode, "ToggleDefaultMode");
             TryRegister(HOTKEY_COMIC, s.HotkeyToggleComicBook, "ToggleComicBook");
             TryRegister(HOTKEY_STOP_TTS, s.HotkeyStopTts, "StopTts");
+            TryRegister(HOTKEY_TOGGLE_WATCH, s.HotkeyToggleWatch, "ToggleWatch");
 
             // User custom system actions (mouse, keys, window, media…)
             int n = Math.Min(s.CustomHotkeys.Count, HOTKEY_CUSTOM_MAX);
@@ -712,6 +714,7 @@ namespace SpeakRect
             LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_DEFAULT_MODE);
             LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_COMIC);
             LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_STOP_TTS);
+            LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_TOGGLE_WATCH);
             for (int i = 0; i < HOTKEY_CUSTOM_MAX; i++)
                 LowLevelInputHooks.UnregisterHotKey(this.Handle, HOTKEY_CUSTOM_BASE + i);
         }
@@ -794,6 +797,28 @@ namespace SpeakRect
 
             string phrase = OcrProcessor.DescribeModeChange(wasComic, s.ComicBook);
             OcrProcessor.SpeakAnnouncement(phrase);
+        }
+
+        /// <summary>
+        /// Global Watch on/off. Persists to ini, starts/stops the background timer,
+        /// and announces when the overlay is hidden.
+        /// </summary>
+        private void ToggleWatchFromHotkey()
+        {
+            var s = AppSettings.Current;
+            s.WatchEnabled = !s.WatchEnabled;
+            s.NormalizeWatchSettings();
+            try { s.Save(); } catch { /* keep in-memory */ }
+            SyncWatchFromSettings();
+            try { _settingsForm?.ReloadWatchFromSettings(); } catch { /* ignore */ }
+
+            if (Visible)
+            {
+                Invalidate();
+                return;
+            }
+
+            OcrProcessor.SpeakAnnouncement(s.WatchEnabled ? "Watch on" : "Watch off");
         }
 
         /// <summary>True while Settings is open (keyboard hotkeys unregistered for Key Map capture).</summary>
@@ -1226,6 +1251,9 @@ namespace SpeakRect
                     break;
                 case "StopTts":
                     AbortTtsInProgress();
+                    break;
+                case "ToggleWatch":
+                    ToggleWatchFromHotkey();
                     break;
                 case "ShapeRect":
                     if (Visible) SetMode(CaptureMode.Rectangle);
@@ -2467,6 +2495,10 @@ namespace SpeakRect
                 else if (id == HOTKEY_STOP_TTS)
                 {
                     AbortTtsInProgress();
+                }
+                else if (id == HOTKEY_TOGGLE_WATCH)
+                {
+                    ToggleWatchFromHotkey();
                 }
                 else if (id >= HOTKEY_REGION_BASE && id < HOTKEY_REGION_BASE + 8)
                 {

@@ -609,6 +609,13 @@ namespace SpeakRect
             catch { /* ignore */ }
         }
 
+        /// <summary>Refresh Watch tab after a hotkey toggle (do not wipe other tabs).</summary>
+        public void ReloadWatchFromSettings()
+        {
+            try { _watch.ReloadFromSettings(); }
+            catch { /* ignore */ }
+        }
+
         private void LayoutBottom()
         {
             int y = Math.Max(8, (_bottom.ClientSize.Height - _btnClose.Height) / 2);

@@ -1,4 +1,6 @@
 using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
 using SpeakRect;
 using Xunit;
 
@@ -166,6 +168,20 @@ public class WatchSettingsTests
     {
         Assert.True(RegionWatch.DiffersEnough("Hello", "Hello!", 0));
         Assert.False(RegionWatch.DiffersEnough("Hello", "hello", 0));
+    }
+
+    [Fact]
+    public void ToggleWatch_hotkey_row_is_global_ctrl_shift_w()
+    {
+        var row = AppSettings.HotkeyMapRows.First(
+            r => r.Id.Equals("ToggleWatch", StringComparison.Ordinal));
+        Assert.True(row.IsGlobal);
+        Assert.Equal("Watch on / off", row.Label);
+        Assert.Equal(Keys.W, AppSettings.DefaultToggleWatch.Key);
+        Assert.Equal(
+            HotkeyChord.MOD_CONTROL | HotkeyChord.MOD_SHIFT,
+            AppSettings.DefaultToggleWatch.Modifiers);
+        Assert.Equal("Ctrl+Shift+W", AppSettings.DefaultToggleWatch.ToIniString());
     }
 
     [Fact]

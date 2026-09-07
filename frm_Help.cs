@@ -252,6 +252,7 @@ namespace SpeakRect
             Hotkey(sb, "Ctrl+D", "Default mode (Ctrl, not Shift — typing-safe)");
             Hotkey(sb, "Ctrl+B", "Comic Book mode");
             Hotkey(sb, "Ctrl+Shift+S", "Stop speech (abort TTS in progress)");
+            Hotkey(sb, "Ctrl+Shift+W", "Watch on / off");
             Hotkey(sb, "Shift+F1\u2013F8", "Speak region 1\u20138 \u00b7 switch slot if overlay is open");
             Hotkey(sb, "Shift+F9", "Speak Follow at mouse");
             Hotkey(sb, "Enter", "Speak current region (overlay)");

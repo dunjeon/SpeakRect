@@ -731,6 +731,9 @@ namespace SpeakRect
         /// <summary>Abort in-progress TTS / OCR speak — Ctrl+Shift+S.</summary>
         public static readonly HotkeyChord DefaultStopTts =
             new(HotkeyChord.MOD_CONTROL | HotkeyChord.MOD_SHIFT, Keys.S);
+        /// <summary>Watch on/off — Ctrl+Shift+W (global; remap or unbind in Key Map).</summary>
+        public static readonly HotkeyChord DefaultToggleWatch =
+            new(HotkeyChord.MOD_CONTROL | HotkeyChord.MOD_SHIFT, Keys.W);
         public static readonly HotkeyChord DefaultShapeRect = new(0, Keys.R);
         public static readonly HotkeyChord DefaultShapeOval = new(0, Keys.O);
         public static readonly HotkeyChord DefaultShapeLasso = new(0, Keys.L);
@@ -766,6 +769,9 @@ namespace SpeakRect
         /// </summary>
         public HotkeyChord HotkeyStopTts { get; set; } = DefaultStopTts;
 
+        /// <summary>Toggle Watch on/off. Global <c>RegisterHotKey</c>.</summary>
+        public HotkeyChord HotkeyToggleWatch { get; set; } = DefaultToggleWatch;
+
         /// <summary>Overlay-local: rectangle shape (not registered globally).</summary>
         public HotkeyChord HotkeyShapeRect { get; set; } = DefaultShapeRect;
 
@@ -788,6 +794,8 @@ namespace SpeakRect
         public GamepadButton PadToggleComicBook { get; set; }
         /// <summary>Gamepad binding for abort TTS.</summary>
         public GamepadButton PadStopTts { get; set; }
+        /// <summary>Gamepad binding for Watch on/off.</summary>
+        public GamepadButton PadToggleWatch { get; set; }
         public GamepadButton[] PadRegions { get; private set; } = CreateEmptyPadRegions();
         /// <summary>Gamepad binding for Follow / region 9 speak.</summary>
         public GamepadButton PadFollowRegion { get; set; }
@@ -819,6 +827,7 @@ namespace SpeakRect
             HotkeyToggleDefaultMode = DefaultToggleDefaultMode;
             HotkeyToggleComicBook = DefaultToggleComicBook;
             HotkeyStopTts = DefaultStopTts;
+            HotkeyToggleWatch = DefaultToggleWatch;
             HotkeyShapeRect = DefaultShapeRect;
             HotkeyShapeOval = DefaultShapeOval;
             HotkeyShapeLasso = DefaultShapeLasso;
@@ -832,6 +841,7 @@ namespace SpeakRect
             PadToggleDefaultMode = default;
             PadToggleComicBook = default;
             PadStopTts = default;
+            PadToggleWatch = default;
             PadRegions = CreateEmptyPadRegions();
             PadFollowRegion = default;
             PadShapeRect = default;
@@ -927,6 +937,7 @@ namespace SpeakRect
             if (!PadToggleOverlay.IsEmpty || !PadToggleDefaultMode.IsEmpty ||
                 !PadToggleComicBook.IsEmpty ||
                 !PadStopTts.IsEmpty ||
+                !PadToggleWatch.IsEmpty ||
                 !PadFollowRegion.IsEmpty ||
                 !PadShapeRect.IsEmpty || !PadShapeOval.IsEmpty || !PadShapeLasso.IsEmpty)
                 return true;
@@ -1015,6 +1026,9 @@ namespace SpeakRect
             new("StopTts", "Stop speech (abort TTS)", "Global", true,
                 s => s.HotkeyStopTts, (s, v) => s.HotkeyStopTts = v,
                 s => s.PadStopTts, (s, v) => s.PadStopTts = v),
+            new("ToggleWatch", "Watch on / off", "Global", true,
+                s => s.HotkeyToggleWatch, (s, v) => s.HotkeyToggleWatch = v,
+                s => s.PadToggleWatch, (s, v) => s.PadToggleWatch = v),
             new("Region1", "Region slot 1", "Regions", true,
                 s => s.HotkeyRegions[0], (s, v) => s.HotkeyRegions[0] = v,
                 s => s.PadRegions[0], (s, v) => s.PadRegions[0] = v),
@@ -1987,6 +2001,9 @@ namespace SpeakRect
             HotkeyStopTts = HotkeyChord.ParseFromIni(
                 ReadMap(map, "StopTts"), DefaultStopTts);
 
+            HotkeyToggleWatch = HotkeyChord.ParseFromIni(
+                ReadMap(map, "ToggleWatch"), DefaultToggleWatch);
+
             for (int i = 0; i < 8; i++)
             {
                 HotkeyRegions[i] = HotkeyChord.ParseFromIni(
@@ -2019,6 +2036,7 @@ namespace SpeakRect
             PadToggleDefaultMode = GamepadButton.ParseOrEmpty(ReadMap(map, "PadToggleDefaultMode"));
             PadToggleComicBook = GamepadButton.ParseOrEmpty(ReadMap(map, "PadToggleComicBook"));
             PadStopTts = GamepadButton.ParseOrEmpty(ReadMap(map, "PadStopTts"));
+            PadToggleWatch = GamepadButton.ParseOrEmpty(ReadMap(map, "PadToggleWatch"));
 
             for (int i = 0; i < 8; i++)
                 PadRegions[i] = GamepadButton.ParseOrEmpty(ReadMap(map, $"PadRegion{i + 1}"));
@@ -2452,6 +2470,8 @@ namespace SpeakRect
                 sb.AppendLine($"ToggleComicBook={HotkeyToggleComicBook.ToIniString()}");
                 sb.AppendLine("; StopTts aborts in-progress speech (region / Follow / Balloons / announce).");
                 sb.AppendLine($"StopTts={HotkeyStopTts.ToIniString()}");
+                sb.AppendLine("; ToggleWatch turns Watch on/off (default Ctrl+Shift+W). Empty = unbound.");
+                sb.AppendLine($"ToggleWatch={HotkeyToggleWatch.ToIniString()}");
                 for (int i = 0; i < 8; i++)
                     sb.AppendLine($"Region{i + 1}={HotkeyRegions[i].ToIniString()}");
                 sb.AppendLine("; Region9 = Follow (mouse-float box; size/shape from [FOLLOW]).");
@@ -2473,6 +2493,7 @@ namespace SpeakRect
                 sb.AppendLine($"PadToggleDefaultMode={PadToggleDefaultMode.ToIniString()}");
                 sb.AppendLine($"PadToggleComicBook={PadToggleComicBook.ToIniString()}");
                 sb.AppendLine($"PadStopTts={PadStopTts.ToIniString()}");
+                sb.AppendLine($"PadToggleWatch={PadToggleWatch.ToIniString()}");
                 for (int i = 0; i < 8; i++)
                     sb.AppendLine($"PadRegion{i + 1}={PadRegions[i].ToIniString()}");
                 sb.AppendLine($"PadRegion9={PadFollowRegion.ToIniString()}");
@@ -2834,7 +2855,7 @@ namespace SpeakRect
         private static bool IsShortSettingKey(string key) =>
             key is "ComicBook"
                 or "UseWinOcr" or "SkipWinOcrSendFullFrameOnly"
-                or "ToggleOverlay" or "ToggleComicBook"
+                or "ToggleOverlay" or "ToggleComicBook" or "ToggleWatch"
                 or "ShapeRect" or "ShapeOval" or "ShapeLasso"
                 or "PadControllerIndex" or "ActiveProfile" or "LastSettingsTab"
                 or "ActiveSlot" or "ShapeMode" or "CustomCount"
