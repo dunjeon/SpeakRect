@@ -21,8 +21,12 @@
 		<StartupObject>SpeakRect.Program</StartupObject>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-		<Version>1.5.7</Version>
-		<InformationalVersion>1.5.7</InformationalVersion>
+		<Version>1.5.8</Version>
+		<AssemblyVersion>1.5.8.0</AssemblyVersion>
+		<FileVersion>1.5.8.0</FileVersion>
+		<InformationalVersion>1.5.8</InformationalVersion>
+		<!-- Keep overlay / file properties on 1.5.8, not 1.5.8+gitsha. -->
+		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
 
 	<!-- Local Build: no RID, normal multi-file output under bin\x64\… -->

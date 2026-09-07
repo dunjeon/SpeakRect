@@ -7,7 +7,7 @@ namespace SpeakRect
 {
     /// <summary>
     /// Unified settings window: profile save/load at the top, tabs for
-    /// Key Map, Regions, Follow, Voice, Speech, Image, Balloons, Analytics, and Help.
+    /// Key Map, Regions, Follow, Watch, Voice, Speech, Image, Balloons, Analytics, and Help.
     /// Hosted as a tool window over the overlay.
     /// </summary>
     public sealed class frm_Settings : Form
@@ -17,18 +17,20 @@ namespace SpeakRect
             KeyMap = 0,
             Regions = 1,
             Follow = 2,
-            Voice = 3,
-            Speech = 4,
-            Image = 5,
-            Balloons = 6,
-            Analytics = 7,
-            Help = 8,
+            Watch = 3,
+            Voice = 4,
+            Speech = 5,
+            Image = 6,
+            Balloons = 7,
+            Analytics = 8,
+            Help = 9,
         }
 
         private readonly Action _onHotkeysChanged;
         private readonly Action? _onBeforeProfileSave;
         private readonly Action? _onAfterProfileLoad;
         private readonly Action? _onFollowChanged;
+        private readonly Action? _onWatchChanged;
         private readonly Action? _onRegionsChanged;
         private readonly Action? _onModeChanged;
         /// <summary>
@@ -55,6 +57,7 @@ namespace SpeakRect
         private readonly frm_ComicRegions _balloons;
         private readonly frm_ImagePrep _imagePrep;
         private readonly frm_FollowSettings _follow;
+        private readonly frm_WatchSettings _watch;
         private readonly frm_Analytics _analytics;
         private readonly frm_Help _help;
 
@@ -72,6 +75,7 @@ namespace SpeakRect
             Action? onBeforeProfileSave = null,
             Action? onAfterProfileLoad = null,
             Action? onFollowChanged = null,
+            Action? onWatchChanged = null,
             Action? onRegionsChanged = null,
             Action? onModeChanged = null,
             Func<System.Threading.Tasks.Task<(Bitmap? Bitmap, string Error)>>? captureActiveRegion = null,
@@ -81,6 +85,7 @@ namespace SpeakRect
             _onBeforeProfileSave = onBeforeProfileSave;
             _onAfterProfileLoad = onAfterProfileLoad;
             _onFollowChanged = onFollowChanged;
+            _onWatchChanged = onWatchChanged;
             _onRegionsChanged = onRegionsChanged;
             _onModeChanged = onModeChanged;
             _captureActiveRegion = captureActiveRegion;
@@ -91,7 +96,7 @@ namespace SpeakRect
             Text = "SpeakRect — Settings";
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
             StartPosition = FormStartPosition.CenterScreen;
-            // Room for Analytics thumbs + nine tab labels without clipping names.
+            // Room for Analytics thumbs + ten tab labels without clipping names.
             MinimumSize = new Size(1040, 700);
             ClientSize = new Size(1120, 800);
             TopMost = true;
@@ -154,7 +159,7 @@ namespace SpeakRect
             {
                 Dock = DockStyle.Fill,
                 // Wide enough for "Key Map" / "Balloons" / "Analytics" without clipping.
-                ItemSize = new Size(100, 32),
+                ItemSize = new Size(92, 32),
             };
 
             TabPage MakeTab(string title) => new(title)
@@ -167,6 +172,7 @@ namespace SpeakRect
             var tabKeyMap = MakeTab("Key Map");
             var tabRegions = MakeTab("Regions");
             var tabFollow = MakeTab("Follow");
+            var tabWatch = MakeTab("Watch");
             var tabVoice = MakeTab("Voice");
             var tabSpeech = MakeTab("Speech");
             var tabImage = MakeTab("Image");
@@ -198,6 +204,12 @@ namespace SpeakRect
                 embedded: true,
                 onRequestClose: () => Close());
             EmbedChild(_follow, tabFollow);
+
+            _watch = new frm_WatchSettings(
+                onChanged: () => _onWatchChanged?.Invoke(),
+                embedded: true,
+                onRequestClose: () => Close());
+            EmbedChild(_watch, tabWatch);
 
             _voice = new frm_VoiceSettings(
                 embedded: true,
@@ -237,6 +249,7 @@ namespace SpeakRect
             _tabs.TabPages.Add(tabKeyMap);
             _tabs.TabPages.Add(tabRegions);
             _tabs.TabPages.Add(tabFollow);
+            _tabs.TabPages.Add(tabWatch);
             _tabs.TabPages.Add(tabVoice);
             _tabs.TabPages.Add(tabSpeech);
             _tabs.TabPages.Add(tabImage);
@@ -253,6 +266,7 @@ namespace SpeakRect
                 try { _imagePrep.FlushToSettings(); } catch { /* ignore */ }
                 try { _balloons.FlushToSettings(); } catch { /* ignore */ }
                 try { _follow.FlushToSettings(); } catch { /* ignore */ }
+                try { _watch.FlushToSettings(); } catch { /* ignore */ }
                 try { _voice.FlushToSettings(); } catch { /* ignore */ }
                 try { _speech.FlushToSettings(); } catch { /* ignore */ }
 
@@ -266,6 +280,8 @@ namespace SpeakRect
                     _balloons.ReloadFromSettings();
                 else if (_tabs.SelectedIndex == (int)SettingsTab.Follow)
                     _follow.ReloadFromSettings();
+                else if (_tabs.SelectedIndex == (int)SettingsTab.Watch)
+                    _watch.ReloadFromSettings();
                 else if (_tabs.SelectedIndex == (int)SettingsTab.Voice)
                     _voice.ReloadFromSettings();
                 else if (_tabs.SelectedIndex == (int)SettingsTab.Speech)
@@ -337,6 +353,7 @@ namespace SpeakRect
                 _keyMap.PerformLayout();
                 _regions.PerformLayout();
                 _follow.PerformLayout();
+                _watch.PerformLayout();
                 _voice.PerformLayout();
                 _speech.PerformLayout();
                 _imagePrep.PerformLayout();
@@ -345,6 +362,7 @@ namespace SpeakRect
                 _help.PerformLayout();
                 _regions.ReloadFromSettings();
                 _follow.ReloadFromSettings();
+                _watch.ReloadFromSettings();
                 _speech.ReloadFromSettings();
                 _imagePrep.ReloadFromSettings();
                 _balloons.ReloadFromSettings();
@@ -360,6 +378,7 @@ namespace SpeakRect
                 try { _voice.FlushToSettings(); } catch { /* ignore */ }
                 try { _speech.FlushToSettings(); } catch { /* ignore */ }
                 try { _follow.FlushToSettings(); } catch { /* ignore */ }
+                try { _watch.FlushToSettings(); } catch { /* ignore */ }
                 try { _imagePrep.FlushToSettings(); } catch { /* ignore */ }
                 try { _balloons.FlushToSettings(); } catch { /* ignore */ }
                 // Refined Balloons speak runs on overlay hide (not Settings close).
@@ -483,6 +502,12 @@ namespace SpeakRect
                     UiTheme.ApplyTabOrder(_follow);
                     _follow.Focus();
                     break;
+                case SettingsTab.Watch:
+                    _watch.ReloadFromSettings();
+                    UiTheme.ApplyDarkChromeTree(_watch);
+                    UiTheme.ApplyTabOrder(_watch);
+                    _watch.Focus();
+                    break;
                 case SettingsTab.Voice:
                     // Voice persists on every change; reload in case a profile load left UI behind.
                     _voice.ReloadFromSettings();
@@ -539,6 +564,7 @@ namespace SpeakRect
             _balloons.ReloadFromSettings();
             _imagePrep.ReloadFromSettings();
             _follow.ReloadFromSettings();
+            _watch.ReloadFromSettings();
             _analytics.ReloadFromSettings();
             _help.ReloadFromSettings();
             RefreshProfileCombo();
@@ -559,15 +585,17 @@ namespace SpeakRect
             {
                 try { _onHotkeysChanged(); } catch { /* ignore */ }
                 try { _onFollowChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onWatchChanged?.Invoke(); } catch { /* ignore */ }
                 try { _onRegionsChanged?.Invoke(); } catch { /* ignore */ }
                 try { _onModeChanged?.Invoke(); } catch { /* ignore */ }
             }
             else
             {
-                // Profile-load host usually rebinds hotkeys; still nudge mode/regions/follow.
+                // Profile-load host usually rebinds hotkeys; still nudge mode/regions/follow/watch.
                 try { _onModeChanged?.Invoke(); } catch { /* ignore */ }
                 try { _onRegionsChanged?.Invoke(); } catch { /* ignore */ }
                 try { _onFollowChanged?.Invoke(); } catch { /* ignore */ }
+                try { _onWatchChanged?.Invoke(); } catch { /* ignore */ }
             }
         }
 

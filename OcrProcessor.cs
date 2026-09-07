@@ -1012,6 +1012,27 @@ namespace SpeakRect
         private static int LiveSpeakGeneration;
         private int _speakGeneration;
 
+        /// <summary>In-flight <see cref="CaptureAndRecognizeAsync"/> / Balloons still-image OCR.</summary>
+        private static int _ocrInFlight;
+
+        /// <summary>In-flight TTS (live speak, watch replay, announcements).</summary>
+        private static int _ttsInFlight;
+
+        /// <summary>When true, this host OCRs without ducking or speaking.</summary>
+        private bool _suppressTts;
+
+        /// <summary>Watch gate from the last <see cref="RecognizeWatchWithoutSpeakingAsync"/>.</summary>
+        private WatchTextGate _watchTextGate;
+
+        /// <summary>True while any OCR pipeline is running (live, watch, Balloons speak-test).</summary>
+        public static bool IsOcrInProgress => Volatile.Read(ref _ocrInFlight) > 0;
+
+        /// <summary>True while any SpeakRect TTS is playing (including short announcements).</summary>
+        public static bool IsSpeechInProgress => Volatile.Read(ref _ttsInFlight) > 0;
+
+        /// <summary>Live <see cref="Start"/> generation — watch uses this to detect user preemption.</summary>
+        public static int CurrentLiveSpeakGeneration => Volatile.Read(ref LiveSpeakGeneration);
+
         private static readonly string DebugFolder = Path.Combine(
             AppContext.BaseDirectory, "debug_images");
 
@@ -1183,6 +1204,244 @@ namespace SpeakRect
             try { _player.Source = null; } catch { /* ignore */ }
             try { _player.Dispose(); } catch { /* ignore */ }
             try { _synth?.Dispose(); } catch { /* ignore */ }
+        }
+
+        /// <summary>
+        /// Full capture + OCR with TTS suppressed. Does not bump live speak generation,
+        /// does not cancel background comic speak, and does not restore/duck audio.
+        /// </summary>
+        public async Task<string> RecognizeWithoutSpeakingAsync(CancellationToken token)
+        {
+            _suppressTts = true;
+            CancellationToken linked;
+            lock (_ttsLock)
+            {
+                try { _processingCts?.Cancel(); } catch { /* ignore */ }
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
+                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                linked = _processingCts.Token;
+            }
+
+            try
+            {
+                await CaptureAndRecognizeAsync(linked).ConfigureAwait(false);
+                return _lastText ?? "";
+            }
+            finally
+            {
+                _suppressTts = false;
+            }
+        }
+
+        /// <summary>
+        /// Watch OCR: Default-mode prep, then a WinOCR <b>boolean</b> “is there text?”
+        /// gate (no WinOCR strings or boxes). If false, silent. If true, Local-LLM
+        /// converts the <b>full snap</b> to the spoken words.
+        /// </summary>
+        public async Task<(WatchTextGate Gate, string Text)> RecognizeWatchWithoutSpeakingAsync(
+            CancellationToken token)
+        {
+            _suppressTts = true;
+            _watchTextGate = WatchTextGate.Unavailable;
+            _lastText = "";
+            CancellationToken linked;
+            lock (_ttsLock)
+            {
+                try { _processingCts?.Cancel(); } catch { /* ignore */ }
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
+                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                linked = _processingCts.Token;
+            }
+
+            try
+            {
+                await CaptureAndRecognizeWatchAsync(linked).ConfigureAwait(false);
+                return (_watchTextGate, _lastText ?? "");
+            }
+            finally
+            {
+                _suppressTts = false;
+            }
+        }
+
+        /// <summary>
+        /// Speak already-recognized text (watch path). Skips if anything is already
+        /// being read. Does not recapture and does not bump live speak generation.
+        /// Returns false if it did not actually speak (busy, empty, cancelled).
+        /// </summary>
+        public async Task<bool> SpeakExistingTextAsync(string text, CancellationToken token)
+        {
+            if (_suppressTts)
+                return false;
+            if (string.IsNullOrWhiteSpace(text) || RegionWatch.IsUnreadable(text))
+                return false;
+            if (IsSpeechInProgress)
+                return false;
+
+            CancellationToken linked;
+            lock (_ttsLock)
+            {
+                try { _processingCts?.Cancel(); } catch { /* ignore */ }
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
+                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                linked = _processingCts.Token;
+            }
+
+            bool ducked = false;
+            try
+            {
+                DuckOtherAudio();
+                ducked = true;
+                await SpeakWithSystemAsync(text, linked).ConfigureAwait(false);
+                return !linked.IsCancellationRequested;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            finally
+            {
+                if (ducked)
+                    RestoreAudio();
+            }
+        }
+
+        /// <summary>
+        /// Watch-only Default pipeline: snap → Image prep → WinOCR bool gate →
+        /// full-frame Local-LLM (the only converter to spoken words).
+        /// </summary>
+        private async Task CaptureAndRecognizeWatchAsync(CancellationToken token)
+        {
+            Interlocked.Increment(ref _ocrInFlight);
+            ImagePrepStages? prepStages = null;
+            try
+            {
+                using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
+                _runImages = new List<OcrResultImage>(8);
+                ClearRunFogAnalytics();
+                _watchTextGate = WatchTextGate.Unavailable;
+                _lastText = "";
+
+                try { PrepareForCapture?.Invoke(); }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Watch] PrepareForCapture: {ex.Message}");
+                }
+
+                Bitmap? snapped = null;
+                try
+                {
+                    // Overlay is hidden for Watch; only wait if a host actually dimmed chrome.
+                    if (PrepareForCapture != null)
+                        await Task.Delay(80, token).ConfigureAwait(false);
+                    snapped = SnapCapture();
+                }
+                finally
+                {
+                    try { RestoreAfterCapture?.Invoke(); }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Watch] RestoreAfterCapture: {ex.Message}");
+                    }
+                }
+
+                token.ThrowIfCancellationRequested();
+                if (snapped == null || snapped.Width < 2 || snapped.Height < 2)
+                {
+                    try { snapped?.Dispose(); } catch { /* ignore */ }
+                    return;
+                }
+
+                using var rawSnap = snapped;
+                var detail = new StringBuilder();
+                detail.AppendLine(
+                    "watch=Default prep + WinOCR bool-gate → full-frame LLM (no comic crops)");
+
+                prepStages = BuildImagePrepStages(rawSnap, buildTone: true, detail);
+                Bitmap tone = prepStages.LiveOcrInput;
+                if (tone.Width < 2 || tone.Height < 2)
+                    return;
+
+                token.ThrowIfCancellationRequested();
+                var engine = GetWinOcrEngine();
+                if (engine == null)
+                {
+                    detail.AppendLine("watch-gate: no WinOCR engine → skip (not NoText)");
+                    Debug.WriteLine("[Watch] WinOCR engine missing — skip, keep last spoken");
+                    return;
+                }
+
+                bool hasText = await BalloonOcrDetect.SeesTextAsync(
+                    engine, tone, token).ConfigureAwait(false);
+                _watchTextGate = hasText ? WatchTextGate.HasText : WatchTextGate.NoText;
+                detail.AppendLine($"watch-gate: winocrHasText={hasText}");
+                Debug.WriteLine($"[Watch] winocrHasText={hasText}");
+
+                if (!hasText)
+                    return;
+
+                try
+                {
+                    LocalLlmHost.Start();
+                    if (!LocalLlmHost.IsApiReady())
+                    {
+                        bool ready = await LocalLlmHost.WaitUntilReadyAsync(
+                            TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
+                        if (!ready)
+                        {
+                            Debug.WriteLine("[Watch] Local-LLM not ready — silent skip");
+                            return;
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Watch] LLM ready wait: {ex.Message}");
+                    return;
+                }
+
+                string? fullClean = await RunFullFrameKoboldOnBitmapAsync(
+                    tone, detail, token, savePrep: false).ConfigureAwait(false);
+                if (SpeechCleaner.IsUnusableOcrText(fullClean))
+                {
+                    detail.AppendLine("watch: LLM empty — silent");
+                    return;
+                }
+
+                var speakPieces = SpeechCleaner.ExpandToSpeakPieces(new[] { fullClean! });
+                if (speakPieces.Count >= 2)
+                    speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
+                if (speakPieces.Count >= 2)
+                    speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(speakPieces, detail);
+
+                var spokenParts = new List<string>();
+                for (int i = 0; i < speakPieces.Count; i++)
+                {
+                    string u = speakPieces[i].Text;
+                    if (u.Length > 0)
+                        spokenParts.Add(u);
+                }
+
+                _lastText = spokenParts.Count > 0
+                    ? string.Join(Environment.NewLine + Environment.NewLine, spokenParts)
+                    : "";
+                // Do not WriteLastOcrDebug — Watch must not stomp Analytics last hotkey speak.
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Watch] CaptureAndRecognizeWatchAsync: {ex.Message}");
+                _lastText = "";
+            }
+            finally
+            {
+                try { prepStages?.Dispose(); } catch { /* ignore */ }
+                Interlocked.Decrement(ref _ocrInFlight);
+            }
         }
 
         /// <summary>
@@ -1431,6 +1690,9 @@ namespace SpeakRect
             CancellationToken token,
             IReadOnlyList<Rectangle>? regionOverride = null)
         {
+            Interlocked.Increment(ref _ocrInFlight);
+            try
+            {
             // Freeze knobs for this Balloons still-image speak (same as live Comic Book).
             using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
 
@@ -1478,8 +1740,11 @@ namespace SpeakRect
                         if (!ready)
                         {
                             detail.AppendLine("Local-LLM host not ready — recognition will likely fail");
-                            SpeakAnnouncement(
-                                "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                            if (!_suppressTts)
+                            {
+                                SpeakAnnouncement(
+                                    "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                            }
                         }
                     }
                 }
@@ -1794,6 +2059,11 @@ namespace SpeakRect
                 prepStages?.Dispose();
                 try { fogOwned?.Dispose(); } catch { /* ignore */ }
             }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _ocrInFlight);
+            }
         }
 
         /// <summary>
@@ -2058,6 +2328,9 @@ namespace SpeakRect
 
         private void DuckOtherAudio()
         {
+            if (_suppressTts)
+                return;
+
             // Process-wide: clear any prior duck first so originals stay correct.
             RestoreAudio();
 
@@ -2122,6 +2395,9 @@ namespace SpeakRect
 
         private async Task CaptureAndRecognizeAsync(CancellationToken token)
         {
+            Interlocked.Increment(ref _ocrInFlight);
+            try
+            {
             // Freeze knobs for this run (MODE / pad / pauses / prompts / voice).
             using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
             // Fresh analytics image list for this run (published via WriteLastOcrDebug).
@@ -2164,8 +2440,11 @@ namespace SpeakRect
                         if (!ready)
                         {
                             Debug.WriteLine("[OCR] Local-LLM API not ready — recognition will likely fail.");
-                            SpeakAnnouncement(
-                                "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                            if (!_suppressTts)
+                            {
+                                SpeakAnnouncement(
+                                    "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                            }
                         }
                         else
                             Debug.WriteLine("[OCR] Local-LLM API ready.");
@@ -2747,6 +3026,11 @@ namespace SpeakRect
             catch (Exception ex)
             {
                 Debug.WriteLine($"[OCR] Capture error: {ex}");
+            }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _ocrInFlight);
             }
         }
 
@@ -10286,6 +10570,12 @@ namespace SpeakRect
 
         private async Task SpeakWithSystemAsync(string text, CancellationToken token)
         {
+            if (_suppressTts)
+                return;
+
+            Interlocked.Increment(ref _ttsInFlight);
+            try
+            {
             try
             {
                 if (string.IsNullOrWhiteSpace(text)) return;
@@ -10325,6 +10615,11 @@ namespace SpeakRect
             catch (Exception ex)
             {
                 Debug.WriteLine($"[SystemTTS] Error: {ex}");
+            }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _ttsInFlight);
             }
         }
 
@@ -10842,6 +11137,7 @@ namespace SpeakRect
             CancellationToken token = cts.Token;
             _ = Task.Run(async () =>
             {
+                Interlocked.Increment(ref _ttsInFlight);
                 try
                 {
                     AppSettings.Current.NormalizeVoiceSettings();
@@ -10860,6 +11156,10 @@ namespace SpeakRect
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[AnnounceTTS] {ex.Message}");
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _ttsInFlight);
                 }
             });
         }

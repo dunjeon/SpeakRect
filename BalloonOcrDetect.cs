@@ -35,6 +35,7 @@ namespace SpeakRect
         private const double LineGroupGapXFactor = 1.05;
         private const double LineGroupGapYFactor = 1.15;
 
+        private static readonly object EngineLock = new();
         private static OcrEngine? _engine;
         private static bool _tried;
 
@@ -43,44 +44,47 @@ namespace SpeakRect
         /// </summary>
         public static OcrEngine? GetEngine()
         {
-            if (_tried)
-                return _engine;
-
-            _tried = true;
-            try
+            lock (EngineLock)
             {
-                _engine = OcrEngine.TryCreateFromUserProfileLanguages();
-                if (_engine != null)
-                {
-                    Debug.WriteLine(
-                        $"[OCR] engine ready: {_engine.RecognizerLanguage.LanguageTag}");
+                if (_tried)
                     return _engine;
-                }
 
-                foreach (var lang in OcrEngine.AvailableRecognizerLanguages)
+                _tried = true;
+                try
                 {
-                    _engine = OcrEngine.TryCreateFromLanguage(lang);
+                    _engine = OcrEngine.TryCreateFromUserProfileLanguages();
                     if (_engine != null)
                     {
                         Debug.WriteLine(
-                            $"[OCR] engine ready (fallback): {lang.LanguageTag}");
+                            $"[OCR] engine ready: {_engine.RecognizerLanguage.LanguageTag}");
                         return _engine;
                     }
+
+                    foreach (var lang in OcrEngine.AvailableRecognizerLanguages)
+                    {
+                        _engine = OcrEngine.TryCreateFromLanguage(lang);
+                        if (_engine != null)
+                        {
+                            Debug.WriteLine(
+                                $"[OCR] engine ready (fallback): {lang.LanguageTag}");
+                            return _engine;
+                        }
+                    }
+
+                    _engine = OcrEngine.TryCreateFromLanguage(new Language("en-US"));
+                    if (_engine != null)
+                        Debug.WriteLine("[OCR] engine ready (en-US)");
+                    else
+                        Debug.WriteLine("[OCR] no recognizer language packs available");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[OCR] init failed: {ex.Message}");
+                    _engine = null;
                 }
 
-                _engine = OcrEngine.TryCreateFromLanguage(new Language("en-US"));
-                if (_engine != null)
-                    Debug.WriteLine("[OCR] engine ready (en-US)");
-                else
-                    Debug.WriteLine("[OCR] no recognizer language packs available");
+                return _engine;
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[OCR] init failed: {ex.Message}");
-                _engine = null;
-            }
-
-            return _engine;
         }
 
         /// <summary>
@@ -209,6 +213,36 @@ namespace SpeakRect
         /// </summary>
         public static bool IsJunkWinOcrText(string? text)
             => ComicBestOfFusion.IsJunkWinOcrText(text, MinWinOcrAlnumChars);
+
+        /// <summary>
+        /// Watch gate: true if Windows OCR sees any non-junk line. Does not return
+        /// boxes or recognized strings — Watch still uses the LLM for spoken text.
+        /// </summary>
+        public static async Task<bool> SeesTextAsync(
+            OcrEngine engine,
+            Bitmap bitmap,
+            CancellationToken token)
+        {
+            if (engine == null || bitmap == null || bitmap.Width < 2 || bitmap.Height < 2)
+                return false;
+
+            using var softwareBitmap = await ToSoftwareBitmapAsync(bitmap).ConfigureAwait(false);
+            if (softwareBitmap == null)
+                return false;
+
+            token.ThrowIfCancellationRequested();
+            var result = await engine.RecognizeAsync(softwareBitmap).AsTask(token)
+                .ConfigureAwait(false);
+            if (result?.Lines == null)
+                return false;
+
+            foreach (var line in result.Lines)
+            {
+                if (!IsJunkWinOcrText(line.Text))
+                    return true;
+            }
+            return false;
+        }
 
         /// <summary>
         /// GDI Bitmap → WinRT SoftwareBitmap (BGRA8) for Windows.Media.Ocr.

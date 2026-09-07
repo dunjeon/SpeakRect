@@ -63,12 +63,12 @@ var thread = new Thread(() =>
         Check("Profile combo present", profileCombo != null && profileCombo.Width > 40,
             profileCombo == null ? "missing" : $"w={profileCombo.Width}");
 
-        // Tab control: Key Map, Regions, Follow, Voice, Speech, Image, Balloons, Analytics, Help
+        // Tab control: Key Map, Regions, Follow, Watch, Voice, Speech, Image, Balloons, Analytics, Help
         var tabs = FindControls(settings, c => c is TabControl).OfType<TabControl>().FirstOrDefault();
         Check("TabControl present", tabs != null);
         if (tabs != null)
         {
-            Check("Nine settings tabs (incl. Speech / Image / Balloons)", tabs.TabPages.Count == 9,
+            Check("Ten settings tabs (incl. Watch / Speech / Image / Balloons)", tabs.TabPages.Count == 10,
                 $"count={tabs.TabPages.Count}");
             var names = string.Join(", ", tabs.TabPages.Cast<TabPage>().Select(p => p.Text));
             Check("Tab names",
@@ -76,6 +76,7 @@ var thread = new Thread(() =>
                 names.Contains("Regions", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Voice", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Follow", StringComparison.OrdinalIgnoreCase) &&
+                names.Contains("Watch", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Speech", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Image", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Balloons", StringComparison.OrdinalIgnoreCase) &&
@@ -105,6 +106,7 @@ var thread = new Thread(() =>
             frm_Settings.SettingsTab.KeyMap,
             frm_Settings.SettingsTab.Regions,
             frm_Settings.SettingsTab.Follow,
+            frm_Settings.SettingsTab.Watch,
             frm_Settings.SettingsTab.Voice,
             frm_Settings.SettingsTab.Speech,
             frm_Settings.SettingsTab.Image,
@@ -117,6 +119,7 @@ var thread = new Thread(() =>
             "settings_keymap.png",
             "settings_regions.png",
             "settings_follow.png",
+            "settings_watch.png",
             "settings_voice.png",
             "settings_speech.png",
             "settings_image.png",
@@ -267,6 +270,61 @@ var thread = new Thread(() =>
             Application.DoEvents();
             Check("Settings still open after Follow apply (Enter does not close)",
                 settings.Visible && !settings.IsDisposed);
+        }
+
+        // ---- Watch tab: enable + region + interval ----
+        settings.SelectTab(frm_Settings.SettingsTab.Watch);
+        Application.DoEvents();
+        Thread.Sleep(150);
+        Application.DoEvents();
+
+        var watch = FindControls(settings, c => c is frm_WatchSettings)
+            .OfType<frm_WatchSettings>().FirstOrDefault();
+        Check("Watch panel embedded", watch != null);
+        if (watch != null)
+        {
+            var enable = FindControls(watch, c => c is CheckBox cb &&
+                (cb.Text ?? "").Contains("Watch", StringComparison.OrdinalIgnoreCase))
+                .OfType<CheckBox>().FirstOrDefault();
+            Check("Watch enable checkbox present", enable != null);
+            var interval = FindControls(watch, c => c is NumericUpDown)
+                .OfType<NumericUpDown>().FirstOrDefault();
+            Check("Watch interval spin present", interval != null,
+                interval == null ? "missing" : $"min={interval.Minimum} max={interval.Maximum}");
+            var combo = FindControls(watch, c => c is ComboBox)
+                .OfType<ComboBox>().FirstOrDefault();
+            Check("Watch region combo has 8 slots",
+                combo != null && combo.Items.Count == 8,
+                combo == null ? "missing" : $"count={combo.Items.Count}");
+
+            bool prevOn = AppSettings.Current.WatchEnabled;
+            int prevSlot = AppSettings.Current.WatchRegionSlot;
+            int prevMs = AppSettings.Current.WatchIntervalMs;
+            try
+            {
+                if (enable != null && interval != null)
+                {
+                    enable.Checked = true;
+                    interval.Value = 3.5m;
+                    Application.DoEvents();
+                    watch.FlushToSettings();
+                    Application.DoEvents();
+                    Check("Watch enable saves", AppSettings.Current.WatchEnabled);
+                    Check("Watch interval saves 3.5s",
+                        AppSettings.Current.WatchIntervalMs == 3500,
+                        $"got {AppSettings.Current.WatchIntervalMs}");
+                }
+            }
+            finally
+            {
+                AppSettings.Current.WatchEnabled = prevOn;
+                AppSettings.Current.WatchRegionSlot = prevSlot;
+                AppSettings.Current.WatchIntervalMs = prevMs;
+                AppSettings.Current.NormalizeWatchSettings();
+                try { AppSettings.Current.Save(); } catch { /* ignore */ }
+                watch.ReloadFromSettings();
+                Application.DoEvents();
+            }
         }
 
         settings.Close();

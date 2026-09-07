@@ -12,6 +12,7 @@ No cloud AI is required for recognition. Speech works offline with the built-in 
 
 - **Up to 8 saved regions** — pin dialogue, menus, choices, captions, or panels each to its own hotkey
 - **Follow mode** — a ninth reader that tracks the mouse (or locks in place)
+- **Watch** — timer-read one saved region when its text changes (never overlaps speech)
 - **Local recognition** — Local-LLM host + GLM-OCR (Q8_0) bundled in the release zip
 - **Windows TTS by default** — works out of the box; optional **SAPI 5** for classic voices and third-party engines
 - **Keyboard + gamepad** — remappable bindings, optional custom actions
@@ -141,7 +142,7 @@ For games, use **borderless windowed** so capture works.
 | Menu | What it does |
 |------|----------------|
 | **Show Overlay** | Opens the selection overlay |
-| **Settings…** | Profiles, Key Map, Regions, Voice, Follow, Analytics, Help |
+| **Settings…** | Profiles, Key Map, Regions, Follow, Watch, Voice, Analytics, Help |
 | **Profiles** | Load / save named setups |
 | **Exit** | Quit SpeakRect and stop the local LLM |
 
@@ -254,6 +255,25 @@ Follow is a movable capture box that tracks the cursor (or can lock in place). I
 
 Typical use: size the Follow box to a subtitle line → point the mouse → **Shift+F9**.
 
+### Watch (auto-read one saved region)
+
+Watch is a timer that checks **one** of your saved slots (1–8). Each tick: **Windows OCR** answers a boolean — is there text? It does not supply the spoken line. No → silent (the LLM is not called). Yes → the **local LLM** converts the **full snap** to words (Default pipeline). Watch compares and speaks **those LLM words**.
+
+| Setting | What it does |
+|---------|----------------|
+| **Enable** | Turn the timer on or off (off by default) |
+| **Region** | Which drawn slot to watch (Follow / region 9 cannot be watched) |
+| **Interval** | Seconds between checks (0.5–60, default 2.0) |
+| **Forget last on no text** | WinOCR sees no text → clear last spoken so returning dialogue can be read again (default on) |
+| **Min difference %** | Speak only if new words differ by at least this much (0–100, default 90) |
+
+- Watch runs on a **background thread**. Opening the overlay **stops the timer immediately** and cancels an in-flight check. Hide the overlay (**Escape**) to resume. It does not fire while Settings is open.
+- The first successful check after you turn Watch on (or change slot) is a **silent baseline** — it does not speak.
+- Later checks: WinOCR must see text, then the LLM reads the snap and Watch compares to the **last spoken words**.
+- A region hotkey, Follow speak, or **Stop speech** cancels a Watch check in flight so your action wins.
+
+Typical use: draw a dialogue box on region 1 → **Settings → Watch** → pick region 1 → enable → hide overlay → play. New lines in that box are read when they appear.
+
 ### Reading modes
 
 One primary mode is always selected (also toggleable with global hotkeys):
@@ -278,6 +298,7 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 | **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
 | **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
+| **Watch** | Timer-read one saved region (1–8) when its text changes |
 | **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
 | **Help** | Getting started, features, default hotkeys, open README |
 
@@ -333,7 +354,7 @@ Tips:
 
 ### Profiles
 
-Save hotkeys, modes, regions, Follow size, **voice (engine + voice + rate/pitch/volume)**, and related prefs:
+Save hotkeys, modes, regions, Follow size, Watch, **voice (engine + voice + rate/pitch/volume)**, and related prefs:
 
 1. Tray → **Profiles** → **Save current…** / **Save as…**, or use the profile bar in **Settings**.
 2. Load from the tray menu or the Settings profile list.
@@ -370,6 +391,9 @@ Overlay → draw → **Enter**. Hide with **Escape** when done.
 
 **Subtitles under the cursor**  
 Follow settings → size the box → point → **Shift+F9**.
+
+**Same dialogue box, auto-read on change**  
+Draw the box on a slot → **Settings → Watch** → pick that slot → set the interval → enable → **Escape**. Watch reads new text only when speech is idle.
 
 **Comic page**  
 Comic Book **on** → draw panel or page → **Enter**. Reuse the same region hotkey if layout stays put.

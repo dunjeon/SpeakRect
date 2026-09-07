@@ -656,6 +656,49 @@ namespace SpeakRect
         }
 
         // -----------------------------------------------------------------------
+        // Watch one saved region for text changes — [WATCH] section
+        // -----------------------------------------------------------------------
+
+        public const int DefaultWatchIntervalMs = RegionWatch.DefaultIntervalMs;
+        public const int MinWatchIntervalMs = RegionWatch.MinIntervalMs;
+        public const int MaxWatchIntervalMs = RegionWatch.MaxIntervalMs;
+        public const int DefaultWatchMinDifferencePercent = RegionWatch.DefaultMinDifferencePercent;
+        public const int MinWatchDifferencePercent = 0;
+        public const int MaxWatchDifferencePercent = 100;
+
+        /// <summary>
+        /// When true, a timer OCRs <see cref="WatchRegionSlot"/> and speaks only if
+        /// the text changed and nothing else is currently being read.
+        /// </summary>
+        public bool WatchEnabled { get; set; }
+
+        /// <summary>Slot to watch, 0..7 (region 1..8). Follow (region 9) is not valid.</summary>
+        public int WatchRegionSlot { get; set; }
+
+        /// <summary>Delay between watch checks (ms). Default 2000.</summary>
+        public int WatchIntervalMs { get; set; } = DefaultWatchIntervalMs;
+
+        /// <summary>
+        /// When true, a no-text WinOCR gate clears last spoken words so returning
+        /// dialogue (after a cutscene) can be read again.
+        /// </summary>
+        public bool WatchClearLastOnNoText { get; set; } = true;
+
+        /// <summary>
+        /// Speak again only when new words differ by at least this percent
+        /// (Levenshtein vs last spoken, 0–100). Default 90.
+        /// </summary>
+        public int WatchMinDifferencePercent { get; set; } = DefaultWatchMinDifferencePercent;
+
+        public void NormalizeWatchSettings()
+        {
+            WatchRegionSlot = Math.Clamp(WatchRegionSlot, 0, 7);
+            WatchIntervalMs = Math.Clamp(WatchIntervalMs, MinWatchIntervalMs, MaxWatchIntervalMs);
+            WatchMinDifferencePercent = Math.Clamp(
+                WatchMinDifferencePercent, MinWatchDifferencePercent, MaxWatchDifferencePercent);
+        }
+
+        // -----------------------------------------------------------------------
         // Saved capture regions + overlay shape (persisted under [REGIONS])
         // Profiles include these so switching profiles restores slot geometries.
         // -----------------------------------------------------------------------
@@ -1333,6 +1376,11 @@ namespace SpeakRect
             FollowShape = "Rectangle";
             FollowOffsetX = DefaultFollowOffsetX;
             FollowOffsetY = DefaultFollowOffsetY;
+            WatchEnabled = false;
+            WatchRegionSlot = 0;
+            WatchIntervalMs = DefaultWatchIntervalMs;
+            WatchClearLastOnNoText = true;
+            WatchMinDifferencePercent = DefaultWatchMinDifferencePercent;
             ActiveProfileName = "Default";
             LastSettingsTab = "Help";
             ActiveRegionSlot = 0;
@@ -1350,7 +1398,7 @@ namespace SpeakRect
 
         /// <summary>
         /// Factory-restore every product setting (mode, image prep, voice, speech
-        /// rules/names, prompts, hotkeys, gamepad, custom actions, follow, regions).
+        /// rules/names, prompts, hotkeys, gamepad, custom actions, follow, watch, regions).
         /// Keeps the active profile name and last Settings tab so the current profile
         /// file is rewritten on save. Writes main ini + active profile when present.
         /// </summary>
@@ -1365,6 +1413,7 @@ namespace SpeakRect
             LastSettingsTab = string.IsNullOrWhiteSpace(keepTab) ? "Help" : keepTab.Trim();
             NormalizeModeFlags();
             NormalizeFollowSettings();
+            NormalizeWatchSettings();
             NormalizeVoiceSettings();
             NormalizeComicRegionSettings();
             NormalizeImagePrepSettings();
@@ -1444,6 +1493,7 @@ namespace SpeakRect
             LoadSpeechRulesFromMap(map);
             LoadSpeechTextRulesFromMap(map);
             LoadFollowFromMap(map);
+            LoadWatchFromMap(map);
         }
 
         private void LoadFollowFromMap(Dictionary<string, string> map)
@@ -1465,6 +1515,48 @@ namespace SpeakRect
             // FollowIdleMs was for old auto-OCR-on-still-mouse; ignored if present.
 
             NormalizeFollowSettings();
+        }
+
+        private void LoadWatchFromMap(Dictionary<string, string> map)
+        {
+            if (map.TryGetValue("WatchEnabled", out string? enRaw) &&
+                TryParseBool(enRaw, out bool enabled))
+                WatchEnabled = enabled;
+
+            if (map.TryGetValue("WatchSlot", out string? slotRaw) &&
+                int.TryParse(slotRaw, out int slot1Based))
+            {
+                if (slot1Based is >= 1 and <= 8)
+                    WatchRegionSlot = slot1Based - 1;
+                else if (slot1Based is >= 0 and <= 7)
+                    WatchRegionSlot = slot1Based;
+            }
+            else if (map.TryGetValue("WatchRegionSlot", out string? slotRaw2) &&
+                     int.TryParse(slotRaw2, out int slotAlt))
+            {
+                if (slotAlt is >= 1 and <= 8)
+                    WatchRegionSlot = slotAlt - 1;
+                else if (slotAlt is >= 0 and <= 7)
+                    WatchRegionSlot = slotAlt;
+            }
+
+            if (map.TryGetValue("WatchIntervalMs", out string? msRaw) &&
+                int.TryParse(msRaw, out int ms))
+                WatchIntervalMs = ms;
+            else if (map.TryGetValue("WatchIntervalSeconds", out string? secRaw) &&
+                     double.TryParse(secRaw, System.Globalization.NumberStyles.Float,
+                         System.Globalization.CultureInfo.InvariantCulture, out double sec))
+                WatchIntervalMs = (int)Math.Round(sec * 1000.0);
+
+            if (map.TryGetValue("WatchClearLastOnNoText", out string? clearRaw) &&
+                TryParseBool(clearRaw, out bool clearLast))
+                WatchClearLastOnNoText = clearLast;
+
+            if (map.TryGetValue("WatchMinDifferencePercent", out string? diffRaw) &&
+                int.TryParse(diffRaw, out int diffPct))
+                WatchMinDifferencePercent = diffPct;
+
+            NormalizeWatchSettings();
         }
 
         private void LoadVoiceFromMap(Dictionary<string, string> map)
@@ -1770,7 +1862,7 @@ namespace SpeakRect
         /// <summary>
         /// Write the current in-memory settings to Profiles\{name}.ini and mark it active.
         /// Snapshot includes modes, hotkeys, gamepad, regions, prompts,
-        /// voice (engine + UWP/SAPI voice + rate/pitch/volume/silence), and follow.
+        /// voice (engine + UWP/SAPI voice + rate/pitch/volume/silence), follow, and watch.
         /// Also refreshes SpeakRect.ini. Callers should push live overlay regions first.
         /// </summary>
         public bool SaveProfile(string name, out string? error)
@@ -1785,6 +1877,7 @@ namespace SpeakRect
                 ActiveProfileName = clean;
                 NormalizeModeFlags();
                 NormalizeFollowSettings();
+                NormalizeWatchSettings();
                 NormalizeVoiceSettings();
                 NormalizeComicRegionSettings();
                 NormalizeImagePrepSettings();
@@ -2335,11 +2428,11 @@ namespace SpeakRect
                 sb.AppendLine("; ComicBook=true → Comic Book: tone, fog detect, balloons/crops/POI");
                 sb.AppendLine("; Named profiles (Profiles\\*.ini) store full snapshots:");
                 sb.AppendLine(";   modes, hotkeys, gamepad, custom, regions, prompts, voice,");
-                sb.AppendLine(";   speech rules, comic balloons, image prep, follow.");
+                sb.AppendLine(";   speech rules, comic balloons, image prep, follow, watch.");
                 sb.AppendLine();
                 sb.AppendLine("[PROFILE]");
                 sb.AppendLine($"ActiveProfile={profileLabel}");
-                sb.AppendLine("; Last Settings tab name (KeyMap, Regions, Follow, Voice, …).");
+                sb.AppendLine("; Last Settings tab name (KeyMap, Regions, Follow, Watch, Voice, …).");
                 sb.AppendLine($"LastSettingsTab={NormalizeLastSettingsTab(LastSettingsTab)}");
                 sb.AppendLine();
                 sb.AppendLine("[MODE]");
@@ -2575,6 +2668,19 @@ namespace SpeakRect
                 sb.AppendLine($"FollowOffsetX={FollowOffsetX}");
                 sb.AppendLine($"FollowOffsetY={FollowOffsetY}");
                 sb.AppendLine();
+                NormalizeWatchSettings();
+                sb.AppendLine("[WATCH]");
+                sb.AppendLine("; Auto-read one saved region (1–8) when its text changes.");
+                sb.AppendLine("; Never overlaps or stops in-progress speech. First check after enable is a silent baseline.");
+                sb.AppendLine("; Interval is milliseconds (500–60000). Follow (region 9) cannot be watched.");
+                sb.AppendLine("; ClearLastOnNoText: WinOCR sees no text → forget last spoken so returning dialogue can be read again.");
+                sb.AppendLine("; MinDifferencePercent: 0–100. Speak only when new words differ by at least this much (Levenshtein).");
+                sb.AppendLine($"WatchEnabled={WatchEnabled.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"WatchSlot={Math.Clamp(WatchRegionSlot, 0, 7) + 1}");
+                sb.AppendLine($"WatchIntervalMs={WatchIntervalMs}");
+                sb.AppendLine($"WatchClearLastOnNoText={WatchClearLastOnNoText.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"WatchMinDifferencePercent={WatchMinDifferencePercent}");
+                sb.AppendLine();
 
                 File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
             }
@@ -2757,6 +2863,9 @@ namespace SpeakRect
                 or "SpeechRuleCount" or "SpeechTextRuleCount"
                 or "FollowWidth" or "FollowHeight" or "FollowShape"
                 or "FollowOffsetX" or "FollowOffsetY"
+                or "WatchEnabled" or "WatchSlot" or "WatchRegionSlot"
+                or "WatchIntervalMs" or "WatchIntervalSeconds"
+                or "WatchClearLastOnNoText" or "WatchMinDifferencePercent"
                 // Region1..Region8 are hotkeys (short). Slot1..Slot8 are geometries (long) — excluded.
                 || (key.StartsWith("Region", StringComparison.OrdinalIgnoreCase)
                     && !key.StartsWith("RegionGeom", StringComparison.OrdinalIgnoreCase)

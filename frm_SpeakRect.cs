@@ -175,6 +175,20 @@ namespace SpeakRect
         /// <summary>Follow is armed (float or locked pin).</summary>
         private bool FollowActive => _followActive || dynamic_rect;
 
+        /// <summary>Background Watch timer (thread-pool). Never a WinForms UI timer.</summary>
+        private System.Threading.Timer? _watchTimer;
+        private readonly object _watchLock = new();
+        private int _watchTickRunning;
+        private CancellationTokenSource? _watchCts;
+        private OcrProcessor? _watchHost;
+        private string _watchLastText = "";
+        /// <summary>True after enable/slot change until the first successful Watch OCR (silent baseline).</summary>
+        private bool _watchSilentBaselinePending;
+        private int _watchSyncedSlot = -1;
+        private bool _watchSyncedEnabled;
+        /// <summary>Set from UI show/hide so the Watch thread never reads <see cref="Control.Visible"/>.</summary>
+        private volatile bool _overlayVisible = true;
+
         public frm_SpeakRect()
         {
             FormBorderStyle = FormBorderStyle.None;
@@ -307,6 +321,10 @@ namespace SpeakRect
             RegisterAllHotkeys(warnUser: false);
             // Restore any region geometries saved in SpeakRect.ini / last profile snapshot.
             ApplyRegionsFromSettings();
+
+            _watchTimer = new System.Threading.Timer(
+                WatchTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
+            SyncWatchFromSettings();
 
             _gamepadPoller = new XInputPoller(OnGamepadAction, OnGamepadContinuous);
             _gamepadPoller.SyncFromSettings();
@@ -520,6 +538,8 @@ namespace SpeakRect
 
             if (Visible)
                 Invalidate();
+
+            SyncWatchFromSettings();
         }
 
         /// <summary>
@@ -829,6 +849,7 @@ namespace SpeakRect
                     onBeforeProfileSave: SyncRegionsToSettings,
                     onAfterProfileLoad: ApplyFullProfileFromSettings,
                     onFollowChanged: OnFollowSettingsChanged,
+                    onWatchChanged: SyncWatchFromSettings,
                     onRegionsChanged: OnRegionsSettingsChanged,
                     onModeChanged: OnModeSettingsChanged,
                     captureActiveRegion: CaptureActiveRegionForPreviewAsync,
@@ -905,6 +926,255 @@ namespace SpeakRect
             try { _settingsForm?.ReloadBalloonsFromModeChange(); } catch { /* ignore */ }
             if (Visible)
                 Invalidate();
+        }
+
+        /// <summary>
+        /// Start/stop the background Watch timer from [WATCH] knobs.
+        /// Overlay-open always pauses the timer (see <see cref="OnVisibleChanged"/>).
+        /// </summary>
+        private void SyncWatchFromSettings()
+        {
+            var s = AppSettings.Current;
+            s.NormalizeWatchSettings();
+
+            bool slotChanged = _watchSyncedSlot != s.WatchRegionSlot;
+            bool turnedOn = s.WatchEnabled && !_watchSyncedEnabled;
+            if (slotChanged || turnedOn)
+            {
+                lock (_watchLock)
+                {
+                    _watchLastText = "";
+                    _watchSilentBaselinePending = true;
+                }
+            }
+            _watchSyncedSlot = s.WatchRegionSlot;
+            _watchSyncedEnabled = s.WatchEnabled;
+
+            if (!s.WatchEnabled)
+            {
+                PauseWatchTimer();
+                CancelWatchWork();
+                RegionWatch.SetStatus("Off.");
+                return;
+            }
+
+            if (_overlayVisible)
+            {
+                PauseWatchTimer();
+                RegionWatch.SetStatus(
+                    $"Watch R{s.WatchRegionSlot + 1}: paused (overlay open)");
+                return;
+            }
+
+            RegionWatch.SetStatus(
+                $"Watch R{s.WatchRegionSlot + 1}: waiting (every {s.WatchIntervalMs / 1000.0:0.0}s)");
+            ResumeWatchTimer(s.WatchIntervalMs);
+        }
+
+        private void PauseWatchTimer()
+        {
+            try
+            {
+                _watchTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            }
+            catch { /* ignore */ }
+        }
+
+        private void ResumeWatchTimer(int intervalMs)
+        {
+            int ms = Math.Max(RegionWatch.MinIntervalMs, intervalMs);
+            try
+            {
+                _watchTimer?.Change(ms, ms);
+            }
+            catch { /* ignore */ }
+        }
+
+        /// <summary>
+        /// Cancel a Watch OCR/TTS in flight. Does not touch user <see cref="_current"/> speech.
+        /// </summary>
+        private void CancelWatchWork()
+        {
+            CancellationTokenSource? cts;
+            OcrProcessor? host;
+            lock (_watchLock)
+            {
+                cts = _watchCts;
+                host = _watchHost;
+            }
+            try { cts?.Cancel(); } catch { /* ignore */ }
+            try { host?.Stop(); } catch { /* ignore */ }
+        }
+
+        private void WatchTimerCallback(object? state)
+        {
+            try
+            {
+                if (IsDisposed || _overlayVisible || _settingsOpen)
+                    return;
+                if (Volatile.Read(ref _watchTickRunning) != 0)
+                    return;
+                _ = RunWatchTickAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Watch] callback: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Background Watch tick: OCR the slot, speak only if the words changed
+        /// and nothing else is being read. Never runs on the overlay UI thread.
+        /// </summary>
+        private async Task RunWatchTickAsync()
+        {
+            if (Interlocked.CompareExchange(ref _watchTickRunning, 1, 0) != 0)
+                return;
+
+            CancellationTokenSource? cts = null;
+            OcrProcessor? host = null;
+            try
+            {
+                if (IsDisposed || _overlayVisible || _settingsOpen)
+                    return;
+
+                var s = AppSettings.Current;
+                s.NormalizeWatchSettings();
+                if (!s.WatchEnabled)
+                    return;
+                if (OcrProcessor.IsSpeechInProgress || OcrProcessor.IsOcrInProgress)
+                    return;
+
+                int slot = s.WatchRegionSlot;
+                if (!RegionWatch.TryGetCapture(
+                        s.RegionSlots[slot], out var bounds, out var lasso, out bool ellipse))
+                {
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: slot empty — draw it on the overlay");
+                    return;
+                }
+
+                cts = new CancellationTokenSource();
+                host = new OcrProcessor(bounds, lasso, ellipse);
+                lock (_watchLock)
+                {
+                    _watchCts = cts;
+                    _watchHost = host;
+                }
+
+                if (_overlayVisible)
+                    return;
+
+                RegionWatch.SetStatus($"Watch R{slot + 1}: checking…");
+                var (gate, text) = await host.RecognizeWatchWithoutSpeakingAsync(cts.Token)
+                    .ConfigureAwait(false);
+                if (cts.IsCancellationRequested || IsDisposed || _overlayVisible)
+                    return;
+                if (OcrProcessor.IsSpeechInProgress)
+                    return;
+
+                if (gate == WatchTextGate.Unavailable)
+                {
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: skip");
+                    return;
+                }
+
+                if (gate == WatchTextGate.NoText)
+                {
+                    if (s.WatchClearLastOnNoText)
+                    {
+                        lock (_watchLock)
+                        {
+                            _watchLastText = "";
+                            _watchSilentBaselinePending = false;
+                        }
+                    }
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: no text");
+                    return;
+                }
+
+                if (!RegionWatch.TryNormalizeSpeakable(text, out string normalized))
+                {
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: no readable text");
+                    return;
+                }
+
+                string lastSpoken;
+                bool silentBaseline;
+                lock (_watchLock)
+                {
+                    lastSpoken = _watchLastText;
+                    silentBaseline = _watchSilentBaselinePending;
+                }
+
+                if (silentBaseline)
+                {
+                    lock (_watchLock)
+                    {
+                        _watchLastText = normalized;
+                        _watchSilentBaselinePending = false;
+                    }
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: baseline set");
+                    return;
+                }
+
+                int needPct = s.WatchMinDifferencePercent;
+                double diffPct = RegionWatch.DifferencePercent(lastSpoken, normalized);
+                if (!RegionWatch.DiffersEnough(lastSpoken, normalized, needPct))
+                {
+                    RegionWatch.SetStatus(
+                        $"Watch R{slot + 1}: too similar ({diffPct:0.#}% < {needPct}%)");
+                    return;
+                }
+                if (OcrProcessor.IsSpeechInProgress || _overlayVisible)
+                {
+                    RegionWatch.SetStatus($"Watch R{slot + 1}: waiting (speech in progress)");
+                    return;
+                }
+
+                RegionWatch.SetStatus(
+                    $"Watch R{slot + 1}: reading change ({diffPct:0.#}% different)");
+                bool spoke = await host.SpeakExistingTextAsync(normalized, cts.Token)
+                    .ConfigureAwait(false);
+                if (spoke)
+                {
+                    lock (_watchLock)
+                        _watchLastText = normalized;
+                    if (!_overlayVisible)
+                        RegionWatch.SetStatus($"Watch R{slot + 1}: idle");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                RegionWatch.SetStatus(
+                    _overlayVisible ? "Watch: paused (overlay open)" : "Watch: waiting");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Watch] {ex.Message}");
+                RegionWatch.SetStatus("Watch: error");
+            }
+            finally
+            {
+                lock (_watchLock)
+                {
+                    if (ReferenceEquals(_watchCts, cts))
+                        _watchCts = null;
+                    if (ReferenceEquals(_watchHost, host))
+                        _watchHost = null;
+                }
+                try { cts?.Dispose(); } catch { /* ignore */ }
+                if (host != null)
+                {
+                    try { host.Stop(); } catch { /* ignore */ }
+                    var toDispose = host;
+                    _ = Task.Run(() =>
+                    {
+                        try { Thread.Sleep(150); } catch { /* ignore */ }
+                        try { toDispose.Dispose(); } catch { /* ignore */ }
+                    });
+                }
+                Interlocked.Exchange(ref _watchTickRunning, 0);
+            }
         }
 
         /// <summary>Live-refresh mouse-follow rect when FOLLOW panel saves.</summary>
@@ -1086,6 +1356,7 @@ namespace SpeakRect
 
                 if (hasSelection)
                 {
+                    CancelWatchWork();
                     try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
                     RetireCurrentProcessor();
                     _current = new OcrProcessor(bounds, lasso, ellipse);
@@ -1141,6 +1412,29 @@ namespace SpeakRect
             // First launch uses Application.Run (not ShowOverlay) — still need the
             // opaque tool strip. Also covers hide-to-tray / re-show.
             SyncSidebarChrome();
+
+            // Watch lives on a background thread. Kill it the instant the overlay
+            // is shown so a check cannot snap/dim chrome while drawing.
+            if (Visible)
+            {
+                _overlayVisible = true;
+                PauseWatchTimer();
+                CancelWatchWork();
+                if (_watchSyncedEnabled)
+                    RegionWatch.SetStatus("Watch: paused (overlay open)");
+            }
+            else
+            {
+                _overlayVisible = false;
+                if (_watchSyncedEnabled && !IsDisposed)
+                {
+                    var s = AppSettings.Current;
+                    s.NormalizeWatchSettings();
+                    RegionWatch.SetStatus(
+                        $"Watch R{s.WatchRegionSlot + 1}: waiting (every {s.WatchIntervalMs / 1000.0:0.0}s)");
+                    ResumeWatchTimer(s.WatchIntervalMs);
+                }
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -1151,6 +1445,11 @@ namespace SpeakRect
             UnregisterAllHotkeys();
             try { _gamepadPoller?.Dispose(); } catch { /* ignore */ }
             _gamepadPoller = null;
+            _overlayVisible = true;
+            PauseWatchTimer();
+            CancelWatchWork();
+            try { _watchTimer?.Dispose(); } catch { /* ignore */ }
+            _watchTimer = null;
             try { _settingsForm?.Close(); } catch { /* ignore */ }
             DisposeSidebarChrome();
             _trayIcon?.Dispose();
@@ -1384,6 +1683,7 @@ namespace SpeakRect
                 if (bounds.IsEmpty || bounds.Width < 8 || bounds.Height < 8)
                     return;
 
+                CancelWatchWork();
                 try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
                 RetireCurrentProcessor();
                 bool ellipse = AppSettings.Current.FollowIsEllipse;
@@ -2191,6 +2491,7 @@ namespace SpeakRect
         /// </summary>
         private void AbortTtsInProgress()
         {
+            CancelWatchWork();
             try { OcrProcessor.CancelAnnouncement(); } catch { /* ignore */ }
             try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
             try { _current?.Stop(); } catch { /* ignore */ }
@@ -2200,6 +2501,10 @@ namespace SpeakRect
 
         private void ShowOverlay()
         {
+            _overlayVisible = true;
+            PauseWatchTimer();
+            CancelWatchWork();
+
             try { Cursor = new Cursor(@"C:\Windows\Cursors\aero_arrow.cur"); }
             catch { Cursor = Cursors.Hand; }
 
@@ -2713,6 +3018,7 @@ namespace SpeakRect
         /// </summary>
         private void StartSpeakKeepingOverlay(OcrProcessor next)
         {
+            CancelWatchWork();
             // Stop overlay-hide Balloons refine TTS if still playing.
             try { OcrProcessor.CancelBackgroundComicSpeak(); } catch { /* ignore */ }
             RetireCurrentProcessor();
