@@ -1234,9 +1234,10 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Watch OCR: Default-mode prep, then a WinOCR <b>boolean</b> “is there text?”
-        /// gate (no WinOCR strings or boxes). If false, silent. If true, Local-LLM
-        /// converts the <b>full snap</b> to the spoken words.
+        /// Watch OCR (independent of MODE). OCR yes/no on the pipeline bitmap;
+        /// no text → silent. Yes → Local-LLM or OCR words (Watch text source)
+        /// via Raw snap / Image / Image + balloons. Does not publish Analytics
+        /// or last-capture.
         /// </summary>
         public async Task<(WatchTextGate Gate, string Text)> RecognizeWatchWithoutSpeakingAsync(
             CancellationToken token)
@@ -1307,17 +1308,27 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Watch-only Default pipeline: snap → Image prep → WinOCR bool gate →
-        /// full-frame Local-LLM (the only converter to spoken words).
+        /// Watch: snap → (optional Image prep) → OCR yes/no → Local-LLM or OCR
+        /// words (Watch text source). Raw snap / Image = full-frame. Image +
+        /// Balloon = per-island (or full-frame if detect finds no boxes).
+        /// Does not flip live MODE. No Analytics / last-capture stomp.
         /// </summary>
         private async Task CaptureAndRecognizeWatchAsync(CancellationToken token)
         {
             Interlocked.Increment(ref _ocrInFlight);
             ImagePrepStages? prepStages = null;
+            Bitmap? fogOwned = null;
             try
             {
-                using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
-                _runImages = new List<OcrResultImage>(8);
+                var watchPipe = RegionWatch.NormalizePipeline(
+                    AppSettings.Current.WatchPipeline);
+                var textSource = RegionWatch.NormalizeTextSource(
+                    AppSettings.Current.WatchTextSource);
+                using var _runSnap = SpeakRunSettings.Push(
+                    SpeakRunSettings.CaptureForWatch(watchPipe));
+                // Null list: CaptureAnalyticsImage no-ops. Watch must not
+                // encode thumbs or publish LastResult.
+                _runImages = null;
                 ClearRunFogAnalytics();
                 _watchTextGate = WatchTextGate.Unavailable;
                 _lastText = "";
@@ -1354,12 +1365,27 @@ namespace SpeakRect
 
                 using var rawSnap = snapped;
                 var detail = new StringBuilder();
+                bool useImagePrep = watchPipe != WatchPipeline.RawSnap;
                 detail.AppendLine(
-                    "watch=Default prep + WinOCR bool-gate → full-frame LLM (no comic crops)");
+                    $"watch-pipe={RegionWatch.PipelineToIni(watchPipe)} " +
+                    $"text={RegionWatch.TextSourceToIni(textSource)} " +
+                    "(no Analytics / last-capture stomp)");
 
-                prepStages = BuildImagePrepStages(rawSnap, buildTone: true, detail);
-                Bitmap tone = prepStages.LiveOcrInput;
-                if (tone.Width < 2 || tone.Height < 2)
+                Bitmap llmSource = rawSnap;
+                Bitmap? letterboxOwned = null;
+                if (useImagePrep)
+                {
+                    prepStages = BuildImagePrepStages(rawSnap, buildTone: true, detail);
+                    llmSource = prepStages.LiveOcrInput;
+                    letterboxOwned = prepStages.Letterbox;
+                }
+                else
+                {
+                    detail.AppendLine(
+                        $"raw-snap {rawSnap.Width}x{rawSnap.Height} (Image tab off)");
+                }
+
+                if (llmSource.Width < 2 || llmSource.Height < 2)
                     return;
 
                 token.ThrowIfCancellationRequested();
@@ -1371,11 +1397,25 @@ namespace SpeakRect
                     return;
                 }
 
+                if (textSource == WatchTextSource.Ocr)
+                {
+                    _lastText = await WatchOcrSpokenTextAsync(
+                        engine, llmSource, watchPipe, detail, token)
+                        .ConfigureAwait(false);
+                    bool ocrHas = !string.IsNullOrEmpty(_lastText);
+                    _watchTextGate = ocrHas ? WatchTextGate.HasText : WatchTextGate.NoText;
+                    detail.AppendLine($"watch-gate: ocrHasText={ocrHas} (OCR text source)");
+                    Debug.WriteLine(
+                        $"[Watch] pipe={watchPipe} source=OCR hasText={ocrHas}");
+                    return;
+                }
+
                 bool hasText = await BalloonOcrDetect.SeesTextAsync(
-                    engine, tone, token).ConfigureAwait(false);
+                    engine, llmSource, token).ConfigureAwait(false);
                 _watchTextGate = hasText ? WatchTextGate.HasText : WatchTextGate.NoText;
                 detail.AppendLine($"watch-gate: winocrHasText={hasText}");
-                Debug.WriteLine($"[Watch] winocrHasText={hasText}");
+                Debug.WriteLine(
+                    $"[Watch] pipe={watchPipe} source=LLM winocrHasText={hasText}");
 
                 if (!hasText)
                     return;
@@ -1389,6 +1429,7 @@ namespace SpeakRect
                             TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
                         if (!ready)
                         {
+                            _watchTextGate = WatchTextGate.Unavailable;
                             Debug.WriteLine("[Watch] Local-LLM not ready — silent skip");
                             return;
                         }
@@ -1397,35 +1438,75 @@ namespace SpeakRect
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
+                    _watchTextGate = WatchTextGate.Unavailable;
                     Debug.WriteLine($"[Watch] LLM ready wait: {ex.Message}");
                     return;
                 }
 
-                string? fullClean = await RunFullFrameKoboldOnBitmapAsync(
-                    tone, detail, token, savePrep: false).ConfigureAwait(false);
-                if (SpeechCleaner.IsUnusableOcrText(fullClean))
+                if (watchPipe == WatchPipeline.ImageBalloon)
                 {
-                    detail.AppendLine("watch: LLM empty — silent");
-                    return;
+                    var (regions, detection, _, detImg, ownsDet, fogAmt) =
+                        await BuildComicRegionsSharedDetectAsync(
+                            llmSource, detail, token).ConfigureAwait(false);
+                    if (ownsDet)
+                        fogOwned = detImg;
+                    detail.AppendLine(
+                        $"watch-balloons: islands={regions.Count} " +
+                        $"fog={fogAmt:0.###} lowConf={detection.LowConfidence}");
+
+                    if (regions.Count > 0)
+                    {
+                        var pipeTimer = new PipelineTimer();
+                        int pipeW = llmSource.Width;
+                        int pipeH = llmSource.Height;
+                        List<string> spokenParts;
+                        string chosenTag;
+                        bool usePoi =
+                            SpeakRunSettings.GetComicPoiMarkers() && regions.Count > 0;
+                        if (usePoi)
+                        {
+                            var (poiParts, poiTag, _) =
+                                await RunComicPoiGuideAsync(
+                                    llmSource, regions, pipeW, pipeH,
+                                    detail, pipeTimer, token,
+                                    speakNow: false, alreadyDucked: false,
+                                    letterboxHiRes: letterboxOwned)
+                                .ConfigureAwait(false);
+                            spokenParts = poiParts;
+                            chosenTag = poiTag;
+                        }
+                        else
+                        {
+                            using (PushIslandZoomHiRes(letterboxOwned, pipeW, pipeH))
+                            {
+                                var (seqParts, seqTag, _) =
+                                    await RunSequentialRegionsSpeakAsync(
+                                        llmSource, regions, detail, pipeTimer, token,
+                                        speakNow: false, alreadyDucked: false)
+                                    .ConfigureAwait(false);
+                                spokenParts = seqParts;
+                                chosenTag = seqTag;
+                            }
+                        }
+
+                        detail.AppendLine(
+                            $"watch-vl: tag={chosenTag} units={spokenParts.Count}");
+                        _lastText = JoinWatchSpokenParts(spokenParts);
+                    }
+
+                    if (string.IsNullOrEmpty(_lastText))
+                    {
+                        detail.AppendLine(
+                            "watch-balloons: no island text → full-frame LLM");
+                        _lastText = await WatchFullFrameTextAsync(
+                            llmSource, detail, token).ConfigureAwait(false);
+                    }
                 }
-
-                var speakPieces = SpeechCleaner.ExpandToSpeakPieces(new[] { fullClean! });
-                if (speakPieces.Count >= 2)
-                    speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
-                if (speakPieces.Count >= 2)
-                    speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(speakPieces, detail);
-
-                var spokenParts = new List<string>();
-                for (int i = 0; i < speakPieces.Count; i++)
+                else
                 {
-                    string u = speakPieces[i].Text;
-                    if (u.Length > 0)
-                        spokenParts.Add(u);
+                    _lastText = await WatchFullFrameTextAsync(
+                        llmSource, detail, token).ConfigureAwait(false);
                 }
-
-                _lastText = spokenParts.Count > 0
-                    ? string.Join(Environment.NewLine + Environment.NewLine, spokenParts)
-                    : "";
                 // Do not WriteLastOcrDebug — Watch must not stomp Analytics last hotkey speak.
             }
             catch (OperationCanceledException)
@@ -1435,13 +1516,102 @@ namespace SpeakRect
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Watch] CaptureAndRecognizeWatchAsync: {ex.Message}");
+                _watchTextGate = WatchTextGate.Unavailable;
                 _lastText = "";
             }
             finally
             {
+                try { fogOwned?.Dispose(); } catch { /* ignore */ }
                 try { prepStages?.Dispose(); } catch { /* ignore */ }
                 Interlocked.Decrement(ref _ocrInFlight);
             }
+        }
+
+        private async Task<string> WatchFullFrameTextAsync(
+            Bitmap source, StringBuilder detail, CancellationToken token)
+        {
+            string? fullClean = await RunFullFrameKoboldOnBitmapAsync(
+                source, detail, token, savePrep: false).ConfigureAwait(false);
+            if (SpeechCleaner.IsUnusableOcrText(fullClean))
+            {
+                detail.AppendLine("watch: LLM empty — silent");
+                return "";
+            }
+
+            return WatchPiecesToSpeakText(new[] { fullClean! }, detail);
+        }
+
+        /// <summary>
+        /// Watch OCR text source: balloon islands when that pipeline is on,
+        /// else full-frame OCR lines. Does not call the Local-LLM.
+        /// </summary>
+        private async Task<string> WatchOcrSpokenTextAsync(
+            OcrEngine engine,
+            Bitmap source,
+            WatchPipeline pipe,
+            StringBuilder detail,
+            CancellationToken token)
+        {
+            if (pipe == WatchPipeline.ImageBalloon)
+            {
+                Bitmap? fogOwned = null;
+                try
+                {
+                    var (regions, detection, _, detImg, ownsDet, fogAmt) =
+                        await BuildComicRegionsSharedDetectAsync(
+                            source, detail, token).ConfigureAwait(false);
+                    if (ownsDet)
+                        fogOwned = detImg;
+                    var parts = CollectWinOcrSpeakParts(regions);
+                    detail.AppendLine(
+                        $"watch-ocr-balloons: islands={regions.Count} parts={parts.Count} " +
+                        $"fog={fogAmt:0.###} lowConf={detection.LowConfidence}");
+                    if (parts.Count > 0)
+                        return WatchPiecesToSpeakText(parts, detail);
+                    detail.AppendLine(
+                        "watch-ocr-balloons: no island text → full-frame OCR");
+                }
+                finally
+                {
+                    try { fogOwned?.Dispose(); } catch { /* ignore */ }
+                }
+            }
+
+            var lines = await BalloonOcrDetect.ReadNonJunkLinesAsync(
+                engine, source, token).ConfigureAwait(false);
+            detail.AppendLine($"watch-ocr-lines={lines.Count}");
+            if (lines.Count == 0)
+                return "";
+            var cleaned = new List<string>(lines.Count);
+            for (int i = 0; i < lines.Count; i++)
+                cleaned.Add(SpeechCleaner.CleanForSpeech(lines[i]));
+            return WatchPiecesToSpeakText(cleaned, detail);
+        }
+
+        private static string WatchPiecesToSpeakText(
+            IEnumerable<string> rawParts, StringBuilder detail)
+        {
+            var speakPieces = SpeechCleaner.ExpandToSpeakPieces(rawParts);
+            if (speakPieces.Count >= 2)
+                speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
+            if (speakPieces.Count >= 2)
+                speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(speakPieces, detail);
+            return JoinWatchSpokenParts(speakPieces.Select(p => p.Text));
+        }
+
+        private static string JoinWatchSpokenParts(IEnumerable<string> parts)
+        {
+            var keep = new List<string>();
+            foreach (string u in parts)
+            {
+                if (u.Length == 0 || SpeechCleaner.IsUnusableOcrText(u) ||
+                    RegionWatch.IsUnreadable(u))
+                    continue;
+                keep.Add(u);
+            }
+            return keep.Count > 0
+                ? string.Join(Environment.NewLine + Environment.NewLine, keep)
+                : "";
         }
 
         /// <summary>

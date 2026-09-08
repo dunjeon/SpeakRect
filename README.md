@@ -257,19 +257,22 @@ Typical use: size the Follow box to a subtitle line → point the mouse → **Sh
 
 ### Watch (auto-read one saved region)
 
-Watch is a timer that checks **one** of your saved slots (1–8). Each tick: **Windows OCR** answers a boolean — is there text? It does not supply the spoken line. No → silent (the LLM is not called). Yes → the **local LLM** converts the **full snap** to words (Default pipeline). Watch compares and speaks **those LLM words**.
+Watch is a timer that checks **one** of your saved slots (1–8). Each tick: **OCR** answers a boolean — is there text? No → silent. Yes → **Local-LLM** (default) or **OCR** using the **pipeline** you picked. Watch compares and speaks those words. Independent of MODE. Saved with your profile.
 
 | Setting | What it does |
 |---------|----------------|
 | **Enable** | Turn the timer on or off (off by default) |
 | **Region** | Which drawn slot to watch (Follow / region 9 cannot be watched) |
+| **Pipeline** | **Raw snap** (default) — region pixels only. **Image** — Image tab cleanup, then one full-frame read (same as Default speak). **Image + Balloon** — Image tab + balloon boxes, then one read per balloon (Comic Book). |
+| **Text source** | **Local-LLM** (default) — more accurate. **OCR** — faster; skips the local model. |
 | **Interval** | Seconds between checks (0.5–60, default 2.0) |
-| **Forget last on no text** | WinOCR sees no text → clear last spoken so returning dialogue can be read again (default on) |
+| **Forget last on no text** | OCR sees no text → clear last spoken so returning dialogue can be read again (default on) |
 | **Min difference %** | Speak only if new words differ by at least this much (0–100, default 90) |
 
 - Watch runs on a **background thread**. Opening the overlay **stops the timer immediately** and cancels an in-flight check. Hide the overlay (**Escape**) to resume. It does not fire while Settings is open.
 - The first successful check after you turn Watch on (or change slot) is a **silent baseline** — it does not speak.
-- Later checks: WinOCR must see text, then the LLM reads the snap and Watch compares to the **last spoken words**.
+- Later checks: OCR must see text, then Local-LLM or OCR (your text source) runs the chosen pipeline and Watch compares to the **last spoken words**.
+- Watch does **not** follow MODE Default vs Comic Book, and it does not overwrite Analytics from a hotkey speak.
 - A region hotkey, Follow speak, or **Stop speech** cancels a Watch check in flight so your action wins.
 
 Typical use: draw a dialogue box on region 1 → **Settings → Watch** → pick region 1 → enable → hide overlay → play. New lines in that box are read when they appear.

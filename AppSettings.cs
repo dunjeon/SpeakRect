@@ -74,7 +74,7 @@ namespace SpeakRect
         /// (Default, Comic full-frame, crops, POI, recovery retries).
         /// </summary>
         public const string DefaultOcrPrompt =
-            "As an OCR, Extract all english text. " +
+            "As a text OCR, Extract all english text. Never describe the image. " +
             "Output plain text only — do not format as JSON, HTML, or markdown.";
 
         /// <summary>
@@ -665,6 +665,8 @@ namespace SpeakRect
         public const int DefaultWatchMinDifferencePercent = RegionWatch.DefaultMinDifferencePercent;
         public const int MinWatchDifferencePercent = 0;
         public const int MaxWatchDifferencePercent = 100;
+        public const WatchPipeline DefaultWatchPipeline = RegionWatch.DefaultPipeline;
+        public const WatchTextSource DefaultWatchTextSource = RegionWatch.DefaultTextSource;
 
         /// <summary>
         /// When true, a timer OCRs <see cref="WatchRegionSlot"/> and speaks only if
@@ -677,6 +679,17 @@ namespace SpeakRect
 
         /// <summary>Delay between watch checks (ms). Default 2000.</summary>
         public int WatchIntervalMs { get; set; } = DefaultWatchIntervalMs;
+
+        /// <summary>
+        /// After the WinOCR yes/no gate: raw snap, Image-tab prep, or Image + balloons.
+        /// Independent of overlay MODE. Default <see cref="WatchPipeline.RawSnap"/>.
+        /// </summary>
+        public WatchPipeline WatchPipeline { get; set; } = DefaultWatchPipeline;
+
+        /// <summary>
+        /// Spoken words come from Local-LLM (default) or OCR. Independent of MODE.
+        /// </summary>
+        public WatchTextSource WatchTextSource { get; set; } = DefaultWatchTextSource;
 
         /// <summary>
         /// When true, a no-text WinOCR gate clears last spoken words so returning
@@ -696,6 +709,8 @@ namespace SpeakRect
             WatchIntervalMs = Math.Clamp(WatchIntervalMs, MinWatchIntervalMs, MaxWatchIntervalMs);
             WatchMinDifferencePercent = Math.Clamp(
                 WatchMinDifferencePercent, MinWatchDifferencePercent, MaxWatchDifferencePercent);
+            WatchPipeline = RegionWatch.NormalizePipeline(WatchPipeline);
+            WatchTextSource = RegionWatch.NormalizeTextSource(WatchTextSource);
         }
 
         // -----------------------------------------------------------------------
@@ -1393,6 +1408,8 @@ namespace SpeakRect
             WatchEnabled = false;
             WatchRegionSlot = 0;
             WatchIntervalMs = DefaultWatchIntervalMs;
+            WatchPipeline = DefaultWatchPipeline;
+            WatchTextSource = DefaultWatchTextSource;
             WatchClearLastOnNoText = true;
             WatchMinDifferencePercent = DefaultWatchMinDifferencePercent;
             ActiveProfileName = "Default";
@@ -1569,6 +1586,12 @@ namespace SpeakRect
             if (map.TryGetValue("WatchMinDifferencePercent", out string? diffRaw) &&
                 int.TryParse(diffRaw, out int diffPct))
                 WatchMinDifferencePercent = diffPct;
+
+            if (map.TryGetValue("WatchPipeline", out string? pipeRaw))
+                WatchPipeline = RegionWatch.ParsePipeline(pipeRaw);
+
+            if (map.TryGetValue("WatchTextSource", out string? srcRaw))
+                WatchTextSource = RegionWatch.ParseTextSource(srcRaw);
 
             NormalizeWatchSettings();
         }
@@ -2694,11 +2717,15 @@ namespace SpeakRect
                 sb.AppendLine("; Auto-read one saved region (1–8) when its text changes.");
                 sb.AppendLine("; Never overlaps or stops in-progress speech. First check after enable is a silent baseline.");
                 sb.AppendLine("; Interval is milliseconds (500–60000). Follow (region 9) cannot be watched.");
-                sb.AppendLine("; ClearLastOnNoText: WinOCR sees no text → forget last spoken so returning dialogue can be read again.");
+                sb.AppendLine("; Pipeline: RawSnap (pixels only) | Image (Image tab + one LLM) | ImageBalloon (Image tab + balloons). Independent of MODE.");
+                sb.AppendLine("; TextSource: LocalLlm (default) | Ocr (faster; skips the local model).");
+                sb.AppendLine("; ClearLastOnNoText: OCR sees no text → forget last spoken so returning dialogue can be read again.");
                 sb.AppendLine("; MinDifferencePercent: 0–100. Speak only when new words differ by at least this much (Levenshtein).");
                 sb.AppendLine($"WatchEnabled={WatchEnabled.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"WatchSlot={Math.Clamp(WatchRegionSlot, 0, 7) + 1}");
                 sb.AppendLine($"WatchIntervalMs={WatchIntervalMs}");
+                sb.AppendLine($"WatchPipeline={RegionWatch.PipelineToIni(WatchPipeline)}");
+                sb.AppendLine($"WatchTextSource={RegionWatch.TextSourceToIni(WatchTextSource)}");
                 sb.AppendLine($"WatchClearLastOnNoText={WatchClearLastOnNoText.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"WatchMinDifferencePercent={WatchMinDifferencePercent}");
                 sb.AppendLine();
@@ -2767,6 +2794,12 @@ namespace SpeakRect
             "Extract all text. Include SFX (BRAP! CRASH!). Do not stop after SFX.",
             "As an OCR, Extract all english text.",
             "As an OCR, Extract all english text. Correct the spelling of common english words.",
+            // Previous built-in (JSON/HTML/markdown ban, no "never describe")
+            "As an OCR, Extract all english text. " +
+            "Output plain text only — do not format as JSON, HTML, or markdown.",
+            // Same instruction with the ungrammatical article
+            "As an text OCR, Extract all english text. Never describe the image. " +
+            "Output plain text only — do not format as JSON, HTML, or markdown.",
             // Pre-JSON wording (html/markdown only)
             "As an OCR, Extract all english text. Do not export html or markdown.",
             "OCR:",
@@ -2886,6 +2919,7 @@ namespace SpeakRect
                 or "FollowOffsetX" or "FollowOffsetY"
                 or "WatchEnabled" or "WatchSlot" or "WatchRegionSlot"
                 or "WatchIntervalMs" or "WatchIntervalSeconds"
+                or "WatchPipeline" or "WatchTextSource"
                 or "WatchClearLastOnNoText" or "WatchMinDifferencePercent"
                 // Region1..Region8 are hotkeys (short). Slot1..Slot8 are geometries (long) — excluded.
                 || (key.StartsWith("Region", StringComparison.OrdinalIgnoreCase)

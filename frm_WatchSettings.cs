@@ -13,6 +13,8 @@ namespace SpeakRect
     {
         private readonly CheckBox _chkEnabled;
         private readonly ComboBox _cmbRegion;
+        private readonly ComboBox _cmbPipeline;
+        private readonly ComboBox _cmbTextSource;
         private readonly NumericUpDown _numInterval;
         private readonly CheckBox _chkClearOnNoText;
         private readonly NumericUpDown _numMinDiff;
@@ -176,6 +178,48 @@ namespace SpeakRect
                 "Pick any slot 1–8 that you have drawn. Follow (region 9) cannot be watched — " +
                 "it tracks the mouse, not a fixed box."), 40);
 
+            AddFull(MakeSection("PIPELINE"), 28);
+            _cmbPipeline = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 520,
+                DropDownWidth = 560,
+                Font = new Font("Segoe UI", 10f),
+            };
+            UiTheme.StyleCombo(_cmbPipeline);
+            _cmbPipeline.Items.Add(new PipeItem(
+                WatchPipeline.RawSnap, "Raw snap — region pixels only (fastest)"));
+            _cmbPipeline.Items.Add(new PipeItem(
+                WatchPipeline.Image, "Image — Image tab cleanup, then one full-frame read"));
+            _cmbPipeline.Items.Add(new PipeItem(
+                WatchPipeline.ImageBalloon,
+                "Image + Balloon — Image tab + balloon boxes, then one read per balloon"));
+            _cmbPipeline.SelectedIndexChanged += (_, _) => OnFieldChanged();
+            AddFull(WrapField(_cmbPipeline), 40);
+            AddFull(MakeHint(
+                "Independent of MODE. Raw snap skips the Image tab. Image matches Default speak " +
+                "(prep, then one full-frame read). Image + Balloon matches Comic Book speak " +
+                "(prep + balloons). Every check still asks OCR yes/no first; no text → stop."), 56);
+
+            AddFull(MakeSection("TEXT SOURCE"), 28);
+            _cmbTextSource = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 520,
+                DropDownWidth = 560,
+                Font = new Font("Segoe UI", 10f),
+            };
+            UiTheme.StyleCombo(_cmbTextSource);
+            _cmbTextSource.Items.Add(new TextSourceItem(
+                WatchTextSource.LocalLlm, "Local-LLM (default) — more accurate"));
+            _cmbTextSource.Items.Add(new TextSourceItem(
+                WatchTextSource.Ocr, "OCR — faster, skips the local model"));
+            _cmbTextSource.SelectedIndexChanged += (_, _) => OnFieldChanged();
+            AddFull(WrapField(_cmbTextSource), 40);
+            AddFull(MakeHint(
+                "What Watch speaks after OCR says yes. Local-LLM is the default. OCR reads the " +
+                "same pipeline bitmap (raw snap, Image tab, or balloons) without calling the model."), 48);
+
             AddFull(MakeSection("CHECK INTERVAL"), 28);
             _numInterval = new NumericUpDown
             {
@@ -193,13 +237,15 @@ namespace SpeakRect
                 Font = new Font("Segoe UI", 10f),
             };
             AddFull(WrapField(_numInterval), 40);
-            AddFull(MakeHint("Seconds between checks (0.5–60). Default 2.0."), 28);
+            AddFull(MakeHint(
+                "Seconds between checks (0.5–60). Default 2.0. Image + Balloon can take " +
+                "longer than this — the next tick waits until the last one finishes."), 40);
             _numInterval.ValueChanged += (_, _) => OnFieldChanged();
 
             AddFull(MakeSection("WHEN TEXT DISAPPEARS"), 28);
             _chkClearOnNoText = new CheckBox
             {
-                Text = "Forget last spoken words when WinOCR sees no text",
+                Text = "Forget last spoken words when no text is found",
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.Fg,
                 BackColor = UiTheme.Bg,
@@ -236,12 +282,12 @@ namespace SpeakRect
 
             AddFull(MakeSection("HOW IT WORKS"), 28);
             AddFull(MakeHint(
-                "1. Each check: Windows OCR answers yes/no — is there text? It does not read the line. No → silent (no LLM).\n" +
-                "2. Yes → the local LLM converts the full snap to words (Default pipeline). Those LLM words are what Watch compares and speaks.\n" +
+                "1. Each check: OCR answers yes/no — is there text? It does not read the line. No → silent (no LLM).\n" +
+                "2. Yes → Local-LLM or OCR (Text source) using the pipeline you picked. Those words are what Watch compares and speaks.\n" +
                 "3. First successful read after enable/slot change is a silent baseline. After a no-text gap (if forget-last is on), returning dialogue is spoken.\n" +
                 "4. Otherwise it speaks only if the new line differs enough (see percent above) and nothing else is being read.\n" +
                 "5. Opening the overlay stops Watch immediately and cancels a check in flight.\n" +
-                "6. A region hotkey, Follow speak, or Stop speech also cancels a Watch check so your action wins."), 140);
+                "6. A region hotkey, Follow speak, or Stop speech also cancels a Watch check so your action wins."), 156);
 
             AddFull(MakeSection("LIVE"), 28);
             _lblLive = new Label
@@ -313,6 +359,8 @@ namespace SpeakRect
                 RebuildRegionCombo(s);
                 _chkEnabled.Checked = s.WatchEnabled;
                 SelectSlotInCombo(s.WatchRegionSlot);
+                SelectPipelineInCombo(s.WatchPipeline);
+                SelectTextSourceInCombo(s.WatchTextSource);
                 decimal sec = s.WatchIntervalMs / 1000m;
                 if (sec < _numInterval.Minimum) sec = _numInterval.Minimum;
                 if (sec > _numInterval.Maximum) sec = _numInterval.Maximum;
@@ -369,6 +417,50 @@ namespace SpeakRect
             return i < 0 ? 0 : Math.Clamp(i, 0, 7);
         }
 
+        private void SelectPipelineInCombo(WatchPipeline pipeline)
+        {
+            var want = RegionWatch.NormalizePipeline(pipeline);
+            for (int i = 0; i < _cmbPipeline.Items.Count; i++)
+            {
+                if (_cmbPipeline.Items[i] is PipeItem p && p.Pipeline == want)
+                {
+                    _cmbPipeline.SelectedIndex = i;
+                    return;
+                }
+            }
+            if (_cmbPipeline.Items.Count > 0)
+                _cmbPipeline.SelectedIndex = 0;
+        }
+
+        private WatchPipeline SelectedPipeline()
+        {
+            if (_cmbPipeline.SelectedItem is PipeItem item)
+                return item.Pipeline;
+            return AppSettings.DefaultWatchPipeline;
+        }
+
+        private void SelectTextSourceInCombo(WatchTextSource source)
+        {
+            var want = RegionWatch.NormalizeTextSource(source);
+            for (int i = 0; i < _cmbTextSource.Items.Count; i++)
+            {
+                if (_cmbTextSource.Items[i] is TextSourceItem t && t.Source == want)
+                {
+                    _cmbTextSource.SelectedIndex = i;
+                    return;
+                }
+            }
+            if (_cmbTextSource.Items.Count > 0)
+                _cmbTextSource.SelectedIndex = 0;
+        }
+
+        private WatchTextSource SelectedTextSource()
+        {
+            if (_cmbTextSource.SelectedItem is TextSourceItem item)
+                return item.Source;
+            return AppSettings.DefaultWatchTextSource;
+        }
+
         private void OnFieldChanged()
         {
             if (_loading) return;
@@ -383,6 +475,8 @@ namespace SpeakRect
             var s = AppSettings.Current;
             s.WatchEnabled = _chkEnabled.Checked;
             s.WatchRegionSlot = SelectedSlotIndex();
+            s.WatchPipeline = SelectedPipeline();
+            s.WatchTextSource = SelectedTextSource();
             s.WatchIntervalMs = (int)Math.Round(_numInterval.Value * 1000m);
             s.WatchClearLastOnNoText = _chkClearOnNoText.Checked;
             s.WatchMinDifferencePercent = (int)_numMinDiff.Value;
@@ -412,7 +506,12 @@ namespace SpeakRect
             if (!force && !_diskSavePending)
                 return;
             _diskSavePending = false;
-            try { AppSettings.Current.Save(); } catch { /* keep in-memory */ }
+            try
+            {
+                AppSettings.Current.Save();
+                AppSettings.Current.SyncActiveProfileFile();
+            }
+            catch { /* keep in-memory */ }
         }
 
         private void Reset_Click()
@@ -422,6 +521,8 @@ namespace SpeakRect
             {
                 _chkEnabled.Checked = false;
                 SelectSlotInCombo(0);
+                SelectPipelineInCombo(AppSettings.DefaultWatchPipeline);
+                SelectTextSourceInCombo(AppSettings.DefaultWatchTextSource);
                 _numInterval.Value = 2.0m;
                 _chkClearOnNoText.Checked = true;
                 _numMinDiff.Value = AppSettings.DefaultWatchMinDifferencePercent;
@@ -455,7 +556,7 @@ namespace SpeakRect
         {
             string on = s.WatchEnabled ? "On" : "Off";
             double sec = s.WatchIntervalMs / 1000.0;
-            return $"{on}  ·  region {s.WatchRegionSlot + 1}  ·  every {sec.ToString("0.0", CultureInfo.CurrentCulture)} s  ·  ≥{s.WatchMinDifferencePercent}% different";
+            return $"{on}  ·  region {s.WatchRegionSlot + 1}  ·  {RegionWatch.PipelineDisplayName(s.WatchPipeline)}  ·  {RegionWatch.TextSourceDisplayName(s.WatchTextSource)}  ·  every {sec.ToString("0.0", CultureInfo.CurrentCulture)} s  ·  ≥{s.WatchMinDifferencePercent}% different";
         }
 
         private void LayoutBottomButtons(Panel bottom)
@@ -538,6 +639,34 @@ namespace SpeakRect
                 Index = index;
                 Label = label;
                 IsSet = isSet;
+            }
+
+            public override string ToString() => Label;
+        }
+
+        private sealed class PipeItem
+        {
+            public WatchPipeline Pipeline { get; }
+            public string Label { get; }
+
+            public PipeItem(WatchPipeline pipeline, string label)
+            {
+                Pipeline = pipeline;
+                Label = label;
+            }
+
+            public override string ToString() => Label;
+        }
+
+        private sealed class TextSourceItem
+        {
+            public WatchTextSource Source { get; }
+            public string Label { get; }
+
+            public TextSourceItem(WatchTextSource source, string label)
+            {
+                Source = source;
+                Label = label;
             }
 
             public override string ToString() => Label;

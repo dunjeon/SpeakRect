@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using SpeakRect;
@@ -98,6 +99,172 @@ public class WatchSettingsTests
         Assert.Equal(new Rectangle(10, 20, 80, 40), bounds);
         Assert.Null(lasso);
         Assert.False(ellipse);
+    }
+
+    [Fact]
+    public void CaptureFromApp_comic_book_override_ignores_live_mode()
+    {
+        var forcedOn = SpeakRunSettings.CaptureFromApp(comicBook: true);
+        Assert.True(forcedOn.ComicBook);
+        var forcedOff = SpeakRunSettings.CaptureFromApp(comicBook: false);
+        Assert.False(forcedOff.ComicBook);
+    }
+
+    [Theory]
+    [InlineData(null, WatchPipeline.RawSnap)]
+    [InlineData("", WatchPipeline.RawSnap)]
+    [InlineData("RawSnap", WatchPipeline.RawSnap)]
+    [InlineData("raw", WatchPipeline.RawSnap)]
+    [InlineData("Image", WatchPipeline.Image)]
+    [InlineData("imageprep", WatchPipeline.Image)]
+    [InlineData("ImageBalloon", WatchPipeline.ImageBalloon)]
+    [InlineData("Image+Balloon", WatchPipeline.ImageBalloon)]
+    [InlineData("2", WatchPipeline.ImageBalloon)]
+    [InlineData("nope", WatchPipeline.RawSnap)]
+    public void Pipeline_parse(string? raw, WatchPipeline expect)
+    {
+        Assert.Equal(expect, RegionWatch.ParsePipeline(raw));
+    }
+
+    [Fact]
+    public void Pipeline_normalize_unknown_is_raw()
+    {
+        Assert.Equal(WatchPipeline.RawSnap, RegionWatch.NormalizePipeline((WatchPipeline)99));
+        Assert.Equal("RawSnap", RegionWatch.PipelineToIni(WatchPipeline.RawSnap));
+        Assert.Equal("Image", RegionWatch.PipelineToIni(WatchPipeline.Image));
+        Assert.Equal("ImageBalloon", RegionWatch.PipelineToIni(WatchPipeline.ImageBalloon));
+
+        var s = AppSettings.Current;
+        var prev = s.WatchPipeline;
+        try
+        {
+            s.WatchPipeline = (WatchPipeline)99;
+            s.NormalizeWatchSettings();
+            Assert.Equal(WatchPipeline.RawSnap, s.WatchPipeline);
+        }
+        finally
+        {
+            s.WatchPipeline = prev;
+            s.NormalizeWatchSettings();
+        }
+    }
+
+    [Fact]
+    public void CaptureForWatch_raw_disables_image_tab()
+    {
+        var snap = SpeakRunSettings.CaptureForWatch(WatchPipeline.RawSnap);
+        Assert.False(snap.ComicBook);
+        Assert.False(snap.ImagePrepEnabled);
+        Assert.False(snap.ImageLlmSendDownscale);
+    }
+
+    [Fact]
+    public void CaptureForWatch_image_is_default_mode_with_live_prep()
+    {
+        var s = AppSettings.Current;
+        bool prevPrep = s.ImagePrepEnabled;
+        bool prevDown = s.ImageLlmSendDownscale;
+        try
+        {
+            s.ImagePrepEnabled = true;
+            s.ImageLlmSendDownscale = true;
+            var snap = SpeakRunSettings.CaptureForWatch(WatchPipeline.Image);
+            Assert.False(snap.ComicBook);
+            Assert.True(snap.ImagePrepEnabled);
+            Assert.True(snap.ImageLlmSendDownscale);
+        }
+        finally
+        {
+            s.ImagePrepEnabled = prevPrep;
+            s.ImageLlmSendDownscale = prevDown;
+        }
+    }
+
+    [Fact]
+    public void CaptureForWatch_balloon_forces_comic_book()
+    {
+        var snap = SpeakRunSettings.CaptureForWatch(WatchPipeline.ImageBalloon);
+        Assert.True(snap.ComicBook);
+    }
+
+    [Theory]
+    [InlineData(null, WatchTextSource.LocalLlm)]
+    [InlineData("", WatchTextSource.LocalLlm)]
+    [InlineData("LocalLlm", WatchTextSource.LocalLlm)]
+    [InlineData("LLM", WatchTextSource.LocalLlm)]
+    [InlineData("Ocr", WatchTextSource.Ocr)]
+    [InlineData("OCR", WatchTextSource.Ocr)]
+    [InlineData("WinOCR", WatchTextSource.Ocr)]
+    [InlineData("1", WatchTextSource.Ocr)]
+    [InlineData("nope", WatchTextSource.LocalLlm)]
+    public void TextSource_parse(string? raw, WatchTextSource expect)
+    {
+        Assert.Equal(expect, RegionWatch.ParseTextSource(raw));
+    }
+
+    [Fact]
+    public void TextSource_default_is_local_llm()
+    {
+        Assert.Equal(WatchTextSource.LocalLlm, AppSettings.DefaultWatchTextSource);
+        Assert.Equal("LocalLlm", RegionWatch.TextSourceToIni(WatchTextSource.LocalLlm));
+        Assert.Equal("Ocr", RegionWatch.TextSourceToIni(WatchTextSource.Ocr));
+        Assert.Equal(WatchTextSource.LocalLlm, RegionWatch.NormalizeTextSource((WatchTextSource)99));
+    }
+
+    [Fact]
+    public void Watch_knobs_round_trip_ini_snapshot()
+    {
+        var s = AppSettings.Current;
+        bool prevOn = s.WatchEnabled;
+        int prevSlot = s.WatchRegionSlot;
+        int prevMs = s.WatchIntervalMs;
+        var prevPipe = s.WatchPipeline;
+        var prevSrc = s.WatchTextSource;
+        bool prevClear = s.WatchClearLastOnNoText;
+        int prevDiff = s.WatchMinDifferencePercent;
+        string path = Path.Combine(
+            Path.GetTempPath(), "SpeakRect-watch-rt-" + Guid.NewGuid().ToString("N") + ".ini");
+        try
+        {
+            s.WatchEnabled = true;
+            s.WatchRegionSlot = 3;
+            s.WatchIntervalMs = 3500;
+            s.WatchPipeline = WatchPipeline.ImageBalloon;
+            s.WatchTextSource = WatchTextSource.Ocr;
+            s.WatchClearLastOnNoText = false;
+            s.WatchMinDifferencePercent = 40;
+            s.NormalizeWatchSettings();
+            s.SaveTo(path);
+
+            s.WatchEnabled = false;
+            s.WatchRegionSlot = 0;
+            s.WatchIntervalMs = 2000;
+            s.WatchPipeline = WatchPipeline.RawSnap;
+            s.WatchTextSource = WatchTextSource.LocalLlm;
+            s.WatchClearLastOnNoText = true;
+            s.WatchMinDifferencePercent = 90;
+
+            s.LoadFrom(path, resetFirst: false);
+            Assert.True(s.WatchEnabled);
+            Assert.Equal(3, s.WatchRegionSlot);
+            Assert.Equal(3500, s.WatchIntervalMs);
+            Assert.Equal(WatchPipeline.ImageBalloon, s.WatchPipeline);
+            Assert.Equal(WatchTextSource.Ocr, s.WatchTextSource);
+            Assert.False(s.WatchClearLastOnNoText);
+            Assert.Equal(40, s.WatchMinDifferencePercent);
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* ignore */ }
+            s.WatchEnabled = prevOn;
+            s.WatchRegionSlot = prevSlot;
+            s.WatchIntervalMs = prevMs;
+            s.WatchPipeline = prevPipe;
+            s.WatchTextSource = prevSrc;
+            s.WatchClearLastOnNoText = prevClear;
+            s.WatchMinDifferencePercent = prevDiff;
+            s.NormalizeWatchSettings();
+        }
     }
 
     [Fact]
@@ -224,6 +391,7 @@ public class WatchSettingsTests
             Assert.False(s.WatchEnabled);
             Assert.Equal(0, s.WatchRegionSlot);
             Assert.Equal(2000, s.WatchIntervalMs);
+            Assert.Equal(WatchPipeline.RawSnap, AppSettings.DefaultWatchPipeline);
         }
         finally
         {

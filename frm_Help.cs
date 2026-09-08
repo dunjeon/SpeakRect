@@ -232,7 +232,7 @@ namespace SpeakRect
             Section(sb, "WHAT YOU CAN DO");
             Feature(sb, "8 regions", "Fixed slots (default Shift+F1\u2013F8) for dialogue, choices, menus\u2026");
             Feature(sb, "Follow", "Slot 9 \u2014 floating box at the mouse. Speak with Shift+F9.");
-            Feature(sb, "Watch", "Settings \u2192 Watch: WinOCR is yes/no (is there text?). The LLM turns the snap into the spoken words.");
+            Feature(sb, "Watch", "Settings \u2192 Watch: OCR is yes/no, then Raw snap / Image / Image + Balloon, spoken by Local-LLM (default) or OCR. Saved with your profile.");
             Feature(sb, "Shapes", "Rectangle, oval, or freehand lasso (R / O / L on the overlay).");
             Feature(sb, "Modes", "Default for games/UI \u00b7 Comic Book for panels and balloons.");
             Feature(sb, "Key Map", "Remap keyboard and gamepad; add custom actions.");
@@ -268,7 +268,7 @@ namespace SpeakRect
             Tip(sb, "Use one profile per game so regions and hotkeys stay out of the way of controls.");
             Tip(sb, "Open the Regions tab to see a map of every slot you have set.");
             Tip(sb, "Ctrl+click FOLLOW on the overlay to open Follow size and offset settings.");
-            Tip(sb, "Watch: pick one saved region, hide the overlay. WinOCR only answers whether text is present. The LLM reads the snap. Overlay open stops Watch.");
+            Tip(sb, "Watch: pick a region, pipeline, and text source (Local-LLM or OCR), hide the overlay. OCR answers whether text is present. Overlay open stops Watch.");
             Tip(sb, "Sidebar REGIONS buttons 1–8 switch slots for drawing (same as region hotkeys).");
             Tip(sb, "Leave Voice engine on Windows unless you installed a SAPI adapter; full steps are in README.md.");
             Tip(sb, "Speech \u2192 Names: e.g. X-Men \u2192 Ex-Men (any case). Click \u25b6 / Preview / Space to sample the Say as voice. Packs\u2026 lists NamePacks\\*.txt — pick one to import (rules start ON, A\u2013Z). Nothing auto-loads at startup.");

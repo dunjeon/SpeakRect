@@ -215,33 +215,50 @@ namespace SpeakRect
             => ComicBestOfFusion.IsJunkWinOcrText(text, MinWinOcrAlnumChars);
 
         /// <summary>
-        /// Watch gate: true if Windows OCR sees any non-junk line. Does not return
-        /// boxes or recognized strings — Watch still uses the LLM for spoken text.
+        /// Watch gate: true if Windows OCR sees any non-junk line.
         /// </summary>
         public static async Task<bool> SeesTextAsync(
             OcrEngine engine,
             Bitmap bitmap,
             CancellationToken token)
         {
+            var lines = await ReadNonJunkLinesAsync(engine, bitmap, token)
+                .ConfigureAwait(false);
+            return lines.Count > 0;
+        }
+
+        /// <summary>
+        /// Non-junk OCR lines in engine order. Empty list = no speakable text
+        /// (or missing engine / tiny bitmap).
+        /// </summary>
+        public static async Task<IReadOnlyList<string>> ReadNonJunkLinesAsync(
+            OcrEngine engine,
+            Bitmap bitmap,
+            CancellationToken token)
+        {
             if (engine == null || bitmap == null || bitmap.Width < 2 || bitmap.Height < 2)
-                return false;
+                return Array.Empty<string>();
 
             using var softwareBitmap = await ToSoftwareBitmapAsync(bitmap).ConfigureAwait(false);
             if (softwareBitmap == null)
-                return false;
+                return Array.Empty<string>();
 
             token.ThrowIfCancellationRequested();
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(token)
                 .ConfigureAwait(false);
             if (result?.Lines == null)
-                return false;
+                return Array.Empty<string>();
 
+            var lines = new List<string>();
             foreach (var line in result.Lines)
             {
-                if (!IsJunkWinOcrText(line.Text))
-                    return true;
+                if (IsJunkWinOcrText(line.Text))
+                    continue;
+                string t = (line.Text ?? "").Trim();
+                if (t.Length > 0)
+                    lines.Add(t);
             }
-            return false;
+            return lines;
         }
 
         /// <summary>

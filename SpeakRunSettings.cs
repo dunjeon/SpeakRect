@@ -89,7 +89,21 @@ namespace SpeakRect
         /// Snapshot live <see cref="AppSettings.Current"/> (after normalize).
         /// Call at the start of a speak path only.
         /// </summary>
-        public static SpeakRunSettings CaptureFromApp()
+        /// <param name="comicBook">
+        /// When set, freeze this MODE instead of the live flag.
+        /// </param>
+        /// <param name="imagePrepEnabled">
+        /// When set, freeze Image-tab master prep instead of the live flag.
+        /// Watch Raw snap passes <c>false</c>.
+        /// </param>
+        /// <param name="imageLlmSendDownscale">
+        /// When set, freeze Image-tab LLM send downscale. Watch Raw snap
+        /// passes <c>false</c> so Image tab does not resize the payload.
+        /// </param>
+        public static SpeakRunSettings CaptureFromApp(
+            bool? comicBook = null,
+            bool? imagePrepEnabled = null,
+            bool? imageLlmSendDownscale = null)
         {
             var s = AppSettings.Current;
             s.NormalizeComicRegionSettings();
@@ -98,7 +112,7 @@ namespace SpeakRect
 
             return new SpeakRunSettings
             {
-                ComicBook = s.ComicBook,
+                ComicBook = comicBook ?? s.ComicBook,
                 ComicPoiMarkers = s.ComicPoiMarkers,
                 ComicPoiFogOutside = s.ComicPoiFogOutside,
                 ComicPoiAutoStack = s.ComicPoiAutoStack,
@@ -116,7 +130,7 @@ namespace SpeakRect
                 ComicMergeOverlappingIslands = s.ComicMergeOverlappingIslands,
                 ComicSeparateOverlappingIslands = s.ComicSeparateOverlappingIslands,
 
-                ImagePrepEnabled = s.ImagePrepEnabled,
+                ImagePrepEnabled = imagePrepEnabled ?? s.ImagePrepEnabled,
                 ImageLetterbox = s.ImageLetterbox,
                 ImageLetterboxPad = s.ImageLetterboxPad,
                 ImageLetterboxBlack = s.ImageLetterboxBlack,
@@ -132,7 +146,7 @@ namespace SpeakRect
                 ImageDenoiseSigma = s.ImageDenoiseSigma,
                 ImageSharpenAmount = s.ImageSharpenAmount,
                 ImageSharpenPasses = s.ImageSharpenPasses,
-                ImageLlmSendDownscale = s.ImageLlmSendDownscale,
+                ImageLlmSendDownscale = imageLlmSendDownscale ?? s.ImageLlmSendDownscale,
                 ImageLlmSendMaxLongEdge = s.ImageLlmSendMaxLongEdge,
 
                 OcrPrompt = s.ResolveOcrPrompt(),
@@ -157,6 +171,25 @@ namespace SpeakRect
                 SpeechForceLowercase = s.SpeechForceLowercase,
                 SpeechRules = s.SpeechRules.ToList(),
                 SpeechTextRules = s.SpeechTextRules.ToList(),
+            };
+        }
+
+        /// <summary>
+        /// Watch run snap: independent of overlay MODE.
+        /// Raw snap turns Image tab off. Image uses live Image knobs + Default
+        /// (one full-frame). Image + Balloon uses live Image knobs + Comic Book.
+        /// </summary>
+        public static SpeakRunSettings CaptureForWatch(WatchPipeline pipeline)
+        {
+            pipeline = RegionWatch.NormalizePipeline(pipeline);
+            return pipeline switch
+            {
+                WatchPipeline.Image => CaptureFromApp(comicBook: false),
+                WatchPipeline.ImageBalloon => CaptureFromApp(comicBook: true),
+                _ => CaptureFromApp(
+                    comicBook: false,
+                    imagePrepEnabled: false,
+                    imageLlmSendDownscale: false),
             };
         }
 

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="Platform">
 
 	<PropertyGroup>
 		<!-- ====================== TARGET FRAMEWORK ====================== -->
@@ -14,6 +14,9 @@
 
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<Platforms>x64;arm64</Platforms>
+		<!-- `dotnet build` / `dotnet test` default to AnyCPU → bin\Debug.
+		     Local output is bin\x64\… (same as VS Debug|x64). arm64 stays arm64. -->
+		<Platform Condition="'$(Platform)' == '' OR '$(Platform)' == 'AnyCPU'">x64</Platform>
 
 		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
 		<EnableWindowsFormsHighDpiAutoResizing>true</EnableWindowsFormsHighDpiAutoResizing>
@@ -21,11 +24,11 @@
 		<StartupObject>SpeakRect.Program</StartupObject>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-		<Version>1.5.8</Version>
-		<AssemblyVersion>1.5.8.0</AssemblyVersion>
-		<FileVersion>1.5.8.0</FileVersion>
-		<InformationalVersion>1.5.8</InformationalVersion>
-		<!-- Keep overlay / file properties on 1.5.8, not 1.5.8+gitsha. -->
+		<Version>1.5.9</Version>
+		<AssemblyVersion>1.5.9.0</AssemblyVersion>
+		<FileVersion>1.5.9.0</FileVersion>
+		<InformationalVersion>1.5.9</InformationalVersion>
+		<!-- Keep overlay / file properties on 1.5.9, not 1.5.9+gitsha. -->
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
 

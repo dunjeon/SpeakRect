@@ -291,11 +291,22 @@ var thread = new Thread(() =>
                 .OfType<NumericUpDown>().FirstOrDefault();
             Check("Watch interval spin present", interval != null,
                 interval == null ? "missing" : $"min={interval.Minimum} max={interval.Maximum}");
-            var combo = FindControls(watch, c => c is ComboBox)
-                .OfType<ComboBox>().FirstOrDefault();
+            var combos = FindControls(watch, c => c is ComboBox)
+                .OfType<ComboBox>().ToList();
+            var regionCombo = combos.FirstOrDefault(c => c.Items.Count == 8);
             Check("Watch region combo has 8 slots",
-                combo != null && combo.Items.Count == 8,
-                combo == null ? "missing" : $"count={combo.Items.Count}");
+                regionCombo != null,
+                regionCombo == null
+                    ? $"combos={combos.Count} counts={string.Join(",", combos.Select(c => c.Items.Count))}"
+                    : $"count={regionCombo.Items.Count}");
+            var pipeCombo = combos.FirstOrDefault(c => c.Items.Count == 3);
+            Check("Watch pipeline combo has 3 pipes",
+                pipeCombo != null,
+                pipeCombo == null ? "missing" : $"count={pipeCombo.Items.Count}");
+            var sourceCombo = combos.FirstOrDefault(c => c.Items.Count == 2);
+            Check("Watch text-source combo has 2 items",
+                sourceCombo != null,
+                sourceCombo == null ? "missing" : $"count={sourceCombo.Items.Count}");
 
             bool prevOn = AppSettings.Current.WatchEnabled;
             int prevSlot = AppSettings.Current.WatchRegionSlot;

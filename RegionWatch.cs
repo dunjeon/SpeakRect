@@ -17,9 +17,34 @@ namespace SpeakRect
     }
 
     /// <summary>
-    /// Watch-region helpers: spoken-word compare and slot geometry.
-    /// The overlay timer OCRs on each idle tick and speaks only when the
-    /// recognized words differ from the last spoken (or baseline) text.
+    /// Watch Local-LLM path after the WinOCR yes/no gate.
+    /// Independent of overlay MODE.
+    /// </summary>
+    public enum WatchPipeline
+    {
+        /// <summary>Raw region pixels. No Image tab. One full-frame LLM.</summary>
+        RawSnap = 0,
+        /// <summary>Image tab prep, then one full-frame LLM (Default speak path).</summary>
+        Image = 1,
+        /// <summary>Image tab prep + balloon detect, then per-island LLM (Comic Book).</summary>
+        ImageBalloon = 2,
+    }
+
+    /// <summary>
+    /// Where Watch gets the spoken line after the yes/no gate.
+    /// </summary>
+    public enum WatchTextSource
+    {
+        /// <summary>Local-LLM converts the snap / balloons to words. Default.</summary>
+        LocalLlm = 0,
+        /// <summary>OCR line text (faster; skips the local model).</summary>
+        Ocr = 1,
+    }
+
+    /// <summary>
+    /// Watch-region helpers: spoken-word compare, pipeline pick, and slot geometry.
+    /// Each idle tick: OCR boolean (is there text?) then the chosen pipeline
+    /// only if yes. Speaks when the recognized words differ from last spoken.
     /// </summary>
     public static class RegionWatch
     {
@@ -27,6 +52,8 @@ namespace SpeakRect
         public const int MinIntervalMs = 500;
         public const int MaxIntervalMs = 60_000;
         public const int DefaultMinDifferencePercent = 90;
+        public const WatchPipeline DefaultPipeline = WatchPipeline.RawSnap;
+        public const WatchTextSource DefaultTextSource = WatchTextSource.LocalLlm;
 
         private static readonly object StatusLock = new();
         private static string _lastStatus = "Off.";
@@ -43,6 +70,78 @@ namespace SpeakRect
             lock (StatusLock)
                 _lastStatus = line;
         }
+
+        public static WatchPipeline NormalizePipeline(WatchPipeline pipeline) =>
+            pipeline is WatchPipeline.RawSnap or WatchPipeline.Image or WatchPipeline.ImageBalloon
+                ? pipeline
+                : DefaultPipeline;
+
+        public static WatchPipeline ParsePipeline(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return DefaultPipeline;
+            string t = raw.Trim();
+            if (t.Equals("ImageBalloon", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("Image+Balloon", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("Balloon", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("2", StringComparison.Ordinal))
+                return WatchPipeline.ImageBalloon;
+            if (t.Equals("Image", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("ImagePrep", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("1", StringComparison.Ordinal))
+                return WatchPipeline.Image;
+            if (t.Equals("RawSnap", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("Raw", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("0", StringComparison.Ordinal))
+                return WatchPipeline.RawSnap;
+            return DefaultPipeline;
+        }
+
+        public static string PipelineToIni(WatchPipeline pipeline) =>
+            NormalizePipeline(pipeline) switch
+            {
+                WatchPipeline.Image => "Image",
+                WatchPipeline.ImageBalloon => "ImageBalloon",
+                _ => "RawSnap",
+            };
+
+        public static string PipelineDisplayName(WatchPipeline pipeline) =>
+            NormalizePipeline(pipeline) switch
+            {
+                WatchPipeline.Image => "Image",
+                WatchPipeline.ImageBalloon => "Image + Balloon",
+                _ => "Raw snap",
+            };
+
+        public static WatchTextSource NormalizeTextSource(WatchTextSource source) =>
+            source is WatchTextSource.LocalLlm or WatchTextSource.Ocr
+                ? source
+                : DefaultTextSource;
+
+        public static WatchTextSource ParseTextSource(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return DefaultTextSource;
+            string t = raw.Trim();
+            if (t.Equals("Ocr", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("OCR", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("WinOcr", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("WinOCR", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("1", StringComparison.Ordinal))
+                return WatchTextSource.Ocr;
+            if (t.Equals("LocalLlm", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("Local-LLM", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("LLM", StringComparison.OrdinalIgnoreCase) ||
+                t.Equals("0", StringComparison.Ordinal))
+                return WatchTextSource.LocalLlm;
+            return DefaultTextSource;
+        }
+
+        public static string TextSourceToIni(WatchTextSource source) =>
+            NormalizeTextSource(source) == WatchTextSource.Ocr ? "Ocr" : "LocalLlm";
+
+        public static string TextSourceDisplayName(WatchTextSource source) =>
+            NormalizeTextSource(source) == WatchTextSource.Ocr ? "OCR" : "Local-LLM";
 
         public static string NormalizeText(string? raw)
         {
@@ -73,8 +172,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Watch gate: WinOCR reported at least one box that contains real words.
-        /// Geometry is ignored — Watch still sends the full snap to the LLM.
+        /// True when balloon detect reported at least one box that contains
+        /// real words. Watch's cheap gate is <see cref="BalloonOcrDetect.SeesTextAsync"/>;
+        /// this helper is for island lists after detect.
         /// </summary>
         public static bool WinOcrFoundSpeakableText(IReadOnlyList<DetectedTextRegion>? regions)
         {

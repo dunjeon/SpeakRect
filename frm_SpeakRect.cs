@@ -1158,7 +1158,9 @@ namespace SpeakRect
 
                 RegionWatch.SetStatus(
                     $"Watch R{slot + 1}: reading change ({diffPct:0.#}% different)");
-                bool spoke = await host.SpeakExistingTextAsync(normalized, cts.Token)
+                // Speak balloon-joined text (blank lines keep unit pauses). Compare
+                // used the whitespace-collapsed form stored in _watchLastText.
+                bool spoke = await host.SpeakExistingTextAsync(text, cts.Token)
                     .ConfigureAwait(false);
                 if (spoke)
                 {
