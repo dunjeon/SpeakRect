@@ -39,6 +39,9 @@ namespace SpeakRect
         private readonly Button _btnTextResetAll;
         private readonly ComboBox _cmbTextStageFilter;
 
+        // ---- Global recognize engine (live / Follow / Balloons; Watch overrides) ----
+        private readonly ComboBox _cmbTextSource;
+
         // ---- Prompt (single OCR instruction for all VL paths) ----
         private readonly TextBox _txtPrompt;
         private readonly Label _lblPromptDefault;
@@ -100,10 +103,11 @@ namespace SpeakRect
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(10, 8, 10, 8),
                 BackColor = UiTheme.Bg,
             };
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f)); // text source
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 62f)); // inner tabs
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 38f)); // test
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // status bar
@@ -135,11 +139,12 @@ namespace SpeakRect
             _innerTabs.TabPages.Add(tabNames);
             _innerTabs.TabPages.Add(tabText);
             _innerTabs.TabPages.Add(tabPrompts);
-            root.Controls.Add(_innerTabs, 0, 0);
+            root.Controls.Add(BuildTextSourceBar(out _cmbTextSource), 0, 0);
+            root.Controls.Add(_innerTabs, 0, 1);
 
             // ---- Test panel (shared) ----
             root.Controls.Add(BuildTestPanel(
-                out _txtTestIn, out _txtTestOut, out _btnTest, out _btnSpeak), 0, 1);
+                out _txtTestIn, out _txtTestOut, out _btnTest, out _btnSpeak), 0, 2);
 
             // ---- Status + close ----
             var bottom = new TableLayoutPanel
@@ -176,7 +181,7 @@ namespace SpeakRect
                 };
                 bottom.Controls.Add(_btnClose, 1, 0);
             }
-            root.Controls.Add(bottom, 0, 2);
+            root.Controls.Add(bottom, 0, 3);
             Controls.Add(root);
 
             WireEvents();
@@ -227,6 +232,76 @@ namespace SpeakRect
             UseVisualStyleBackColor = false,
             ForeColor = UiTheme.Fg,
         };
+
+        private Control BuildTextSourceBar(out ComboBox combo)
+        {
+            var wrap = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 2,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(0, 0, 0, 4),
+            };
+            wrap.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100f));
+            wrap.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            wrap.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
+            wrap.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            var lbl = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "TEXT SOURCE",
+                ForeColor = UiTheme.FgHeader,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            wrap.Controls.Add(lbl, 0, 0);
+
+            combo = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 10f),
+            };
+            UiTheme.StyleCombo(combo);
+            combo.Items.Add(new TextSourceItem(
+                WatchTextSource.LocalLlm, "Local-LLM (default) — more accurate"));
+            combo.Items.Add(new TextSourceItem(
+                WatchTextSource.Ocr, "OCR — faster, skips the local model"));
+            combo.SelectedIndexChanged += (_, _) =>
+            {
+                if (_loading) return;
+                PersistAll(saveDisk: true);
+                SetStatus("Saved text source · speech rules still apply.");
+            };
+            wrap.Controls.Add(combo, 1, 0);
+
+            var hint = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Live speak, Follow, and Balloons. Image prep, balloon boxes, names, " +
+                       "text rules, pauses, and voice still apply. Watch has its own text source.",
+                ForeColor = UiTheme.FgMuted,
+                Font = new Font("Segoe UI", 8.5f),
+                TextAlign = ContentAlignment.TopLeft,
+            };
+            wrap.Controls.Add(hint, 0, 1);
+            wrap.SetColumnSpan(hint, 2);
+            return wrap;
+        }
+
+        private sealed class TextSourceItem
+        {
+            public WatchTextSource Source { get; }
+            public string Label { get; }
+            public TextSourceItem(WatchTextSource source, string label)
+            {
+                Source = source;
+                Label = label;
+            }
+            public override string ToString() => Label;
+        }
 
         private void BuildNamesTab(
             TabPage tab,
@@ -649,6 +724,7 @@ namespace SpeakRect
             {
                 _chkTitleCaseAllCaps.Checked = AppSettings.Current.SpeechTitleCaseAllCaps;
                 _chkForceLowercase.Checked = AppSettings.Current.SpeechForceLowercase;
+                SelectTextSourceInCombo(AppSettings.Current.TextSource);
 
                 // Names
                 _listNames.BeginUpdate();
@@ -742,6 +818,7 @@ namespace SpeakRect
 
             AppSettings.Current.SpeechTitleCaseAllCaps = _chkTitleCaseAllCaps.Checked;
             AppSettings.Current.SpeechForceLowercase = _chkForceLowercase.Checked;
+            AppSettings.Current.TextSource = SelectedTextSource();
             AppSettings.Current.SetSpeechRules(CollectNameRules());
             SyncTextRulesFromListViewTags();
             AppSettings.Current.SetSpeechTextRules(_textRules);
@@ -764,6 +841,28 @@ namespace SpeakRect
             {
                 _dirty = true;
             }
+        }
+
+        private void SelectTextSourceInCombo(WatchTextSource source)
+        {
+            var want = RegionWatch.NormalizeTextSource(source);
+            for (int i = 0; i < _cmbTextSource.Items.Count; i++)
+            {
+                if (_cmbTextSource.Items[i] is TextSourceItem t && t.Source == want)
+                {
+                    _cmbTextSource.SelectedIndex = i;
+                    return;
+                }
+            }
+            if (_cmbTextSource.Items.Count > 0)
+                _cmbTextSource.SelectedIndex = 0;
+        }
+
+        private WatchTextSource SelectedTextSource()
+        {
+            if (_cmbTextSource.SelectedItem is TextSourceItem item)
+                return item.Source;
+            return RegionWatch.DefaultTextSource;
         }
 
         private void MarkChanged(string? status = null)

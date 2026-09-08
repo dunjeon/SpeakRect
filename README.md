@@ -290,6 +290,7 @@ Mode toggles use **Ctrl+letter**, not Shift+letter: a global **Shift+D** (etc.) 
 
 - **Default** and **Comic Book** are opposites — only one primary style at a time.
 - When the overlay is hidden, mode hotkeys are announced with a short TTS phrase.
+- **Text source** (Settings → Speech): **Local-LLM** (default) or **OCR**. Image prep, balloons, speech rules, pauses, and voice still apply. Watch has its own text source that overrides this.
 
 ### Settings
 
@@ -301,7 +302,8 @@ Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile *
 | **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
 | **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
 | **Follow** | Size, shape, and offset for the mouse-follow reader |
-| **Watch** | Timer-read one saved region (1–8) when its text changes |
+| **Watch** | Timer-read one saved region (1–8) when its text changes (pipeline + text source override) |
+| **Speech** | Live text source (Local-LLM or OCR), name rules, cleanup, reading prompt |
 | **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
 | **Help** | Getting started, features, default hotkeys, open README |
 

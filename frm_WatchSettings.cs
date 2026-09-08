@@ -217,8 +217,9 @@ namespace SpeakRect
             _cmbTextSource.SelectedIndexChanged += (_, _) => OnFieldChanged();
             AddFull(WrapField(_cmbTextSource), 40);
             AddFull(MakeHint(
-                "What Watch speaks after OCR says yes. Local-LLM is the default. OCR reads the " +
-                "same pipeline bitmap (raw snap, Image tab, or balloons) without calling the model."), 48);
+                "Watch override of Settings → Speech text source. Local-LLM is the Watch default. " +
+                "OCR reads the same pipeline bitmap without calling the model. Image prep, balloons, " +
+                "speech rules, pauses, and voice still apply either way."), 48);
 
             AddFull(MakeSection("CHECK INTERVAL"), 28);
             _numInterval = new NumericUpDown

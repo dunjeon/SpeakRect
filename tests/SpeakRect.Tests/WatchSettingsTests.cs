@@ -212,6 +212,53 @@ public class WatchSettingsTests
     }
 
     [Fact]
+    public void Global_text_source_defaults_to_llm_and_round_trips()
+    {
+        var s = AppSettings.Current;
+        var prev = s.TextSource;
+        string path = Path.Combine(
+            Path.GetTempPath(), "SpeakRect-textsrc-" + Guid.NewGuid().ToString("N") + ".ini");
+        try
+        {
+            Assert.Equal(WatchTextSource.LocalLlm, RegionWatch.DefaultTextSource);
+            s.TextSource = WatchTextSource.Ocr;
+            s.SaveTo(path);
+            s.TextSource = WatchTextSource.LocalLlm;
+            s.LoadFrom(path, resetFirst: false);
+            Assert.Equal(WatchTextSource.Ocr, s.TextSource);
+
+            var snap = SpeakRunSettings.CaptureFromApp();
+            Assert.Equal(WatchTextSource.Ocr, snap.TextSource);
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* ignore */ }
+            s.TextSource = prev;
+        }
+    }
+
+    [Fact]
+    public void CaptureForWatch_does_not_use_global_text_source()
+    {
+        var s = AppSettings.Current;
+        var prevG = s.TextSource;
+        var prevW = s.WatchTextSource;
+        try
+        {
+            s.TextSource = WatchTextSource.Ocr;
+            s.WatchTextSource = WatchTextSource.LocalLlm;
+            var snap = SpeakRunSettings.CaptureFromApp();
+            Assert.Equal(WatchTextSource.Ocr, snap.TextSource);
+            Assert.Equal(WatchTextSource.LocalLlm, s.WatchTextSource);
+        }
+        finally
+        {
+            s.TextSource = prevG;
+            s.WatchTextSource = prevW;
+        }
+    }
+
+    [Fact]
     public void Watch_knobs_round_trip_ini_snapshot()
     {
         var s = AppSettings.Current;

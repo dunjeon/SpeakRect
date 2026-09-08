@@ -1614,6 +1614,116 @@ namespace SpeakRect
                 : "";
         }
 
+        private static bool UseOcrTextSource =>
+            SpeakRunSettings.GetTextSource() == WatchTextSource.Ocr;
+
+        /// <summary>
+        /// OCR word-engine: island WinOCR text when boxes exist, else full-frame
+        /// OCR lines. Speech-cleaned. Does not call Local-LLM.
+        /// </summary>
+        private async Task<List<string>> CollectOcrSpeakPartsAsync(
+            Bitmap pipelineImage,
+            List<DetectedTextRegion>? regions,
+            StringBuilder detail,
+            CancellationToken token)
+        {
+            var parts = CollectWinOcrSpeakParts(regions);
+            if (parts.Count > 0)
+            {
+                detail.AppendLine(
+                    $"ocr-text-source: island parts={parts.Count} " +
+                    $"words={parts.Sum(ComicRegionGeometry.CountWords)}");
+                return parts;
+            }
+
+            var engine = GetWinOcrEngine();
+            if (engine == null)
+            {
+                detail.AppendLine("ocr-text-source: no OCR engine");
+                return parts;
+            }
+
+            var lines = await BalloonOcrDetect.ReadNonJunkLinesAsync(
+                engine, pipelineImage, token).ConfigureAwait(false);
+            detail.AppendLine($"ocr-text-source: full-frame lines={lines.Count}");
+            foreach (string line in lines)
+            {
+                string c = SpeechCleaner.CleanForSpeech(line);
+                if (c.Length == 0 || SpeechCleaner.IsUnusableOcrText(c) ||
+                    RegionWatch.IsUnreadable(c))
+                    continue;
+                parts.Add(c);
+            }
+            return parts;
+        }
+
+        /// <summary>
+        /// Live / Balloons: speak OCR words with the same expand / pause / TTS
+        /// path as Local-LLM. Image prep and balloon boxes already applied.
+        /// </summary>
+        private async Task<(List<string> Spoken, bool DuckUsed)> SpeakOcrSourcePlanAsync(
+            Bitmap pipelineImage,
+            List<DetectedTextRegion>? regions,
+            StringBuilder detail,
+            PipelineTimer pipeTimer,
+            CancellationToken token,
+            bool speakNow,
+            bool alreadyDucked)
+        {
+            var sw = Stopwatch.StartNew();
+            var rawParts = await CollectOcrSpeakPartsAsync(
+                pipelineImage, regions, detail, token).ConfigureAwait(false);
+            pipeTimer.Mark("ocr-text-source collect", sw);
+
+            var speakPieces = SpeechCleaner.ExpandToSpeakPieces(rawParts);
+            if (speakPieces.Count >= 2)
+                speakPieces = SpeechCleaner.DedupeSpeakPiecesForTts(speakPieces, detail);
+            if (speakPieces.Count >= 2)
+                speakPieces = SpeechCleaner.CoalesceFragmentSpeakPieces(speakPieces, detail);
+
+            detail.AppendLine(
+                $"strategy=ocr-text-source units={speakPieces.Count} " +
+                "(skip Local-LLM; speech rules / pauses apply)");
+
+            var spoken = new List<string>();
+            bool ducked = alreadyDucked;
+            if (speakPieces.Count == 0)
+                return (spoken, ducked);
+
+            if (speakNow)
+            {
+                if (!ducked)
+                {
+                    DuckOtherAudio();
+                    ducked = true;
+                }
+                for (int pi = 0; pi < speakPieces.Count; pi++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    string unit = speakPieces[pi].Text;
+                    spoken.Add(unit);
+                    detail.AppendLine(
+                        $"speak[ocr-text-source {pi + 1}/{speakPieces.Count}]: {unit}");
+                    sw.Restart();
+                    await SpeakWithSystemAsync(unit, token).ConfigureAwait(false);
+                    pipeTimer.Mark($"tts ocr-text-source[{pi + 1}]", sw);
+                    int pauseMs = speakPieces[pi].PauseAfterMs;
+                    if (pauseMs > 0)
+                    {
+                        detail.AppendLine($"unit-pause {pauseMs} ms");
+                        await Task.Delay(pauseMs, token).ConfigureAwait(false);
+                    }
+                }
+            }
+            else
+            {
+                foreach (var p in speakPieces)
+                    spoken.Add(p.Text);
+            }
+
+            return (spoken, ducked);
+        }
+
         /// <summary>
         /// Build the Balloons detect-view bitmap (prep + optional gray fog) without
         /// running WinOCR. Same pixels WinOCR would see. Caller owns the return.
@@ -1898,30 +2008,32 @@ namespace SpeakRect
 
             try
             {
-                // Ensure Local-LLM host is up for recognition
-                try
+                if (!UseOcrTextSource)
                 {
-                    LocalLlmHost.Start();
-                    if (!LocalLlmHost.IsApiReady())
+                    try
                     {
-                        detail.AppendLine("waiting for Local-LLM host…");
-                        bool ready = await LocalLlmHost.WaitUntilReadyAsync(
-                            TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
-                        if (!ready)
+                        LocalLlmHost.Start();
+                        if (!LocalLlmHost.IsApiReady())
                         {
-                            detail.AppendLine("Local-LLM host not ready — recognition will likely fail");
-                            if (!_suppressTts)
+                            detail.AppendLine("waiting for Local-LLM host…");
+                            bool ready = await LocalLlmHost.WaitUntilReadyAsync(
+                                TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
+                            if (!ready)
                             {
-                                SpeakAnnouncement(
-                                    "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                                detail.AppendLine("Local-LLM host not ready — recognition will likely fail");
+                                if (!_suppressTts)
+                                {
+                                    SpeakAnnouncement(
+                                        "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                                }
                             }
                         }
                     }
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    detail.AppendLine($"OCR ready wait: {ex.Message}");
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        detail.AppendLine($"OCR ready wait: {ex.Message}");
+                    }
                 }
 
                 var sw = Stopwatch.StartNew();
@@ -2044,7 +2156,19 @@ namespace SpeakRect
                 // Non-POI multi: per-island VL+TTS (no §9 toggle / crop-stack mode).
                 bool usePerIsland = !usePoi && regions.Count > 0;
 
-                if (usePoi)
+                if (UseOcrTextSource)
+                {
+                    var (ocrParts, ocrDucked) = await SpeakOcrSourcePlanAsync(
+                        toneOwned, regions, detail, pipeTimer, token,
+                        speakNow: !_suppressTts, alreadyDucked: ducked)
+                        .ConfigureAwait(false);
+                    spokenParts = ocrParts;
+                    chosenTag = "ocr-text-source";
+                    ducked = ocrDucked;
+                    detail.AppendLine(
+                        $"speak-plan units={spokenParts.Count} tag={chosenTag}");
+                }
+                else if (usePoi)
                 {
                     var (poiParts, poiTag, poiDucked) =
                         await RunComicPoiGuideAsync(
@@ -2597,33 +2721,35 @@ namespace SpeakRect
                 var totalSw = Stopwatch.StartNew();
 
                 var sw = Stopwatch.StartNew();
-                // Ensure Local-LLM host is up (auto-start can still be loading the GGUF).
-                // Without this, ComicBook/Default both fail silently while the model warms.
-                try
+                // Ensure Local-LLM host is up unless this run is OCR-only.
+                if (!UseOcrTextSource)
                 {
-                    LocalLlmHost.Start();
-                    if (!LocalLlmHost.IsApiReady())
+                    try
                     {
-                        Debug.WriteLine("[OCR] Waiting for Local-LLM API (model load)…");
-                        bool ready = await LocalLlmHost.WaitUntilReadyAsync(
-                            TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
-                        if (!ready)
+                        LocalLlmHost.Start();
+                        if (!LocalLlmHost.IsApiReady())
                         {
-                            Debug.WriteLine("[OCR] Local-LLM API not ready — recognition will likely fail.");
-                            if (!_suppressTts)
+                            Debug.WriteLine("[OCR] Waiting for Local-LLM API (model load)…");
+                            bool ready = await LocalLlmHost.WaitUntilReadyAsync(
+                                TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
+                            if (!ready)
                             {
-                                SpeakAnnouncement(
-                                    "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                                Debug.WriteLine("[OCR] Local-LLM API not ready — recognition will likely fail.");
+                                if (!_suppressTts)
+                                {
+                                    SpeakAnnouncement(
+                                        "Local-LLM is not ready yet. Wait for the local model to finish loading.");
+                                }
                             }
+                            else
+                                Debug.WriteLine("[OCR] Local-LLM API ready.");
                         }
-                        else
-                            Debug.WriteLine("[OCR] Local-LLM API ready.");
                     }
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[OCR] Local-LLM ready wait: {ex.Message}");
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[OCR] Local-LLM ready wait: {ex.Message}");
+                    }
                 }
                 pipeTimer.Mark("ocr-engine-ready", sw);
 
@@ -2935,7 +3061,21 @@ namespace SpeakRect
                                 $"scrap={scrapDetect} solid={solidIslands} regions={regions.Count}" +
                                 (usedRegionOverride ? " override=1" : "") + ")");
 
-                            if (usePoi)
+                            if (UseOcrTextSource)
+                            {
+                                detail.AppendLine(
+                                    "strategy=ocr-text-source " +
+                                    $"(ComicBook detect boxes={regions.Count}; skip Local-LLM)");
+                                var (ocrParts, ocrDucked) = await SpeakOcrSourcePlanAsync(
+                                    ocrImage, regions, detail, pipeTimer, token,
+                                    speakNow: !_suppressTts, alreadyDucked: ducked)
+                                    .ConfigureAwait(false);
+                                spokenParts = ocrParts;
+                                chosen = ocrParts;
+                                chosenTag = "ocr-text-source";
+                                ducked = ocrDucked;
+                            }
+                            else if (usePoi)
                             {
                                 var (poiParts, poiTag, poiDucked) =
                                     await RunComicPoiGuideAsync(
@@ -3008,10 +3148,12 @@ namespace SpeakRect
                     // speakNow was true — do not speak again (was double-reading
                     // 1-island POI: tag "comic-poi" missed the old check).
                     bool alreadySpoke =
-                        spokenParts.Count > 0 &&
+                        UseOcrTextSource ||
+                        (spokenParts.Count > 0 &&
                         (chosenTag.StartsWith("per-island", StringComparison.Ordinal) ||
                          chosenTag.StartsWith("sequential-regions", StringComparison.Ordinal) ||
-                         chosenTag.StartsWith("comic-poi", StringComparison.Ordinal));
+                         chosenTag.StartsWith("comic-poi", StringComparison.Ordinal) ||
+                         chosenTag.StartsWith("ocr-text-source", StringComparison.Ordinal)));
 
                     if (!alreadySpoke)
                     {
@@ -4700,6 +4842,50 @@ namespace SpeakRect
                     }
                 }
                 pipeTimer.Mark("debug-image-save", sw);
+
+                if (UseOcrTextSource)
+                {
+                    var (ocrParts, ocrDucked) = await SpeakOcrSourcePlanAsync(
+                        koboldSource, regions: null, detail, pipeTimer, token,
+                        speakNow: !_suppressTts, alreadyDucked: false)
+                        .ConfigureAwait(false);
+                    totalSw.Stop();
+                    pipeTimer.Mark("TOTAL wall-clock", totalSw);
+                    detail.AppendLine();
+                    detail.AppendLine("--- timings (ms) ---");
+                    detail.Append(pipeTimer.FormatReport());
+                    string ocrJoined = ocrParts.Count > 0
+                        ? string.Join(Environment.NewLine + Environment.NewLine, ocrParts)
+                        : "";
+                    WriteLastOcrDebug(
+                        string.IsNullOrWhiteSpace(ocrJoined) ? "(unreadable)" : ocrJoined,
+                        detail);
+                    bool duckedOcr = ocrDucked;
+                    try
+                    {
+                        if (ocrParts.Count == 0 && !_suppressTts)
+                        {
+                            if (!duckedOcr)
+                            {
+                                DuckOtherAudio();
+                                duckedOcr = true;
+                            }
+                            if (_lastText != "unreadable")
+                            {
+                                _lastText = "unreadable";
+                                await SpeakWithSystemAsync("unreadable", token);
+                            }
+                        }
+                        else
+                            _lastText = ocrJoined;
+                    }
+                    finally
+                    {
+                        if (duckedOcr)
+                            RestoreAudio();
+                    }
+                    return;
+                }
 
                 sw.Restart();
                 // savePrep:false — gray already captured above; avoid duplicate "Full-frame prep".

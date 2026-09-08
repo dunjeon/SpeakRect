@@ -238,7 +238,7 @@ namespace SpeakRect
             Feature(sb, "Key Map", "Remap keyboard and gamepad; add custom actions.");
             Feature(sb, "Profiles", "Save regions, hotkeys, modes, voice, speech rules, and Follow per game.");
             Feature(sb, "Voice", "Windows TTS by default. Optional SAPI 5 for adapters (see README).");
-            Feature(sb, "Speech", "Settings \u2192 Speech: name rules, text cleanup, and the reading prompt. Saved with your profile.");
+            Feature(sb, "Speech", "Settings \u2192 Speech: Local-LLM or OCR for live speak, name rules, text cleanup, and the reading prompt. Saved with your profile.");
             Feature(sb, "Balloons", "Settings \u2192 Balloons: find and edit speech-balloon boxes for Comic Book. Saved with your profile.");
             Feature(sb, "Image", "Settings \u2192 Image: clean up the capture before reading, with live preview. Saved with your profile.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");

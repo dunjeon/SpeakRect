@@ -85,6 +85,9 @@ namespace SpeakRect
         public IReadOnlyList<SpeechTextRule> SpeechTextRules { get; init; } =
             Array.Empty<SpeechTextRule>();
 
+        /// <summary>Live recognize engine. Watch ignores this (uses WatchTextSource).</summary>
+        public WatchTextSource TextSource { get; init; }
+
         /// <summary>
         /// Snapshot live <see cref="AppSettings.Current"/> (after normalize).
         /// Call at the start of a speak path only.
@@ -171,6 +174,7 @@ namespace SpeakRect
                 SpeechForceLowercase = s.SpeechForceLowercase,
                 SpeechRules = s.SpeechRules.ToList(),
                 SpeechTextRules = s.SpeechTextRules.ToList(),
+                TextSource = RegionWatch.NormalizeTextSource(s.TextSource),
             };
         }
 
@@ -225,6 +229,10 @@ namespace SpeakRect
 
         public static bool GetComicBook() =>
             Active?.ComicBook ?? AppSettings.Current.ComicBook;
+
+        public static WatchTextSource GetTextSource() =>
+            RegionWatch.NormalizeTextSource(
+                Active?.TextSource ?? AppSettings.Current.TextSource);
 
         public static bool GetComicPoiMarkers() =>
             Active?.ComicPoiMarkers ?? AppSettings.Current.ComicPoiMarkers;

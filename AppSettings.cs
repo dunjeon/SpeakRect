@@ -89,6 +89,13 @@ namespace SpeakRect
         /// </summary>
         public string OcrPrompt { get; set; } = "";
 
+        /// <summary>
+        /// Live speak / Follow / Balloons: Local-LLM (default) or OCR.
+        /// Watch has its own <see cref="WatchTextSource"/> override.
+        /// Image prep, balloon detect, speech rules, and TTS still apply either way.
+        /// </summary>
+        public WatchTextSource TextSource { get; set; } = RegionWatch.DefaultTextSource;
+
         // -----------------------------------------------------------------------
         // TTS voice — [VOICE] section
         // Windows = Windows.Media.SpeechSynthesis (UWP/OneCore)
@@ -1384,6 +1391,7 @@ namespace SpeakRect
         private void ResetToBuiltInDefaults()
         {
             OcrPrompt = "";
+            TextSource = RegionWatch.DefaultTextSource;
             TtsEngine = "Windows";
             VoiceId = "";
             SapiVoiceName = "";
@@ -1495,6 +1503,10 @@ namespace SpeakRect
             {
                 ComicBook = !skip;
             }
+
+            if (map.TryGetValue("TextSource", out string? srcRaw))
+                TextSource = RegionWatch.ParseTextSource(srcRaw);
+            TextSource = RegionWatch.NormalizeTextSource(TextSource);
             // Legacy FastComic / FasterComic keys are ignored (speed pipes removed).
             //
             // Do NOT NormalizeModeFlags here — POI keys load later in
@@ -2478,6 +2490,9 @@ namespace SpeakRect
                 sb.AppendLine();
                 sb.AppendLine("[MODE]");
                 sb.AppendLine($"ComicBook={ComicBook.ToString().ToLowerInvariant()}");
+                sb.AppendLine("; TextSource: LocalLlm (default) | Ocr. Live / Follow / Balloons.");
+                sb.AppendLine("; Image prep, balloons, speech rules, and TTS still apply. Watch has its own override.");
+                sb.AppendLine($"TextSource={RegionWatch.TextSourceToIni(TextSource)}");
                 sb.AppendLine();
                 sb.AppendLine("[HOTKEYS]");
                 sb.AppendLine("; Format: Ctrl / Alt / Shift / Win combined with + then the key.");
@@ -2886,7 +2901,7 @@ namespace SpeakRect
         /// and even with '|' we keep full slot values intact.
         /// </summary>
         private static bool IsShortSettingKey(string key) =>
-            key is "ComicBook"
+            key is "ComicBook" or "TextSource"
                 or "UseWinOcr" or "SkipWinOcrSendFullFrameOnly"
                 or "ToggleOverlay" or "ToggleComicBook" or "ToggleWatch"
                 or "ShapeRect" or "ShapeOval" or "ShapeLasso"
