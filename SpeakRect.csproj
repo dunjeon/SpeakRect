@@ -116,6 +116,7 @@
 			<_DocFiles Include="$(MSBuildProjectDirectory)\README.md" Condition="Exists('$(MSBuildProjectDirectory)\README.md')" />
 			<_DocFiles Include="$(MSBuildProjectDirectory)\THIRD_PARTY_NOTICES.md" Condition="Exists('$(MSBuildProjectDirectory)\THIRD_PARTY_NOTICES.md')" />
 			<_NamePackFiles Include="$(MSBuildProjectDirectory)\NamePacks\**\*" Condition="Exists('$(MSBuildProjectDirectory)\NamePacks')" />
+			<_ReadmeImageFiles Include="$(MSBuildProjectDirectory)\images\**\*" Condition="Exists('$(MSBuildProjectDirectory)\images')" />
 		</ItemGroup>
 
 		<Error Condition="'$(SkipKoboldPayload)' != 'true' And '@(_KoboldFiles)' == ''" Text="No kobold files found under $(_KoboldSrc)\" />
@@ -123,12 +124,14 @@
 
 		<MakeDir Directories="$(_PubDir)koboldcpp" Condition="'$(SkipKoboldPayload)' != 'true'" />
 		<MakeDir Directories="$(_PubDir)NamePacks" Condition="'@(_NamePackFiles)' != ''" />
+		<MakeDir Directories="$(_PubDir)images" Condition="'@(_ReadmeImageFiles)' != ''" />
 		<Copy Condition="'$(SkipKoboldPayload)' != 'true'" SourceFiles="@(_KoboldFiles)" DestinationFolder="$(_PubDir)koboldcpp" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
 		<Copy SourceFiles="@(_DocFiles)" DestinationFolder="$(_PubDir)" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
 		<Copy Condition="'@(_NamePackFiles)' != ''" SourceFiles="@(_NamePackFiles)" DestinationFolder="$(_PubDir)NamePacks\%(RecursiveDir)" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
+		<Copy Condition="'@(_ReadmeImageFiles)' != ''" SourceFiles="@(_ReadmeImageFiles)" DestinationFolder="$(_PubDir)images\%(RecursiveDir)" SkipUnchangedFiles="true" Retries="3" RetryDelayMilliseconds="500" />
 
-		<Message Importance="high" Condition="'$(SkipKoboldPayload)' != 'true'" Text="Published: $(_PubDir)SpeakRect.exe (single-file) + koboldcpp\ + NamePacks\ + LICENSE/README/notices" />
-		<Message Importance="high" Condition="'$(SkipKoboldPayload)' == 'true'" Text="Published: $(_PubDir)SpeakRect.exe (app-only; SkipKoboldPayload=true) + NamePacks\ + LICENSE/README/notices" />
+		<Message Importance="high" Condition="'$(SkipKoboldPayload)' != 'true'" Text="Published: $(_PubDir)SpeakRect.exe (single-file) + koboldcpp\ + NamePacks\ + images\ + LICENSE/README/notices" />
+		<Message Importance="high" Condition="'$(SkipKoboldPayload)' == 'true'" Text="Published: $(_PubDir)SpeakRect.exe (app-only; SkipKoboldPayload=true) + NamePacks\ + images\ + LICENSE/README/notices" />
 	</Target>
 
 </Project>

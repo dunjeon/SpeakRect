@@ -1,488 +1,282 @@
 # SpeakRect
 
-**Draw regions on your screen. Hear the text read aloud.**
+SpeakRect is a Windows tray app that reads text off the screen and speaks it.
 
-SpeakRect is a free Windows accessibility app for people with **visual impairments**. It captures text from whatever is on your screen — games, comics, browsers, menus, subtitles, and more — recognizes it with a **local LLM** on your PC, and reads it aloud with **Windows speech by default** (optional SAPI 5 for advanced setups).
+A lot of the text people need is not a real control. RPG dialogue in an emulator, a menu in a modern game, a comic balloon, a subtitle burned into the frame: it is paint. A screen reader never sees it. SpeakRect does not hook the game either. You draw a box (or several), it snapshots those pixels, a local vision model turns them into words, and Windows speech reads them aloud.
 
-No cloud AI is required for recognition. Speech works offline with the built-in Windows engine.
+That is the whole mechanism, and it is also the main limitation: capture is a desktop screenshot. **Borderless windowed** or a normal window works. Exclusive fullscreen usually does not.
 
----
+Recognition stays on your PC. Captures are not sent to a cloud OCR API. Speech uses the voices already installed on Windows.
 
-## Highlights
+![Image tab: picture cleanup and the built-in sample panel](images/image-prep.png)
 
-- **Up to 8 saved regions** — pin dialogue, menus, choices, captions, or panels each to its own hotkey
-- **Follow mode** — a ninth reader that tracks the mouse (or locks in place)
-- **Watch** — timer-read one saved region when its text changes (never overlaps speech)
-- **Local recognition** — Local-LLM host + GLM-OCR (Q8_0) bundled in the release zip
-- **Windows TTS by default** — works out of the box; optional **SAPI 5** for classic voices and third-party engines
-- **Keyboard + gamepad** — remappable bindings, optional custom actions
-- **Profiles** — save layouts, hotkeys, modes, and voice (including TTS engine) per game
-- **Comic Book mode** — better handling of panels and balloons
+## What it is not
 
-If Windows can show it in a normal window or on the desktop, SpeakRect can try to read it. Prefer **borderless windowed** or **windowed** mode — exclusive fullscreen often cannot be captured.
+- Not Narrator, NVDA, or any UI Automation screen reader. It does not walk the control tree or announce buttons.
+- Not a comic viewer, emulator, or an overlay that draws *inside* a game.
+- Not cloud OCR. There is no account and no upload of screen captures.
+- Not a promise of perfect reads. Fancy lettering, SFX, motion blur, low contrast, and tiny credits still get mangled.
+- Not a general translation tool. The default reading prompt asks for English; other languages are untested.
 
----
+If Windows can show it on the desktop, SpeakRect can try to read it. That is the bar.
 
 ## Download
 
 | | |
 |--|--|
 | **Latest build** | [Releases](https://github.com/dunjeon/SpeakRect/releases/latest) |
-| **Package** | One zip: `SpeakRect.exe` + local LLM host + **Q8_0** model files |
-| **Source** | This repository (**GPLv2**) — full application source |
-
-Source clones include the Local-LLM host + models under `koboldcpp\` (**Git LFS** — run `git lfs install` before clone). Ready-to-run zips remain on [Releases](https://github.com/dunjeon/SpeakRect/releases).
+| **Package** | One zip: `SpeakRect.exe` + local LLM host + Q8_0 model files |
+| **Source** | This repository, **GPLv2** |
 
 ### Install
 
-1. Download **`SpeakRect-<version>-win-x64.zip`** from the [latest release](https://github.com/dunjeon/SpeakRect/releases/latest).
-2. Extract it to a folder (about **2.5 GB free** disk recommended).
-3. Run **`SpeakRect.exe`**.
+1. Download `SpeakRect-<version>-win-x64.zip` from the [latest release](https://github.com/dunjeon/SpeakRect/releases/latest).
+2. Extract it somewhere with about **2.5 GB** free. Keep `SpeakRect.exe` and the `koboldcpp` folder together.
+3. Run **`SpeakRect.exe`**. It lives in the system tray. The model may take a short time to load on first launch.
 
-No separate model download is required for the complete package.
+No separate model download is required for the complete zip.
+
+Source clones keep the same host and models under `koboldcpp\` via **Git LFS** (`git lfs install` before clone). Ready-to-run zips stay on Releases.
 
 ### Windows SmartScreen / “Unknown publisher”
 
-Windows may block or warn on first run. Common messages:
+Windows may warn on first run (“Windows protected your PC”, unknown publisher, browser warnings on the zip). That is expected. SpeakRect is free and the GitHub zip is **unsigned**. The warning means Microsoft does not recognize the publisher, not that the file was found to be malware.
 
-- **“Windows protected your PC”** / SmartScreen  
-- **“Unknown publisher”**  
-- Browser warnings for an unsigned download  
+To run it: SmartScreen → **More info** → **Run anyway**.
 
-**That is expected.** SpeakRect is free and distributed as an **unsigned** zip from GitHub Releases. The warning means Microsoft does not recognize the publisher — **not** that the file was found to be malware.
-
-**To run anyway**
-
-1. On the SmartScreen window, click **More info**.
-2. Click **Run anyway**.
-
-If the file stays blocked after download:
-
-1. Right-click **`SpeakRect.exe`** (or the zip) → **Properties**.
-2. Check **Unblock** if shown → **OK**.
-3. Run the app again.
-
-Or from PowerShell in the extract folder:
+If the file stays blocked after download, right-click `SpeakRect.exe` (or the zip) → **Properties** → check **Unblock** if it is there → **OK**. Or from PowerShell in the extract folder:
 
 ```powershell
 Unblock-File -Path .\SpeakRect.exe
 Get-ChildItem -Recurse | Unblock-File
 ```
 
-Only download from the official [Releases](https://github.com/dunjeon/SpeakRect/releases) page. If a release lists a SHA-256 checksum:
+Only download from the official [Releases](https://github.com/dunjeon/SpeakRect/releases) page. If a release lists a SHA-256:
 
 ```powershell
 Get-FileHash -Algorithm SHA256 .\SpeakRect-*-win-x64.zip
 ```
 
----
-
 ## Requirements
 
 | | |
 |--|--|
-| **OS** | Windows 10/11 **x64** with platform package **≥ 10.0.26100** (see project TFM) |
-| **Disk** | ~**2.5 GB+** free for a full install |
-| **GPU** | Strongly recommended for usable speed |
+| **OS** | Windows 10/11 **x64** (`net10.0-windows10.0.26100.0`) |
+| **Disk** | ~2 GB for the bundled host + model, plus a little for the app |
+| **GPU** | Strongly recommended |
 
-### Disk (bundled local LLM)
+The bundled host is set up for Vulkan, with **2 CPU threads** so a game can keep the rest. CPU-only is usually too slow to use live. Sharing a card with a demanding game needs spare VRAM; integrated and very small GPUs may not load the default model pair.
 
-| Item | Approx. size | Role |
-|------|--------------|------|
-| Vision model (`glmocr-Q8_0.gguf`) | ~906 MB | Local LLM weights |
-| Vision projector (`mmproj-glmocr-Q8_0.gguf`) | ~462 MB | Image understanding |
-| Local LLM host (`koboldcpp.exe`) | ~608 MB | Runs the model |
-| Config | under 10 KB | Launch settings |
-| **Runtime folder total** | **~2.0 GB** | Ships next to SpeakRect |
+Advanced host settings live in `koboldcpp\ocr.kcpps`.
 
-The SpeakRect app itself is small next to the model files.
-
-### VRAM
-
-Default setup loads the model on the GPU (Vulkan).
-
-| | Guidance |
-|--|----------|
-| Model files on disk | ~**1.4 GB** (weights + projector) |
-| Free VRAM to load and run | ~**3 GB** minimum |
-| Sharing GPU with a game | **4–6 GB+** free recommended |
-| Comfortable gaming + reading | **8 GB+** total card VRAM |
-
-CPU-only is usually too slow for interactive use. Integrated or very low-VRAM GPUs may not load the default model pair.
-
-### Local LLM defaults (1.2.1+)
-
-The bundled host is configured for broader hardware compatibility:
-
-- **Vulkan** is the default GPU backend (instead of CUDA)
-- **2 CPU threads** are used by default, to leave more cores free for games and other apps
-
-Advanced users can edit `koboldcpp\ocr.kcpps` if they need different host settings.
-
----
+Only one instance of SpeakRect runs at a time. A second launch tells you to look in the tray.
 
 ## Quick start
 
-1. Extract the release so `SpeakRect.exe` and the `koboldcpp` folder stay together.
-2. Run **SpeakRect**. It appears in the **system tray**. The local LLM may take a short time to load the first time.
-3. Press **Shift+Tab** (default) to show the overlay — or double-click the tray icon.
-4. **Draw** a box around the text you care about (starts on **region 1**).
-5. Press **Enter** to **speak** that region.
-6. To add another area: **Shift+F2** (overlay still open) → draw region 2 → **Enter** again.
-7. Press **Escape** to hide the overlay. Later, **Shift+F1** / **Shift+F2** / … speak those saved spots without opening the overlay.
+1. Extract the zip so `SpeakRect.exe` and `koboldcpp\` stay together.
+2. Run SpeakRect. Tray icon appears; the local model may still be loading.
+3. **Shift+Tab** (or double-click the tray icon) shows the overlay.
+4. Draw a box around the text (starts on region 1). Rectangle is the default; **R** / **O** / **L** pick rectangle, oval, or freehand lasso.
+5. **Enter** speaks that region.
+6. Still on the overlay: **Shift+F2**, draw region 2, Enter to test. Repeat up to eight saved slots.
+7. **Escape** hides the overlay. After that, **Shift+F1** … **Shift+F8** speak those spots without opening the overlay.
 
-For games, use **borderless windowed** so capture works.
+For games, switch to **borderless windowed** first.
 
----
+A typical layout: region 1 on the dialogue box, region 2 on choices, region 3 on a quest log. One profile per game so the hotkeys do not fight the title’s own binds.
 
-## How to use
+## Overlay
 
-### System tray
+The overlay is a dim full-screen layer over the desktop. Tools sit in a **left sidebar** that stays fully opaque. Drawing starts on region 1.
 
-| Menu | What it does |
-|------|----------------|
-| **Show Overlay** | Opens the selection overlay |
-| **Settings…** | Profiles, Key Map, Regions, Follow, Watch, Voice, Analytics, Help |
-| **Profiles** | Load / save named setups |
-| **Exit** | Quit SpeakRect and stop the local LLM |
+| | |
+|--|--|
+| Show / hide | **Shift+Tab**, tray **Show Overlay**, or a gamepad bind |
+| Draw | Click and drag (not on the sidebar) |
+| Speak current slot | **Enter** (regions 1–8) |
+| Hide to tray | **Escape** (saves the current slot, stops speech) |
+| Clear the active slot | **Delete** |
+| Dim more / less | **←** / **→** while the overlay is open |
 
-Double-click the tray icon to show the overlay. Only one instance of SpeakRect runs at a time.
+Picking RECT / OVAL / LASSO hides the sidebar so you can draw against the left edge. Esc brings the sidebar back; Esc again hides to the tray.
 
-### Overlay basics
+The overlay tint is cleared for the snapshot so the dim does not bake into the picture. Drawing is paused while Settings is open.
 
-The overlay is a dim full-screen layer so you can still see the app or game underneath while you draw. Tools sit in the **left sidebar**.
+## Regions (slots 1–8)
 
-| Action | How |
-|--------|-----|
-| Show / hide overlay | **Shift+Tab** (default), tray, or gamepad if bound |
-| Draw a region | Click and drag (not on the sidebar) |
-| Read the current region | **Enter** |
-| Cancel / hide overlay | **Escape** (saves the current slot, stops speech, hides to tray) |
-| Clear active region slot | **Delete** |
-| Overlay more transparent | **← Left** arrow |
-| Overlay more opaque | **→ Right** arrow |
+Eight fixed slots, each with its own hotkey. Defaults are **Shift+F1** … **Shift+F8**. They are remappable.
 
-While **Settings** is open, drawing on the overlay is paused.
+With the overlay **open**, a region hotkey **selects** that slot so you can draw; it does not speak. With the overlay **closed**, the same hotkey speaks whatever is saved there.
 
-#### Overlay opacity
-
-Use the arrow keys **while the overlay is open**:
-
-| Key | Effect |
-|-----|--------|
-| **← Left** | Lower opacity (see more of the screen). Stops at a light minimum. |
-| **→ Right** | Raise opacity (stronger dim / easier to see your box). Up to fully opaque. |
-
-Turn opacity **down** when dim dialogue or dark HUDs are hard to aim at. Turn it **up** when the selection outline is hard to spot on a bright scene. SpeakRect briefly clears the overlay tint when it captures so the snapshot is not darkened.
-
-### Shape tools
-
-| Shape | Default key | Use when |
-|-------|-------------|----------|
-| **RECT** | **R** | Most text boxes, panels, UI |
-| **OVAL** | **O** | Circular / rounded areas |
-| **LASSO** | **L** | Irregular freehand outlines |
-
-1. Pick RECT, OVAL, or LASSO (sidebar or **R** / **O** / **L**).
-2. The **left sidebar hides** so you can select text near the left edge.
-3. Drag on the content (release to finish a rect/oval; lasso closes when you finish the stroke).
-4. When the shape is committed, the **sidebar returns**.
-5. Press **Enter** to speak.
-
-While the sidebar is hidden, a small corner hint remains. **Esc** brings the sidebar back without leaving the overlay (press **Esc** again to hide to the tray).
-
-### Regions (slots 1–8)
-
-SpeakRect keeps **8 fixed region slots**, each with its own hotkey. Defaults:
-
-| Slot | Default hotkey | Typical use |
-|------|----------------|-------------|
-| **1** | **Shift+F1** | Main dialogue |
-| **2** | **Shift+F2** | Choices / secondary box |
-| **3**–**8** | **Shift+F3** … **Shift+F8** | Extra UI, logs, captions… |
-| **9 (Follow)** | **Shift+F9** | Under the mouse (not a fixed box) |
-
-All hotkeys are remappable in **Settings → Key Map**.
-
-#### Set region 1
-
-1. Show the overlay (**Shift+Tab** or tray **Show Overlay**).
-2. You start on **region 1**. (To switch slots while the overlay is open, press that slot’s hotkey — it selects the slot; it does **not** speak.)
-3. Pick a shape if needed, then **click and drag** over the text.
-4. Optional: press **Enter** to test-speak.
-
-Drawings save when you finish drawing, press **Enter**, switch slots, or hide the overlay (**Escape**).
-
-#### Speak a region
-
-| Situation | Action |
-|-----------|--------|
-| Overlay open | Select the slot → **Enter** |
-| Overlay closed (normal play) | **Shift+F1** … **Shift+F8** from anywhere |
-
-#### Add more regions
-
-1. Keep the overlay open (or open it again).
-2. Press the next slot’s hotkey (e.g. **Shift+F2**). This switches slots and saves the previous one; it does not speak while the overlay is visible.
-3. Draw the new area → optional **Enter** to test.
-4. Repeat up to 8 fixed regions, then **Escape** to hide.
+Drawings save when you finish a shape, press Enter, switch slots, or hide the overlay.
 
 | You want to… | Do this |
 |--------------|---------|
 | Speak region *n* | **Shift+F*n*** (overlay closed) |
-| Move or resize a region | Overlay on → that slot’s hotkey → draw again |
-| Clear a region | Overlay on → select slot → **Delete** |
-| Redraw region 1 without losing region 2 | Overlay on → **Shift+F1** → draw; slot 2 is untouched |
+| Move or resize a slot | Overlay on → that slot’s hotkey → draw again |
+| Redraw 1 without losing 2 | Overlay on → **Shift+F1** → draw |
+| See every slot on a map | Settings → **Regions** |
 
-**Game example:** Region 1 = dialogue · Region 2 = choices · Region 3 = quest tracker. Play borderless; press the matching hotkey when that UI appears.
+Follow (region 9) is separate and does not overwrite slots 1–8.
 
-**Comic example:** One region over a panel or page with Comic Book mode on — reuse the same slot on the next page if layout is stable.
+## Follow (region 9)
 
-Regions are stored in settings and can be saved in **Profiles**.
+Follow is a floating capture box at the mouse — size, shape, and offset come from Settings → **Follow**. Use it for a subtitle line or anything that moves with the cursor.
 
-### Follow (region 9 — under the mouse)
+![Follow size, offset, and preview](images/follow.png)
 
-Follow is a movable capture box that tracks the cursor (or can lock in place). It does **not** overwrite slots 1–8.
+| Default | |
+|---------|--|
+| **Shift+F9** | Speak at the current mouse using Follow size/shape/offset |
+| **Up** / **Down** (overlay) | Arm the floating preview / turn Follow off |
+| **Enter** while Follow is on | **Lock** or unlock the box. Does **not** speak. |
+| Sidebar **FOLLOW** | Click on/off; **Ctrl+click** opens Follow settings |
 
-| Default | Action |
-|---------|--------|
-| **Shift+F9** | Speak at the **current mouse** using Follow size/shape/offset |
-| **Up** (overlay) | Arm Follow floating preview |
-| **Down** (overlay) | Turn Follow off (overlay stays open) |
-| **Enter** (Follow on) | **Lock** / unlock the box — does **not** speak |
-| Sidebar **FOLLOW** | Click = on/off; **Ctrl+click** = Follow settings |
-| Sidebar **SETTINGS** | Opens the full Settings window |
+Lasso is for drawn slots only. Follow is rectangle or oval.
 
-Typical use: size the Follow box to a subtitle line → point the mouse → **Shift+F9**.
+## Watch
 
-### Watch (auto-read one saved region)
+Watch is a timer on **one** saved slot (1–8). Follow cannot be watched.
 
-Watch is a timer that checks **one** of your saved slots (1–8). Each tick: **OCR** answers a boolean — is there text? No → silent. Yes → **Local-LLM** (default) or **OCR** using the **pipeline** you picked. Watch compares and speaks those words. Independent of MODE. Saved with your profile.
+Each tick: OCR answers a yes/no — is there text? No → silent, no model call. Yes → read with the **pipeline** and **text source** you picked, then speak if the words changed enough and nothing else is already talking.
 
-| Setting | What it does |
-|---------|----------------|
-| **Enable** | Turn the timer on or off (off by default) |
-| **Region** | Which drawn slot to watch (Follow / region 9 cannot be watched) |
-| **Pipeline** | **Raw snap** (default) — region pixels only. **Image** — Image tab cleanup, then one full-frame read (same as Default speak). **Image + Balloon** — Image tab + balloon boxes, then one read per balloon (Comic Book). |
-| **Text source** | **Local-LLM** (default) — more accurate. **OCR** — faster; skips the local model. |
-| **Interval** | Seconds between checks (0.5–60, default 2.0) |
-| **Forget last on no text** | OCR sees no text → clear last spoken so returning dialogue can be read again (default on) |
-| **Min difference %** | Speak only if new words differ by at least this much (0–100, default 90) |
+| Setting | |
+|---------|--|
+| Pipeline | **Raw snap** (default, region pixels only), **Image** (Image-tab cleanup, one full-frame read), or **Image + Balloon** (cleanup + per-balloon reads) |
+| Text source | **Local-LLM** (default) or **OCR** (faster, skips the model) |
+| Interval | 0.5–60 seconds (default 2.0) |
+| Forget last on no text | Empty box clears the last line so returning dialogue can be read again (default on) |
+| Min difference | Speak only if the new line differs by at least this percent (default 90) |
 
-- Watch runs on a **background thread**. Opening the overlay **stops the timer immediately** and cancels an in-flight check. Hide the overlay (**Escape**) to resume. It does not fire while Settings is open.
-- The first successful check after you turn Watch on (or change slot) is a **silent baseline** — it does not speak.
-- Later checks: OCR must see text, then Local-LLM or OCR (your text source) runs the chosen pipeline and Watch compares to the **last spoken words**.
-- Watch does **not** follow MODE Default vs Comic Book, and it does not overwrite Analytics from a hotkey speak.
-- A region hotkey, Follow speak, or **Stop speech** cancels a Watch check in flight so your action wins.
+Watch does **not** follow Default vs Comic Book. Opening the overlay stops it immediately. Settings open, or any in-progress speech, also holds it. The first successful check after you enable it (or change slot) is a silent baseline.
 
-Typical use: draw a dialogue box on region 1 → **Settings → Watch** → pick region 1 → enable → hide overlay → play. New lines in that box are read when they appear.
+Toggle from Settings or **Ctrl+Shift+W**.
 
-### Reading modes
+## Reading modes
 
-One primary mode is always selected (also toggleable with global hotkeys):
+One primary mode at a time. Global hotkeys use **Ctrl**, not Shift, so they do not fire while typing capitals.
 
-| Mode | Default hotkey | When to use |
-|------|----------------|-------------|
-| **Default** | **Ctrl+D** | Games, menus, subtitles, plain UI |
-| **Comic Book** | **Ctrl+B** | Panels, balloons, multi-caption pages |
+| Mode | Default | |
+|------|---------|--|
+| **Default** | **Ctrl+D** | Games, menus, subtitles, ordinary UI. Image prep, then one full-frame read. |
+| **Comic Book** | **Ctrl+B** | Panels and balloons. Detects balloon boxes, then reads them (optionally one at a time). |
 
-Mode toggles use **Ctrl+letter**, not Shift+letter: a global **Shift+D** (etc.) would fire while typing capitals.
+When the overlay is hidden, a mode hotkey is announced with a short spoken phrase.
 
-- **Default** and **Comic Book** are opposites — only one primary style at a time.
-- When the overlay is hidden, mode hotkeys are announced with a short TTS phrase.
-- **Text source** (Settings → Speech): **Local-LLM** (default) or **OCR**. Image prep, balloons, speech rules, pauses, and voice still apply. Watch has its own text source that overrides this.
+**Text source** (Settings → Speech) is independent of mode: **Local-LLM** (default) or **OCR**. Image prep, balloons, speech rules, pauses, and voice still apply either way. Watch has its own text source that overrides this.
 
-### Settings
+### Comic Book
 
-Open **Settings…** from the tray or the overlay **SETTINGS** button. Profile **Load / Save / Save As / Delete** sit at the top.
+Settings → **Balloons** is where balloon detect is tuned. You can load the built-in sample, the last capture, or your own page; the green boxes (when guide boxes are on) can be dragged, resized, deleted, and reordered. **Speak** on that tab reads what you see.
 
-| Tab | What it does |
-|-----|----------------|
-| **Key Map** | Keyboard + gamepad bindings; custom actions |
-| **Regions** | Map of slots 1–8: position, hotkey, shape; clear a slot |
-| **Voice** | TTS: Windows (default) or optional SAPI 5; voice, rate, pitch, volume |
-| **Follow** | Size, shape, and offset for the mouse-follow reader |
-| **Watch** | Timer-read one saved region (1–8) when its text changes (pipeline + text source override) |
-| **Speech** | Live text source (Local-LLM or OCR), name rules, cleanup, reading prompt |
-| **Analytics** | Most recent OCR/speak result: text, pipeline images (capture/prep/regions/crops), timings |
-| **Help** | Getting started, features, default hotkeys, open README |
+![Balloons tab: detect, edit, and preview](images/balloons.png)
 
-#### Voice (speech)
+Stock Comic Book turns on guide boxes, dims art outside the boxes, and sends one balloon at a time. Small lettering can be zoomed before the model sees it. None of that runs in Default mode.
 
-**Default: Windows (UWP / OneCore).** Fresh installs and **Reset** use this engine so SpeakRect speaks immediately with the voices Windows already provides. You do **not** need SAPI, Narrator packs, or any adapter for a normal setup.
+Settings → **Image** is shared: letterbox trim, scale, ink-preserving gray, tone. Off = raw snap. The preview is the same cleanup used on a live speak.
 
-| Control | Effect |
-|---------|--------|
-| **Engine** | **Windows** (default) or **SAPI 5** (optional) |
-| **Voice** | Voices for the selected engine (blank = that engine’s system default) |
-| **Rate** / **Pitch** / **Volume** | Speaking style |
-| **Silence** options | End / punctuation gaps (**Windows** engine only) |
-| **Preview** | Sample with current settings |
+## Settings
 
-**More Windows voices (still on the default engine)**  
-**Settings → Time & language → Speech** (or Language packs) → download additional speech voices, then reopen SpeakRect’s Voice tab.
+Tray **Settings…**, or **SETTINGS** on the overlay. Profile **Load / Save / Save As / Delete** sit on the bar at the top.
 
-##### Optional: SAPI 5 (natural / adapter voices)
+| Tab | |
+|-----|--|
+| **Key Map** | Keyboard and XInput gamepad; optional custom actions (clicks, key chords, stick-as-mouse) |
+| **Regions** | Map of slots 1–8 |
+| **Follow** | Mouse box size / shape / offset |
+| **Watch** | Timer-read one saved slot |
+| **Voice** | Windows TTS (default) or SAPI 5; rate, pitch, volume, pauses |
+| **Speech** | Live text source, name substitutions, text-cleanup rules, reading prompt |
+| **Image** | Capture cleanup, with live preview |
+| **Balloons** | Balloon find/edit for Comic Book |
+| **Analytics** | Last read: text, pipeline pictures, timings. Export writes a zip. |
+| **Help** | In-app getting started, plus **Restore all defaults** |
 
-SAPI 5 is for people who want **classic Control Panel voices** or a **third-party SAPI engine**. Microsoft’s **Narrator “Natural” voices** are *not* exposed to normal apps by Windows; SpeakRect cannot list them on the Windows engine. Some community tools register those (or similar) voices as **SAPI 5** so apps can use them.
+A profile stores regions, hotkeys, modes, Follow, Watch, voice, speech rules, Image, and Balloons. `SpeakRect.ini` next to the exe is the live config; named profiles live under `Profiles\`. Switching games is the point of profiles.
 
-**Example path — NaturalVoiceSAPIAdapter (unofficial)**
+Help → **Restore all defaults** resets the live settings (asks first) and keeps the profile name.
 
-1. Install and test [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter) from its [Releases](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/releases) (run **Installer.exe** as admin; install **both 32-bit and 64-bit** on 64-bit Windows if you want every app covered).  
-2. Enable **local Narrator voices** in the adapter if that is what you want; follow the project README / [wiki](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/wiki) (some newer Narrator packs need a [last working voice download](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter/wiki/Narrator-natural-voice-download-links)).  
-3. Confirm voices appear in Windows **Control Panel → Speech Recognition → Text to Speech**, or the adapter’s test app.  
-4. In SpeakRect: **Settings → Voice → Engine → SAPI 5 (classic + adapters)** → pick a voice → **Preview**.  
-5. **Save** your **profile** so `TtsEngine` and the SAPI voice name are stored (profiles include the full Voice section).
+## Voice
 
-**Important**
+**Default engine: Windows** (OneCore / UWP). Fresh installs and Restore use this, so speech works with whatever voices Windows already has. Extra Windows voices: **Settings → Time & language → Speech**.
 
-| | |
-|--|--|
-| **Default** | Windows engine — always the out-of-the-box path |
-| **Adapter tools** | Third-party, not shipped with SpeakRect, not endorsed by Microsoft |
-| **Stability** | Adapters can break after Windows updates; switch Engine back to **Windows** if speech fails |
-| **Online adapter options** | Edge/Azure voices via an adapter may need the network; local Narrator models stay offline when configured that way |
-| **Profiles** | Engine + voice + rate/pitch/volume are saved with the profile |
+Rate, pitch, volume, and optional custom pauses (comma / sentence / balloon gap) are on the Voice tab. Silence options apply to the Windows engine only.
 
-SpeakRect does **not** bundle or install SAPI adapters. If SAPI is selected but no usable voice is registered, switch back to **Windows**.
+### Optional: SAPI 5
 
-#### Key Map
+SAPI 5 is for classic Control Panel voices or a third-party SAPI engine. Microsoft Narrator “Natural” voices are **not** exposed to ordinary apps on the Windows engine; some community adapters register them as SAPI 5.
 
-Rebind overlay, modes, region slots, shape tools, and optional **gamepad** buttons. Custom actions can send clicks, key chords, stick-as-mouse, and more.
+Example path — [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter) (unofficial, not shipped with SpeakRect):
 
-Tips:
+1. Install from that project’s Releases (run the installer as admin; on 64-bit Windows install both 32- and 64-bit if you want every app covered).
+2. Enable local Narrator voices in the adapter if that is what you want. Follow *their* README / wiki.
+3. Confirm voices appear in **Control Panel → Speech Recognition → Text to Speech**.
+4. In SpeakRect: **Voice → Engine → SAPI 5** → pick a voice → **Preview**.
+5. **Save** the profile so engine and voice come back next time.
 
-- Global bindings work when another app is focused (when Windows allows).
-- Overlay-only shape keys work when the overlay is up.
-- Avoid conflicts with game controls; use **Profiles** per game if needed.
-- Gamepad uses **XInput** (controller index is configurable).
+Adapters can break after a Windows update. If speech dies, switch Engine back to **Windows**. Online adapter voices may use the network; keep the Windows engine (or local-only SAPI voices) for fully offline speech.
 
-### Profiles
+## Speech rules and name packs
 
-Save hotkeys, modes, regions, Follow size, Watch, **voice (engine + voice + rate/pitch/volume)**, and related prefs:
+Settings → **Speech**:
 
-1. Tray → **Profiles** → **Save current…** / **Save as…**, or use the profile bar in **Settings**.
-2. Load from the tray menu or the Settings profile list.
+- **Text source** — Local-LLM or OCR for live speak, Follow, and Balloons.
+- **Names** — Find → Say-as substitutions (case-insensitive). Preview / Space samples the voice.
+- **Text rules** — cleanup pipeline (noise, abbreviations, decorators).
+- **Prompts** — the instruction sent with every Local-LLM read. Blank uses the built-in default (extract English text, do not describe the image, plain text only).
 
-If you switch to **SAPI 5** or change the spoken voice, **Save** the profile again so that setup is restored next time.
+Name packs are `.txt` files in `NamePacks\` next to the exe. Nothing auto-loads at startup. **Speech → Names → Packs…**, pick a pack, Import. Shipped example: `x-men.txt`. How to write your own is in `NamePacks\README.md`.
 
-### Default hotkey cheat sheet
+## Default hotkeys
 
 | Action | Default |
 |--------|---------|
 | Show / hide overlay | **Shift+Tab** |
 | Default mode | **Ctrl+D** |
 | Comic Book mode | **Ctrl+B** |
-| Stop speech (abort TTS) | **Ctrl+Shift+S** |
+| Stop speech | **Ctrl+Shift+S** |
 | Watch on / off | **Ctrl+Shift+W** |
 | Speak region 1–8 | **Shift+F1** … **Shift+F8** |
-| Speak Follow (at mouse) | **Shift+F9** |
-| Shape: Rectangle / Oval / Lasso | **R** / **O** / **L** (overlay) |
-| Speak current selection | **Enter** (overlay; regions 1–8) |
-| Lock / unlock Follow box | **Enter** (overlay; Follow on) |
+| Speak Follow | **Shift+F9** |
+| Rectangle / oval / lasso | **R** / **O** / **L** (overlay) |
+| Speak current slot | **Enter** (overlay, regions 1–8) |
+| Lock / unlock Follow | **Enter** (overlay, Follow on) |
 | Hide to tray | **Escape** |
 | Clear active region | **Delete** |
 | Follow preview on / off | **Up** / **Down** (overlay) |
 | Overlay more transparent / opaque | **←** / **→** |
 
-Change any of these in **Settings → Key Map**.
-
-### Suggested workflows
-
-**Game with several UI spots**  
-Borderless windowed · Comic Book **off** · overlay → draw dialogue → **Shift+F2** → draw choices → more slots as needed → **Escape**. In play: **Shift+F1** / **F2** / …
-
-**One-shot read**  
-Overlay → draw → **Enter**. Hide with **Escape** when done.
-
-**Subtitles under the cursor**  
-Follow settings → size the box → point → **Shift+F9**.
-
-**Same dialogue box, auto-read on change**  
-Draw the box on a slot → **Settings → Watch** → pick that slot → set the interval → enable → **Escape**. Watch reads new text only when speech is idle.
-
-**Comic page**  
-Comic Book **on** → draw panel or page → **Enter**. Reuse the same region hotkey if layout stays put.
-
-**Controller-only**  
-Key Map → bind overlay and region slots to the pad; optionally add stick/mouse custom actions.
-
----
-
-## What it works on
-
-| Target | Notes |
-|--------|--------|
-| **Retro games** | Emulators, classic ports, pixel UI and dialogue |
-| **Modern games** | As long as the game is **not** exclusive fullscreen |
-| **Comic books / manga** | Use **Comic Book** mode for panels and balloons |
-| **Anything else on screen** | Browsers, documents, chat, apps, subtitles |
-
-**Important:** SpeakRect captures the desktop composite. Exclusive fullscreen often cannot be read. Prefer **borderless windowed** or **windowed**.
-
----
-
-## Accuracy
-
-SpeakRect aims to be **usable**, not perfect. Internal debug sessions (mostly English comics with Comic Book mode) give a ballpark:
-
-| Metric | Result |
-|--------|--------|
-| Sessions logged | **31** complete reads |
-| Empty / failed reads | **0 / 31** |
-| Spot-check set | **14** panels / pages vs on-screen wording |
-| Word match (recall) | **~99.7%** of ground-truth words present |
-| Word match (precision) | **~100%** on that dialogue-heavy set |
-
-Clean English comic balloons and captions were usually spoken correctly end-to-end. Small slips (dropped leading words, logos, rare credit lines) still happen.
-
-| Situation | Expectation |
-|-----------|-------------|
-| Clear comic balloons / print | Excellent |
-| Dense credits, tiny legal lines, fancy logos | More mistakes |
-| Stylized SFX, heavy art behind text | Occasional miss or garble |
-| Game UI, subtitles, low contrast, motion blur | Often good, less consistent than clean comics |
-| Exclusive fullscreen / wrong region / partial crop | Missed or incomplete read |
-| Non-English | Not validated in these logs |
-
-These numbers are from internal runs, not a formal benchmark. Hardware, region size, and content matter. If a read is wrong, redraw a tighter box or retry; saved regions make that easy.
-
----
+Remap everything in **Key Map**. Gamepad is opt-in (XInput, controller index 0–3). Custom actions can send clicks, chords, and stick-as-mouse so a pad can drive the overlay without the keyboard.
 
 ## Privacy
 
-Recognition uses a **local LLM** on your machine. SpeakRect does not send screen captures to a cloud AI API. Speech uses **on-device** TTS (Windows UWP by default, or optional SAPI 5 / a registered local engine). If you enable an adapter’s *online* voices, that path is outside SpeakRect and may use the network — keep the Windows engine or local-only SAPI voices for fully offline speech.
+Recognition uses a local vision model. HTTP to the host is **loopback only** (`127.0.0.1`). SpeakRect does not upload screen captures for OCR.
 
----
-
-## Credits & third-party software
-
-| Component | Project | Links |
-|-----------|---------|--------|
-| Local-LLM host | **KoboldCpp** (LostRuins) — third-party binary | [GitHub](https://github.com/LostRuins/koboldcpp) · [Releases](https://github.com/LostRuins/koboldcpp/releases/latest) |
-| Vision model | **GLM-OCR** (Z.ai / zai-org) | [GitHub](https://github.com/zai-org/GLM-OCR) · [Hugging Face](https://huggingface.co/zai-org/GLM-OCR) |
-
-SpeakRect bundles a **Q8_0** GGUF build of GLM-OCR (`glmocr-Q8_0.gguf` + `mmproj-glmocr-Q8_0.gguf`) and runs it through the Local-LLM host (KoboldCpp binary under `koboldcpp\`) on `127.0.0.1`. Their licenses apply to those components — see each project and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
----
+Speech is on-device (Windows TTS, or SAPI 5 / a registered local engine). If you enable an adapter’s *online* voices, that path is outside SpeakRect and may use the network.
 
 ## Build from source
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Short version:
 
 ```powershell
+git lfs install
 git clone https://github.com/dunjeon/SpeakRect.git
 cd SpeakRect
 dotnet build SpeakRect.sln -c Debug
 dotnet test tests/SpeakRect.Tests
 ```
 
-Architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
----
+If files under `koboldcpp\` are tiny text stubs, run `git lfs pull`.
 
 ## License
 
-**SpeakRect** application source is licensed under the **GNU General Public License version 2 (GPLv2)** — see [LICENSE](LICENSE).
+SpeakRect application source is **GNU GPL v2** — see [LICENSE](LICENSE).
 
-Third-party components (Local-LLM host / KoboldCpp, GLM-OCR, and others) keep **their own** licenses — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). When redistributing a build that **includes** the Local-LLM host binary, comply with that host’s AGPL source-offer requirements for the exact binary version you ship.
+The bundled local-LLM host and GLM-OCR weights keep **their own** licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Redistributing a build that includes the host binary means complying with that host’s AGPL source-offer for the exact version you ship.
+
+| Component | |
+|-----------|--|
+| Local-LLM host | **KoboldCpp** (LostRuins) — [GitHub](https://github.com/LostRuins/koboldcpp) |
+| Vision model | **GLM-OCR** (Z.ai / zai-org), Q8_0 GGUF + projector — [GitHub](https://github.com/zai-org/GLM-OCR), [Hugging Face](https://huggingface.co/zai-org/GLM-OCR) |
+
+The install folder is still named `koboldcpp\` (host binary + `glmocr-Q8_0.gguf` + `mmproj-glmocr-Q8_0.gguf` + `ocr.kcpps`).
