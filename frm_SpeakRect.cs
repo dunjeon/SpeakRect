@@ -204,6 +204,8 @@ namespace SpeakRect
                      ControlStyles.UserPaint, true);
 
             KeyPreview = true;
+            try { Icon = AppIcons.ForWindow(); }
+            catch { /* default */ }
 
             try
             {
@@ -312,7 +314,7 @@ namespace SpeakRect
 
             _trayIcon = new NotifyIcon
             {
-                Icon = SystemIcons.Application,
+                Icon = AppIcons.ForTray(),
                 ContextMenuStrip = _trayMenu,
                 Visible = true,
                 Text = "SpeakRect"

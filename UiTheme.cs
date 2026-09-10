@@ -97,6 +97,8 @@ namespace SpeakRect
         {
             form.BackColor = Bg;
             form.ForeColor = Fg;
+            try { form.Icon = AppIcons.ForWindow(); }
+            catch { /* keep default */ }
             ApplyDarkTitleBar(form);
             form.Shown -= Form_ShownChrome;
             form.Shown += Form_ShownChrome;

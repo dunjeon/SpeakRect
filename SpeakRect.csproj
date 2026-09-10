@@ -13,6 +13,7 @@
 		<UseWPF>true</UseWPF>
 
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<ApplicationIcon>app.ico</ApplicationIcon>
 		<Platforms>x64;arm64</Platforms>
 		<!-- `dotnet build` / `dotnet test` default to AnyCPU → bin\Debug.
 		     Local output is bin\x64\… (same as VS Debug|x64). arm64 stays arm64. -->
@@ -24,11 +25,11 @@
 		<StartupObject>SpeakRect.Program</StartupObject>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-		<Version>1.5.9</Version>
-		<AssemblyVersion>1.5.9.0</AssemblyVersion>
-		<FileVersion>1.5.9.0</FileVersion>
-		<InformationalVersion>1.5.9</InformationalVersion>
-		<!-- Keep overlay / file properties on 1.5.9, not 1.5.9+gitsha. -->
+		<Version>1.5.10</Version>
+		<AssemblyVersion>1.5.10.0</AssemblyVersion>
+		<FileVersion>1.5.10.0</FileVersion>
+		<InformationalVersion>1.5.10</InformationalVersion>
+		<!-- Keep overlay / file properties on 1.5.10, not 1.5.10+gitsha. -->
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
 
@@ -82,6 +83,12 @@
 		<Compile Remove="tests\**\*" />
 		<None Remove="tests\**\*" />
 		<EmbeddedResource Remove="tests\**\*" />
+	</ItemGroup>
+
+	<!-- App mark: Win32 exe icon + the same bytes as a managed resource for tray/forms. -->
+	<ItemGroup>
+		<None Remove="app.ico" />
+		<EmbeddedResource Include="app.ico" LogicalName="SpeakRect.app.ico" />
 	</ItemGroup>
 
 	<!-- Name packs (phonetic Find→Say-as lists). Live next to the exe so users can add their own. -->
