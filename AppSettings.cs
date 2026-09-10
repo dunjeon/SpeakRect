@@ -1436,8 +1436,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Factory-restore every product setting (mode, image prep, voice, speech
-        /// rules/names, prompts, hotkeys, gamepad, custom actions, follow, watch, regions).
+        /// Factory-restore every product setting (mode, image prep, balloons,
+        /// voice, speech text source / names / rules / prompt, hotkeys, gamepad,
+        /// custom actions, follow, watch, regions).
         /// Keeps the active profile name and last Settings tab so the current profile
         /// file is rewritten on save. Writes main ini + active profile when present.
         /// </summary>

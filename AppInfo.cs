@@ -31,6 +31,6 @@ namespace SpeakRect
 
         /// <summary>Help / about line.</summary>
         public static string VersionLine =>
-            $"SpeakRect {Version}  ·  local OCR + Windows TTS (optional SAPI 5)";
+            $"SpeakRect {Version}  ·  local recognition + Windows TTS (optional SAPI 5)";
     }
 }
