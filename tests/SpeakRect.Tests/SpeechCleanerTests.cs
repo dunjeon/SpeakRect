@@ -75,6 +75,14 @@ public class SpeechCleanerTests
     }
 
     [Fact]
+    public void Dialogue_none_nothing_empty_are_usable()
+    {
+        Assert.False(SpeechCleaner.IsUnusable("none"));
+        Assert.False(SpeechCleaner.IsUnusable("nothing"));
+        Assert.False(SpeechCleaner.IsUnusable("empty"));
+    }
+
+    [Fact]
     public void StripMarkdownLlmJunk_removes_fence_and_keeps_dialogue()
     {
         string raw =

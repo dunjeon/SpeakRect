@@ -94,21 +94,12 @@ namespace SpeakRect
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
-        /// <param name="onHotkeysChanged">Re-register bindings after a remap.</param>
-        /// <param name="onBeforeProfileSave">Reserved / unused (profiles owned by Settings shell).</param>
-        /// <param name="onAfterProfileLoad">Reserved / unused (profiles owned by Settings shell).</param>
-        /// <param name="embedded">When true, host inside Settings (no window chrome / Close).</param>
-        /// <param name="onRequestClose">Optional close request (Settings shell).</param>
         public frm_HotkeyMap(
             Action onHotkeysChanged,
-            Action? onBeforeProfileSave = null,
-            Action? onAfterProfileLoad = null,
             bool embedded = false,
             Action? onRequestClose = null)
         {
             _onHotkeysChanged = onHotkeysChanged;
-            _ = onBeforeProfileSave;
-            _ = onAfterProfileLoad;
             _embedded = embedded;
             _onRequestClose = onRequestClose;
 

@@ -22,13 +22,10 @@ namespace SpeakRect
         private readonly RichTextBox _rtb;
 
         public frm_Help(
-            Action<frm_Settings.SettingsTab>? goToTab = null,
             bool embedded = false,
             Action? onRequestClose = null,
             Action? onAfterRestoreAllDefaults = null)
         {
-            // goToTab kept for call-site compat; the tab strip is navigation.
-            _ = goToTab;
             _embedded = embedded;
             _onRequestClose = onRequestClose;
             _onAfterRestoreAllDefaults = onAfterRestoreAllDefaults;

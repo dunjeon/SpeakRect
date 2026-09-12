@@ -284,26 +284,18 @@ namespace SpeakRect
 
             string t = text.Trim();
 
-            // No real words / almost no letters (private-use spam, punctuation-only).
-            // Do NOT reject length-2 letter words: CleanForSpeech keeps short dialogue
-            // like "No!" / "OK!" as "no!" / "ok!" (luc kept; pause mark after), and
-            // ExpandToSpeakPieces re-checks each unit — a length<=2 gate made short
-            // balloons speak "unreadable" even when OCR was correct.
+            // Need a real word. Do not reject "No!" / "OK!" (2 letters after clean).
             if (ComicRegionGeometry.CountWords(t) < 1 || CountAlnum(t) < 2)
                 return true;
 
-            // VL regurgitated our task prompt (or a close variant) ? treat as failure
-            // so recovery / crop / WinOCR paths can run.
+            // Model echoed the task prompt — let recovery / crop / OCR run instead.
             if (IsPromptEcho(t))
                 return true;
 
-            // Common VL refusals / empty-result phrasings (after CleanForSpeech lowercases).
-            // No "I can't see/read/…" or "sorry I can't…" arms: both collide with ordinary
-            // dialogue (e.g. "I can't seem…", "Sorry, I can't go"). Empty/word gates +
-            // IsPromptEcho still cover junk; short fixed tokens and "no text…" shapes
-            // below rarely appear as balloons.
+            // Empty-result phrasings. Do not match "I can't…" / "Sorry I can't…" —
+            // those show up in real dialogue.
             if (Regex.IsMatch(t,
-                    @"^(?:unreadable|n/?a|none|null|nothing|empty|" +
+                    @"^(?:unreadable|" +
                     @"no\s+(?:text|content|readable\s+text)(?:\s+found)?|" +
                     @"there is no (?:visible\s+)?text|" +
                     @"no text (?:is )?(?:visible|detected|present|found))$",
@@ -315,9 +307,7 @@ namespace SpeakRect
 
 
         /// <summary>
-        /// True when cleaned model output is (mostly) one of our OCR task prompts
-        /// rather than text from the image. Case-insensitive; expects CleanForSpeech
-        /// lowercasing already applied, but re-normalizes just in case.
+        /// True when cleaned model output is our OCR task prompt, not image text.
         /// </summary>
         internal static bool IsPromptEcho(string text)
         {
@@ -376,15 +366,6 @@ namespace SpeakRect
 
             return false;
         }
-
-        /// <param name="maxTokens">
-        /// Generation ceiling. Use <see cref="CropMaxTokens"/> for bubble crops,
-        /// <see cref="FullFrameMaxTokens"/> for whole-selection fallbacks.
-        /// </param>
-        /// <param name="temperature">
-        /// Decode temperature. Primary path uses <see cref="KoboldPrimaryTemperature"/> (0);
-        /// recovery may use <see cref="KoboldRecoveryTemperature"/>.
-        /// </param>
 
         public static string CleanForSpeech(string input)
         {

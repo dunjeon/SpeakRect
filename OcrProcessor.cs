@@ -6,19 +6,14 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Windows.Globalization;
 using Windows.Graphics.Imaging;
 using Windows.Media.Core;
 using Windows.Media.Ocr;
@@ -96,7 +91,7 @@ namespace SpeakRect
         public int PipelineWidth { get; init; }
         public int PipelineHeight { get; init; }
 
-        /// <summary>How many reading islands after improve / coalesce / mega-split.</summary>
+        /// <summary>How many reading islands after improve / coalesce / merge.</summary>
         public int RegionCount { get; init; }
 
         /// <summary>
@@ -497,47 +492,6 @@ namespace SpeakRect
             SpeakRunSettings.GetOcrPrompt();
 
         /// <summary>
-        /// Full-frame path only: extra scale + unsharp before Kobold.
-        /// Off — live Image prep (letterbox/upscale/gray/tone) already did this.
-        /// </summary>
-        private static readonly bool EnableFullFrameScaleAndSharpen = false;
-
-        /// <summary>
-        /// Region crops only: second-pass upscale + unsharp after the cut.
-        /// Off — crops are plain snaps of the fully prepped tone image; Image prep
-        /// already upscaled the panel and applied tone/sharpen. Re-doing it here
-        /// double-processed lettering.
-        /// </summary>
-        private static readonly bool EnableCropScaleAndSharpen = false;
-
-        /// <summary>Full-frame fit box (only if <see cref="EnableFullFrameScaleAndSharpen"/>).</summary>
-        private const int OcrTargetWidth = 1280;
-        private const int OcrTargetHeight = 720;
-
-        /// <summary>
-        /// Legacy per-crop fit box (only if <see cref="EnableCropScaleAndSharpen"/>).
-        /// </summary>
-        private const int CropTargetWidth = 1536;
-        private const int CropTargetHeight = 1536;
-
-        /// <summary>
-        /// Legacy cap on crop second-pass upscale (only if
-        /// <see cref="EnableCropScaleAndSharpen"/>).
-        /// </summary>
-        private const double MaxCropUpscale = 8.0;
-
-        /// <summary>Unsharp for full-frame prep (if enabled).</summary>
-        private const float LightSharpenAmount = 0.75f;
-        private const int SharpenPasses = 2;
-
-        /// <summary>
-        /// Legacy crop second-pass unsharp (only if <see cref="EnableCropScaleAndSharpen"/>).
-        /// Pipeline tone already sharpens once.
-        /// </summary>
-        private const float CropSharpenAmount = 0.85f;
-        private const int CropSharpenPasses = 1;
-
-        /// <summary>
         /// Active Local-LLM send long-edge cap from Image tab (or 0 if downscale off).
         /// </summary>
         private static int ActiveLlmSendMaxLongEdge =>
@@ -587,9 +541,6 @@ namespace SpeakRect
         /// <summary>ComicBook ON always uses full-strength consensus when enabled.</summary>
         private static bool ActiveDecodeConsensus =>
             EnableComicBookDecodeConsensus;
-
-        /// <summary>Wide dual-balloon L/R rescue (always on for comic path).</summary>
-        private static bool ActiveWideStripRescue => true;
 
         /// <summary>
         /// Master switch for <c>debug_images/</c> (PNGs, last_ocr.txt, archive).
@@ -713,10 +664,8 @@ namespace SpeakRect
         /// Hard cap on regions/crops per snap (sanity bound only).
         /// Do not lower this to "go faster" if it starts dropping balloons.
         /// </summary>
-        private const int MaxTextRegions = 20;
+        private const int MaxTextRegions = RegionRefineSurface.MaxRegions;
 
-        /// <summary>Minimum line box size (px) to keep before clustering.</summary>
-        /// <summary>Minimum clustered region size (px) after merge.</summary>
         /// <summary>
         /// Detect pass 1: pipeline is already upscaled; 1.0 = native pipeline pixels.
         /// </summary>
@@ -878,13 +827,6 @@ namespace SpeakRect
         private const int WideStripMaxWordsBeforeSplit = 12;
 
         /// <summary>
-        /// Minimum words for a speak unit to survive full-order / crop-primary merge.
-        /// 1 keeps short openers and one-word balloons; SpeechCleaner.IsUnusableOcrText
-        /// still applies. Detect scrap islands are separate.
-        /// </summary>
-        private const int MinSpeakUnitWords = 1;
-
-        /// <summary>
         /// Grow every OCR island by this fraction of its own size on each side.
         /// From <see cref="AppSettings.ComicInflateFracX"/> / <see cref="AppSettings.ComicInflateFracY"/>.
         /// </summary>
@@ -913,9 +855,6 @@ namespace SpeakRect
         private const int WidePanelSparseMaxRegions = 2;
         private const double WidePanelMinAspect = 1.55;
 
-        /// <summary>
-        /// Cap raw OCR line dumps in last_ocr detail (avoid huge logs).
-        /// </summary>
         /// <summary>
         /// Map user refine rects (pipeline space, list = reading order) into detect regions.
         /// Clamps and drops degenerate boxes.
@@ -986,6 +925,8 @@ namespace SpeakRect
         private static readonly object DuckLock = new();
         private static readonly List<(SimpleAudioVolume VolumeControl, float OriginalVolume)>
             DuckedSessions = new();
+        /// <summary>True while this instance ducked other apps for the current speak.</summary>
+        private bool _ownsDuck;
 
         private readonly HashSet<string> _excludedProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -1004,6 +945,9 @@ namespace SpeakRect
         private readonly object _sapiLock = new();
         private SapiSpeech.SpeechSynthesizer? _sapiSynth;
         private CancellationTokenSource? _processingCts;
+        // Previous CTS kept alive one generation so in-flight work can still
+        // read IsCancellationRequested after a new Start() swapped the source.
+        private CancellationTokenSource? _retiredCts;
 
         /// <summary>
         /// Process-wide generation for live <see cref="Start"/> speaks. Stop/preempt
@@ -1045,8 +989,7 @@ namespace SpeakRect
 
         /// <summary>
         /// Hard cap on images kept for one run (many balloons + stages).
-        /// Each image is full pipeline resolution (no analytics downscale) so
-        /// Preview / Live / Analytics show the same pipe pixels.
+        /// Each image is full pipeline resolution (no analytics downscale).
         /// </summary>
         private const int AnalyticsMaxImages = 48;
 
@@ -1090,6 +1033,19 @@ namespace SpeakRect
             // Do not create debug_images/ in Release — only EnsureDebugFolder when dumping.
         }
 
+        /// <summary>
+        /// Cancel the current CTS and install <paramref name="next"/>. The previous
+        /// source stays alive one generation so in-flight work can still observe cancel.
+        /// Caller must hold _ttsLock.
+        /// </summary>
+        private void SwapProcessingCts(CancellationTokenSource next)
+        {
+            try { _processingCts?.Cancel(); } catch { /* ignore */ }
+            try { _retiredCts?.Dispose(); } catch { /* ignore */ }
+            _retiredCts = _processingCts;
+            _processingCts = next;
+        }
+
         public void Start()
         {
             // New hotkey snap/speak preempts background Balloons refine speak (overlay hide).
@@ -1098,9 +1054,7 @@ namespace SpeakRect
             CancellationToken token;
             lock (_ttsLock)
             {
-                // Cancel any in-flight capture/TTS on this instance
-                try { _processingCts?.Cancel(); } catch { /* ignore */ }
-                try { _processingCts?.Dispose(); } catch { /* ignore */ }
+                SwapProcessingCts(new CancellationTokenSource());
                 try
                 {
                     _player.Pause();
@@ -1109,12 +1063,11 @@ namespace SpeakRect
                 catch { }
                 CancelSapiSpeech();
 
-                _processingCts = new CancellationTokenSource();
-                token = _processingCts.Token;
+                token = _processingCts!.Token;
             }
 
-            // Unduck previous session before a new snap (speak path ducks again if needed)
-            RestoreAudio();
+            if (_ownsDuck)
+                RestoreAudio();
             // Bump generation so a Stop()'d host that still runs ignores late TTS.
             int gen = Interlocked.Increment(ref LiveSpeakGeneration);
             _speakGeneration = gen;
@@ -1143,8 +1096,7 @@ namespace SpeakRect
             lock (_ttsLock)
             {
                 try { _processingCts?.Cancel(); } catch { /* ignore */ }
-                try { _processingCts?.Dispose(); } catch { /* ignore */ }
-                _processingCts = null;
+                // Do not dispose here: in-flight work still holds this Token.
 
                 try
                 {
@@ -1155,7 +1107,8 @@ namespace SpeakRect
                 CancelSapiSpeech();
             }
 
-            RestoreAudio();
+            if (_ownsDuck)
+                RestoreAudio();
         }
 
         /// <summary>
@@ -1194,6 +1147,13 @@ namespace SpeakRect
         public void Dispose()
         {
             Stop();
+            lock (_ttsLock)
+            {
+                try { _processingCts?.Dispose(); } catch { /* ignore */ }
+                try { _retiredCts?.Dispose(); } catch { /* ignore */ }
+                _processingCts = null;
+                _retiredCts = null;
+            }
             lock (_sapiLock)
             {
                 try { _sapiSynth?.Dispose(); } catch { /* ignore */ }
@@ -1216,10 +1176,8 @@ namespace SpeakRect
             CancellationToken linked;
             lock (_ttsLock)
             {
-                try { _processingCts?.Cancel(); } catch { /* ignore */ }
-                try { _processingCts?.Dispose(); } catch { /* ignore */ }
-                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                linked = _processingCts.Token;
+                SwapProcessingCts(CancellationTokenSource.CreateLinkedTokenSource(token));
+                linked = _processingCts!.Token;
             }
 
             try
@@ -1248,10 +1206,8 @@ namespace SpeakRect
             CancellationToken linked;
             lock (_ttsLock)
             {
-                try { _processingCts?.Cancel(); } catch { /* ignore */ }
-                try { _processingCts?.Dispose(); } catch { /* ignore */ }
-                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                linked = _processingCts.Token;
+                SwapProcessingCts(CancellationTokenSource.CreateLinkedTokenSource(token));
+                linked = _processingCts!.Token;
             }
 
             try
@@ -1282,10 +1238,8 @@ namespace SpeakRect
             CancellationToken linked;
             lock (_ttsLock)
             {
-                try { _processingCts?.Cancel(); } catch { /* ignore */ }
-                try { _processingCts?.Dispose(); } catch { /* ignore */ }
-                _processingCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                linked = _processingCts.Token;
+                SwapProcessingCts(CancellationTokenSource.CreateLinkedTokenSource(token));
+                linked = _processingCts!.Token;
             }
 
             bool ducked = false;
@@ -1410,8 +1364,28 @@ namespace SpeakRect
                     return;
                 }
 
-                bool hasText = await BalloonOcrDetect.SeesTextAsync(
-                    engine, llmSource, token).ConfigureAwait(false);
+                Bitmap gateSrc = llmSource;
+                ComicDetectTonePair? gatePair = null;
+                if (watchPipe == WatchPipeline.ImageBalloon)
+                {
+                    gatePair = ComicDetectTonePair.Create(
+                        llmSource,
+                        EnableWinOcrDetectGrayFog,
+                        WinOcrDetectGrayFogAmount,
+                        WinOcrDetectGrayFogLevel,
+                        ApplyGrayFog);
+                    gateSrc = gatePair.Detect;
+                }
+                bool hasText;
+                try
+                {
+                    hasText = await BalloonOcrDetect.SeesTextAsync(
+                        engine, gateSrc, token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    try { gatePair?.Dispose(); } catch { /* ignore */ }
+                }
                 _watchTextGate = hasText ? WatchTextGate.HasText : WatchTextGate.NoText;
                 detail.AppendLine($"watch-gate: winocrHasText={hasText}");
                 Debug.WriteLine(
@@ -1973,7 +1947,7 @@ namespace SpeakRect
             Interlocked.Increment(ref _ocrInFlight);
             try
             {
-            // Freeze knobs for this Balloons still-image speak (same as live Comic Book).
+            // Freeze knobs for this Balloons still-image speak.
             using var _runSnap = SpeakRunSettings.Push(SpeakRunSettings.CaptureFromApp());
 
             var detail = new StringBuilder();
@@ -2037,7 +2011,7 @@ namespace SpeakRect
                 }
 
                 var sw = Stopwatch.StartNew();
-                // Shared Image prep (same as live ComicBook + Settings → Image).
+                // Shared Image prep (Comic Book + Settings → Image).
                 prepStages = BuildImagePrepStages(
                     rawSnap, buildTone: true, detail);
                 Bitmap toneOwned = prepStages.ToneOrPre;
@@ -2136,15 +2110,18 @@ namespace SpeakRect
                     ? regions
                     : ExpandRegionsByCropPad(regions, pipeW, pipeH, overlayPad);
                 overlay = BuildRegionsOverlayBitmap(detectImage, speakOverlayBoxes);
-                // Publish for Analytics when speaking from Balloons / still image
-                try
+                // POI already published poi_guide; skip this WinOCR overlay.
+                if (!SpeakRunSettings.GetComicPoiMarkers())
                 {
-                    CaptureAnalyticsImage(
-                        "regions",
-                        "WinOCR detect boxes (fog when on; not VL input)",
-                        overlay);
+                    try
+                    {
+                        CaptureAnalyticsImage(
+                            "regions",
+                            "WinOCR detect boxes (fog when on; not VL input)",
+                            overlay);
+                    }
+                    catch { /* ignore */ }
                 }
-                catch { /* ignore */ }
 
                 var spokenParts = new List<string>();
                 string chosenTag;
@@ -2667,6 +2644,7 @@ namespace SpeakRect
                     lock (DuckLock)
                         DuckedSessions.Add((vol, original));
                 }
+                _ownsDuck = true;
             }
             catch (Exception ex)
             {
@@ -2682,6 +2660,7 @@ namespace SpeakRect
                 toRestore = new List<(SimpleAudioVolume, float)>(DuckedSessions);
                 DuckedSessions.Clear();
             }
+            _ownsDuck = false;
 
             foreach (var (ctrl, original) in toRestore)
                 try { ctrl.Volume = original; } catch { }
@@ -4198,18 +4177,10 @@ namespace SpeakRect
 
         /// <summary>
         /// Shared Comic Book POI path for live overlay and Balloons Speak.
-        /// <list type="bullet">
-        /// <item>Compose base is always <b>tone</b> (never detect fog).</item>
-        /// <item>Display boxes: if override pad is 0 (Balloons refine boxes),
-        /// region bounds are already final; else expand cores with crop pad once.</item>
-        /// <item>Full-page green guide always published for analytics/preview map.</item>
-        /// <item><see cref="AppSettings.ComicPoiAutoStack"/> on (stock): each island →
-        /// its own orange canvas → VL (+ TTS) one at a time (<c>comic-poi-stack</c>).</item>
-        /// <item>Stack off/fail + multi-island: per-island VL+TTS on tone.</item>
-        /// <item>1 island + stack off/fail: full-page guide VL.</item>
-        /// <item>Island Zoom: prefer pre-downscale letterbox crop when richer, then
-        /// Lanczos enlarge to target long-edge (Mag-style).</item>
-        /// </list>
+        /// Compose is always tone. Override boxes (pad 0) are already final; otherwise
+        /// cores get crop pad once. Full-page green map is for edit/analytics.
+        /// Island canvases on: one orange canvas VL per island. Off/fail with several
+        /// islands: tone crops. One island and canvases off: full-page guide VL.
         /// </summary>
         /// <param name="letterboxHiRes">
         /// Image-prep letterbox (before page long-edge scale). When Zoom is on and
@@ -4284,14 +4255,12 @@ namespace SpeakRect
                 CaptureAnalyticsImage(
                     "poi_guide",
                     poiAutoStack
-                        ? (fogOutside
-                            ? "1 · POI edit map only (not Local-LLM input)"
-                            : "1 · POI edit map only (not Local-LLM input)")
+                        ? "1 · POI edit map only (not Local-LLM input)"
                         : boxes.Count >= 2
                             ? "1 · POI edit map (Speak multi = tone crops, not this full page)"
-                            : (fogOutside
+                            : fogOutside
                                 ? "1 · POI full-page VL guide + outside fog"
-                                : "1 · POI full-page VL guide"),
+                                : "1 · POI full-page VL guide",
                     guideBmp);
                 // isVlInput only if we will NOT replace with stack (stack overwrites send files).
                 SavePoiVlDebug(guideBmp, isVlInput: !poiAutoStack && boxes.Count == 1);
@@ -4329,7 +4298,6 @@ namespace SpeakRect
                                     toneImage,
                                     new[] { boxes[i] },
                                     detail,
-                                    paintBullseyes: false,
                                     stripGapPx: 0,
                                     marginPx: margin,
                                     // Full page islands: wide-ribbon expand must not
@@ -4725,7 +4693,7 @@ namespace SpeakRect
             }
 
             string raw = await ExtractTextWithLocalLlmAsync(
-                stackBmp, prompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
+                stackBmp, prompt, FullFrameMaxTokens, KoboldPrimaryTemperature, token);
             token.ThrowIfCancellationRequested();
             string cleaned = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- crop-stack raw ---\n{raw}");
@@ -4733,7 +4701,7 @@ namespace SpeakRect
                 return cleaned;
 
             raw = await ExtractTextWithLocalLlmAsync(
-                stackBmp, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
+                stackBmp, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature, token);
             token.ThrowIfCancellationRequested();
             cleaned = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- crop-stack recovery ---\n{raw}");
@@ -4741,7 +4709,7 @@ namespace SpeakRect
                 return cleaned;
 
             raw = await ExtractTextWithLocalLlmAsync(
-                stackBmp, prompt, FullFrameMaxTokens, KoboldRecoveryTemperature);
+                stackBmp, prompt, FullFrameMaxTokens, KoboldRecoveryTemperature, token);
             token.ThrowIfCancellationRequested();
             cleaned = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine(
@@ -5056,8 +5024,7 @@ namespace SpeakRect
                 return new List<string>();
 
             // Wide dual-balloon panels: single full-frame often misses the right bubble.
-            if (ActiveWideStripRescue &&
-                LooksLikeIncompleteWideStrip(content, fullClean!))
+            if (LooksLikeIncompleteWideStrip(content, fullClean!))
             {
                 detail.AppendLine(
                     $"wide-strip incomplete? aspect={content.Width / (double)content.Height:F2} " +
@@ -5105,11 +5072,6 @@ namespace SpeakRect
             using var fullPrep = PrepareForLocalLlmOcr(source);
             if (savePrep)
             {
-                // Analytics: only when full-frame scale+sharpen actually changes the
-                // image. With EnableFullFrameScaleAndSharpen=false this is a clone of
-                // OCR prep already logged (Capture / letterbox / … / tone) — skip.
-                if (EnableFullFrameScaleAndSharpen)
-                    CaptureAnalyticsImage("full_prep", "Full-frame prep", fullPrep);
                 if (ActiveAnyDebugArtifacts)
                 {
                     try
@@ -5147,7 +5109,8 @@ namespace SpeakRect
             string fullRaw = await ExtractTextWithLocalLlmAsync(
                 fullPrep,
                 promptOverride: promptOverride,
-                maxTokens: FullFrameMaxTokens);
+                maxTokens: FullFrameMaxTokens,
+                token: token);
             token.ThrowIfCancellationRequested();
             string fullClean = SpeechCleaner.CleanForSpeech(fullRaw);
             detail.AppendLine($"--- full-frame raw ---\n{fullRaw}");
@@ -5155,7 +5118,7 @@ namespace SpeakRect
             if (SpeechCleaner.IsUnusableOcrText(fullClean))
             {
                 fullRaw = await ExtractTextWithLocalLlmAsync(
-                    fullPrep, LocalLlmTaskPrompt, FullFrameMaxTokens);
+                    fullPrep, LocalLlmTaskPrompt, FullFrameMaxTokens, token: token);
                 token.ThrowIfCancellationRequested();
                 fullClean = SpeechCleaner.CleanForSpeech(fullRaw);
                 detail.AppendLine($"--- full-frame recovery OCR: ---\n{fullRaw}");
@@ -5167,7 +5130,8 @@ namespace SpeakRect
                     fullPrep,
                     promptOverride: promptOverride,
                     maxTokens: FullFrameMaxTokens,
-                    temperature: KoboldRecoveryTemperature);
+                    temperature: KoboldRecoveryTemperature,
+                    token: token);
                 token.ThrowIfCancellationRequested();
                 fullClean = SpeechCleaner.CleanForSpeech(fullRaw);
                 detail.AppendLine(
@@ -5190,7 +5154,7 @@ namespace SpeakRect
             string best = current;
 
             string raw = await ExtractTextWithLocalLlmAsync(
-                prep, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature);
+                prep, LocalLlmTaskPrompt, FullFrameMaxTokens, KoboldPrimaryTemperature, token);
             token.ThrowIfCancellationRequested();
             string clean = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- wide longer OCR: ---\n{raw}");
@@ -5198,7 +5162,7 @@ namespace SpeakRect
                 best = clean;
 
             raw = await ExtractTextWithLocalLlmAsync(
-                prep, null, FullFrameMaxTokens, KoboldRecoveryTemperature);
+                prep, null, FullFrameMaxTokens, KoboldRecoveryTemperature, token);
             token.ThrowIfCancellationRequested();
             clean = SpeechCleaner.CleanForSpeech(raw);
             detail.AppendLine($"--- wide longer T={KoboldRecoveryTemperature:F1} ---\n{raw}");
@@ -5299,14 +5263,14 @@ namespace SpeakRect
                 else
                 {
                     string raw = await ExtractTextWithLocalLlmAsync(
-                        prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                        prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature, token);
                     token.ThrowIfCancellationRequested();
                     clean = SpeechCleaner.CleanForSpeech(raw);
 
                     if (SpeechCleaner.IsUnusableOcrText(clean))
                     {
                         raw = await ExtractTextWithLocalLlmAsync(
-                            prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                            prep, LocalLlmTaskPrompt, CropMaxTokens, KoboldRecoveryTemperature, token);
                         token.ThrowIfCancellationRequested();
                         clean = SpeechCleaner.CleanForSpeech(raw);
                     }
@@ -5500,7 +5464,6 @@ namespace SpeakRect
                 if (crop == null)
                     return (null, "");
 
-                // Mag-style zoom (Lanczos) unless legacy EnableCropScaleAndSharpen.
                 using var prepared = PrepareCropForLocalLlmOcr(crop);
                 if (prepared.Width != crop.Width || prepared.Height != crop.Height)
                 {
@@ -5544,24 +5507,14 @@ namespace SpeakRect
 
                 // Fallback ladder if consensus disabled
                 string raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
+                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature, token);
                 token.ThrowIfCancellationRequested();
                 string cleaned = SpeechCleaner.CleanForSpeech(raw);
                 if (!SpeechCleaner.IsUnusableOcrText(cleaned))
                     return (cleaned, raw);
 
                 raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldPrimaryTemperature);
-                token.ThrowIfCancellationRequested();
-                cleaned = SpeechCleaner.CleanForSpeech(raw);
-                if (!SpeechCleaner.IsUnusableOcrText(cleaned))
-                {
-                    detail.AppendLine($"      {tag} recovery OCR: ok");
-                    return (cleaned, raw);
-                }
-
-                raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldRecoveryTemperature);
+                    prepared, LocalLlmTaskPrompt, CropMaxTokens, KoboldRecoveryTemperature, token);
                 token.ThrowIfCancellationRequested();
                 cleaned = SpeechCleaner.CleanForSpeech(raw);
                 detail.AppendLine(
@@ -5777,7 +5730,7 @@ namespace SpeakRect
             async Task AddPassAsync(string label, string prompt, double temperature)
             {
                 string raw = await ExtractTextWithLocalLlmAsync(
-                    prepared, prompt, maxTokens, temperature);
+                    prepared, prompt, maxTokens, temperature, token);
                 token.ThrowIfCancellationRequested();
                 string clean = SpeechCleaner.CleanForSpeech(raw);
                 reads.Add((label, raw, clean));
@@ -5941,55 +5894,6 @@ namespace SpeakRect
         // ------------------- WinOCR region detect / cluster / order -------------------
 
         /// <summary>
-        /// Single cheap OCR detect pass after prep — word count only (diagnostic log).
-        /// No multi-scale retry, no orphan rescue. Does <b>not</b> gate full detect/crops;
-        /// Comic Book always continues to <see cref="BuildComicReadingRegionsAsync"/>.
-        /// </summary>
-        private async Task<(int Words, string Detail)> QuickWinOcrWordCountAsync(
-            Bitmap capture,
-            CancellationToken token)
-        {
-            var log = new StringBuilder();
-            log.AppendLine(
-                $"quick-winocr wordcount (single pass scale~{WinOcrDetectScale}, no rescue)");
-
-            var engine = GetWinOcrEngine();
-            if (engine == null || capture.Width < 2 || capture.Height < 2)
-            {
-                log.AppendLine("  no engine or empty capture ? words=0");
-                return (0, log.ToString());
-            }
-
-            try
-            {
-                // One pass only - reuse existing detect bitmap build for consistency
-                var regions = await RunWinOcrPassAsync(
-                    engine, capture, WinOcrDetectScale, token, log);
-                token.ThrowIfCancellationRequested();
-
-                int words = 0;
-                foreach (var r in regions)
-                    words += ComicRegionGeometry.CountWords(r.WinOcrText);
-
-                // Also count raw joined text in case clustering dropped scraps
-                // (regions already filtered junk; word sum is the gate signal)
-                log.AppendLine(
-                    $"  regions={regions.Count} words={words}");
-                return (words, log.ToString());
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                log.AppendLine($"  quick-winocr failed: {ex.Message} ? words=0");
-                Debug.WriteLine($"[WinOCR] quick wordcount failed: {ex.Message}");
-                return (0, log.ToString());
-            }
-        }
-
-        /// <summary>
         /// Shared detect entry for live + Balloons preview/speak.
         /// Detect fog off → WinOCR on tone. On → fixed gray fog amount, then full
         /// reading-region pipeline. (Dynamic fog search was removed.)
@@ -6037,7 +5941,7 @@ namespace SpeakRect
         /// Balloons speak-test. Same detect image + settings must yield the same
         /// reading-blocks (preview is useless if it disagrees with live).
         /// Steps: WinOCR detect (fog) → grow → dead-island → coalesce →
-        /// compact-collapse → mega-split → merge-overlap → Western sort.
+        /// compact-collapse → merge-overlap → Western sort.
         /// </summary>
         private async Task<(
             List<DetectedTextRegion> Regions,
@@ -6115,11 +6019,9 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Locate text islands for crops. <b>Full strength: do not miss balloons.</b>
-        /// Two full-frame OCR detect passes (scale 1.0 + 1.5), pick best, then
-        /// bright-blob orphan fill so plates OCR skipped still get a Local-LLM crop.
-        /// Always used on the Comic path when there is no region override — word-count
-        /// is diagnostic only and does <b>not</b> gate this method.
+        /// WinOCR detect: two full-frame passes (scale 1.0 and 1.5), then bright-blob
+        /// fill for plates the recognizer skipped. Comic path when there is no refine
+        /// override; word count is logged, not used as a gate.
         /// </summary>
         private async Task<DetectionResult> DetectTextRegionsAsync(Bitmap capture, CancellationToken token)
         {
@@ -6503,229 +6405,6 @@ namespace SpeakRect
             {
                 contentOwned?.Dispose();
             }
-        }
-
-        /// <summary>
-        /// When WinOCR returned some islands but bright balloons exist with no
-        /// matching box, re-detect inside each orphan (or keep geometry for Kobold
-        /// only when WinOCR budget is exhausted without a try).
-        /// Fixes partial misses like a left balloon skipped on a wide panel.
-        /// Rejects pale-hair / sky / face false blobs: ink check first; if a
-        /// tight WinOCR pass runs and finds no letters, do <b>not</b> keep empty
-        /// geometry (faces look balloon-sized but OCR-empty).
-        /// </summary>
-        // Orphan recover removed from Balloons — method kept only if any debug path
-        // still references the name; always returns existing islands.
-        private static async Task<List<DetectedTextRegion>> FillOrphanBalloonBlobsAsync(
-            OcrEngine engine,
-            Bitmap capture,
-            List<DetectedTextRegion> existing,
-            CancellationToken token,
-            StringBuilder log)
-        {
-            await Task.CompletedTask.ConfigureAwait(false);
-            _ = (engine, capture, token, log);
-            return existing;
-        }
-
-#if false // orphan recover removed
-        private static async Task<List<DetectedTextRegion>> FillOrphanBalloonBlobsAsync_Removed(
-            OcrEngine engine,
-            Bitmap capture,
-            List<DetectedTextRegion> existing,
-            CancellationToken token,
-            StringBuilder log)
-        {
-            var blobs = ProposeBrightBlobRegions(capture, maxRegions: MaxTextRegions);
-            if (blobs.Count == 0)
-            {
-                log.AppendLine("  partial-miss: no bright blobs");
-                return existing;
-            }
-
-            var orphans = blobs
-                .Where(b => !AnyRegionOverlapsBlob(existing, b.Bounds))
-                .ToList();
-
-            log.AppendLine(
-                $"  partial-miss: blobs={blobs.Count} orphans={orphans.Count} " +
-                $"(ocrIslands={existing.Count})");
-
-            if (orphans.Count == 0)
-                return existing;
-
-            // Largest balloons first - only the top N get a WinOCR re-detect
-            orphans = orphans
-                .OrderByDescending(o => o.Bounds.Width * (long)o.Bounds.Height)
-                .ToList();
-
-            var merged = existing.ToList();
-            int added = 0;
-            int rejected = 0;
-            int ocrBudget = ActiveMaxOrphanWinOcrPasses;
-
-            foreach (var orphan in orphans)
-            {
-                token.ThrowIfCancellationRequested();
-                if (merged.Count >= MaxTextRegions)
-                    break;
-
-                // Ink check before expensive crop OCR - drops white hair / flat sky
-                if (!LooksLikeSpeechBalloonFill(capture, orphan.Bounds))
-                {
-                    rejected++;
-                    log.AppendLine(
-                        $"  orphan reject-ink @{orphan.Bounds.X},{orphan.Bounds.Y} " +
-                        $"{orphan.Bounds.Width}x{orphan.Bounds.Height}");
-                    continue;
-                }
-
-                long frameA = (long)capture.Width * capture.Height;
-                long area = (long)orphan.Bounds.Width * orphan.Bounds.Height;
-                bool balloonSized =
-                    orphan.Bounds.Width >= 80 &&
-                    orphan.Bounds.Height >= 60 &&
-                    area >= 8000 &&
-                    area <= frameA * 0.08 &&
-                    orphan.Bounds.Width <= capture.Width * 0.42 &&
-                    orphan.Bounds.Height <= capture.Height * 0.42;
-
-                var cropRect = Rectangle.Inflate(orphan.Bounds, 8, 8);
-                cropRect.Intersect(new Rectangle(0, 0, capture.Width, capture.Height));
-                if (cropRect.Width < BalloonOcrDetect.MinClusterSize || cropRect.Height < BalloonOcrDetect.MinClusterSize)
-                    continue;
-
-                // Budgeted tight WinOCR (largest orphans only)
-                if (ocrBudget > 0)
-                {
-                    using var crop = CropBitmap(capture, cropRect);
-                    if (crop == null)
-                        continue;
-
-                    ocrBudget--;
-                    var inner = await RunWinOcrPassAsync(
-                        engine, crop, OrphanWinOcrScale, token, log);
-                    if (inner.Count > 0)
-                    {
-                        Rectangle? union = null;
-                        var texts = new List<string>();
-                        foreach (var r in inner)
-                        {
-                            var b = r.Bounds;
-                            b.Offset(cropRect.X, cropRect.Y);
-                            b.Intersect(new Rectangle(0, 0, capture.Width, capture.Height));
-                            if (b.Width < BalloonOcrDetect.MinClusterSize || b.Height < BalloonOcrDetect.MinClusterSize)
-                                continue;
-                            union = union == null ? b : Rectangle.Union(union.Value, b);
-                            if (!string.IsNullOrWhiteSpace(r.WinOcrText))
-                                texts.Add(r.WinOcrText.Trim());
-                        }
-
-                        if (union != null && !AnyRegionOverlapsBlob(merged, union.Value))
-                        {
-                            string joined = Regex.Replace(
-                                string.Join(" ", texts), @"\s+", " ").Trim();
-                            int oAlnum = SpeechCleaner.CountAlnum(joined);
-                            int oWords = ComicRegionGeometry.CountWords(joined);
-                            // Weak single-token OCR (e.g. "dog" on art) is not a balloon
-                            if (oAlnum < MinIslandAlnumChars || oWords < 2)
-                            {
-                                rejected++;
-                                log.AppendLine(
-                                    $"  orphan reject-weak-ocr @{union.Value.X},{union.Value.Y} " +
-                                    $"{union.Value.Width}x{union.Value.Height} " +
-                                    $"alnum={oAlnum} words={oWords} \"{Truncate(joined, 24)}\"");
-                                continue;
-                            }
-                            merged.Add(new DetectedTextRegion
-                            {
-                                Bounds = union.Value,
-                                WinOcrText = joined
-                            });
-                            added++;
-                            log.AppendLine(
-                                $"  orphan ocr @{union.Value.X},{union.Value.Y} " +
-                                $"{union.Value.Width}x{union.Value.Height} " +
-                                $"alnum={oAlnum}");
-                            continue;
-                        }
-                    }
-
-                    // OCR was attempted and found nothing usable - drop the blob.
-                    // Faces / sky / hair often pass size + ink but have no letters;
-                    // keeping empty geometry only wastes crop-Kobold time.
-                    rejected++;
-                    log.AppendLine(
-                        $"  orphan reject-empty-ocr @{orphan.Bounds.X},{orphan.Bounds.Y} " +
-                        $"{orphan.Bounds.Width}x{orphan.Bounds.Height}");
-                    continue;
-                }
-
-                // Geometry-only only when WinOCR budget is exhausted (never tried).
-                // Accuracy-first safety net for remaining balloon-sized plates.
-                if (balloonSized)
-                {
-                    if (AnyRegionOverlapsBlob(merged, orphan.Bounds))
-                    {
-                        rejected++;
-                        continue;
-                    }
-                    log.AppendLine(
-                        $"  orphan keep-geometry @{orphan.Bounds.X},{orphan.Bounds.Y} " +
-                        $"{orphan.Bounds.Width}x{orphan.Bounds.Height} (ocr-budget)");
-                    merged.Add(new DetectedTextRegion
-                    {
-                        Bounds = orphan.Bounds,
-                        WinOcrText = ""
-                    });
-                    added++;
-                }
-                else
-                {
-                    rejected++;
-                    log.AppendLine(
-                        $"  orphan reject-no-ocr @{orphan.Bounds.X},{orphan.Bounds.Y} " +
-                        $"{orphan.Bounds.Width}x{orphan.Bounds.Height} (size)");
-                }
-            }
-
-            if (rejected > 0)
-                log.AppendLine($"  partial-miss rejected {rejected} non-balloon blob(s)");
-
-            if (added == 0)
-                return existing;
-
-            log.AppendLine($"  partial-miss added {added} island(s)");
-            return SortComicReadingOrderRegions(merged);
-        }
-#endif
-
-        /// <summary>
-        /// True when an existing OCR island substantially overlaps a bright-blob
-        /// proposal (blob is already "claimed").
-        /// </summary>
-        private static bool AnyRegionOverlapsBlob(
-            List<DetectedTextRegion> regions, Rectangle blob)
-        {
-            if (regions.Count == 0)
-                return false;
-
-            double blobArea = Math.Max(1.0, blob.Width * (double)blob.Height);
-            foreach (var r in regions)
-            {
-                var inter = Rectangle.Intersect(r.Bounds, blob);
-                if (inter.Width <= 0 || inter.Height <= 0)
-                    continue;
-
-                double interA = inter.Width * (double)inter.Height;
-                double regA = Math.Max(1.0, r.Bounds.Width * (double)r.Bounds.Height);
-
-                // Blob mostly covered by region, or region mostly inside blob
-                if (interA / blobArea >= 0.22 || interA / regA >= 0.45)
-                    return true;
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -8062,14 +7741,10 @@ namespace SpeakRect
         /// Merge also honors <see cref="TextRegionPadding"/> when testing overlap.
         /// </para>
         /// </summary>
-        /// <param name="growOnlyNoMergeNoNudge">
-        /// Inflate only — do not merge or separate (legacy trial path).
-        /// </param>
         private static List<DetectedTextRegion> ImproveDetectedRegions(
             List<DetectedTextRegion> regions,
             int capW,
-            int capH,
-            bool growOnlyNoMergeNoNudge = false)
+            int capH)
         {
             if (regions.Count == 0)
                 return regions;
@@ -8112,12 +7787,6 @@ namespace SpeakRect
                     Bounds = bounds,
                     WinOcrText = r.WinOcrText
                 });
-            }
-
-            if (growOnlyNoMergeNoNudge)
-            {
-                // Dyn-fog trial: leave grown boxes as-is (overlaps ok for area score).
-                return SortComicReadingOrderRegions(inflated);
             }
 
             if (EnableMergeOverlappingIslands)
@@ -8219,176 +7888,6 @@ namespace SpeakRect
             }
             return result.Count > 0 ? result : regions;
         }
-
-        // Mega-island split removed from Balloons — no-op.
-        private static Task<List<DetectedTextRegion>> SplitMegaReadingIslandsAsync(
-            Bitmap pipelineImage,
-            List<DetectedTextRegion> regions,
-            StringBuilder detail,
-            CancellationToken token)
-        {
-            _ = (pipelineImage, detail, token);
-            return Task.FromResult(regions);
-        }
-
-#if false // mega-split removed
-        private static bool IsMegaReadingIsland(Rectangle b, int capW, int capH)
-        {
-            _ = (b, capW, capH);
-            return false;
-        }
-
-        private static async Task<List<DetectedTextRegion>> SplitMegaReadingIslandsAsync_Removed(
-            Bitmap pipelineImage,
-            List<DetectedTextRegion> regions,
-            StringBuilder detail,
-            CancellationToken token)
-        {
-            if (regions.Count == 0 || pipelineImage == null)
-                return regions;
-
-            if (true)
-            {
-                detail.AppendLine("mega-split: removed");
-                return regions;
-            }
-
-            int capW = pipelineImage.Width;
-            int capH = pipelineImage.Height;
-            if (!regions.Any(r => IsMegaReadingIsland(r.Bounds, capW, capH)))
-                return regions;
-
-            var engine = GetWinOcrEngine();
-            if (engine == null)
-            {
-                detail.AppendLine("mega-split: no WinOCR engine - skip");
-                return regions;
-            }
-
-            var result = new List<DetectedTextRegion>();
-            int splitCount = 0;
-
-            foreach (var region in regions)
-            {
-                token.ThrowIfCancellationRequested();
-
-                if (!IsMegaReadingIsland(region.Bounds, capW, capH))
-                {
-                    result.Add(region);
-                    continue;
-                }
-
-                var cropRect = Rectangle.Inflate(region.Bounds, MegaIslandSplitPad, MegaIslandSplitPad);
-                cropRect.Intersect(new Rectangle(0, 0, capW, capH));
-                if (cropRect.Width < 40 || cropRect.Height < 40)
-                {
-                    result.Add(region);
-                    continue;
-                }
-
-                using var crop = CropBitmap(pipelineImage, cropRect);
-                if (crop == null)
-                {
-                    result.Add(region);
-                    continue;
-                }
-
-                var splitLog = new StringBuilder();
-                List<DetectedTextRegion> inner;
-                try
-                {
-                    inner = await RunWinOcrPassAsync(
-                        engine, crop, MegaIslandSplitScale, token, splitLog);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    detail.AppendLine(
-                        $"mega-split fail @{region.Bounds.X},{region.Bounds.Y} " +
-                        $"{region.Bounds.Width}x{region.Bounds.Height}: {ex.Message}");
-                    result.Add(region);
-                    continue;
-                }
-
-                if (inner.Count == 0)
-                {
-                    detail.AppendLine(
-                        $"mega-split keep (empty OCR) " +
-                        $"@{region.Bounds.X},{region.Bounds.Y} " +
-                        $"{region.Bounds.Width}x{region.Bounds.Height}");
-                    result.Add(region);
-                    continue;
-                }
-
-                // Map crop-local boxes ? pipeline coords
-                var mapped = new List<DetectedTextRegion>(inner.Count);
-                foreach (var r in inner)
-                {
-                    var b = r.Bounds;
-                    b.Offset(cropRect.X, cropRect.Y);
-                    b.Intersect(new Rectangle(0, 0, capW, capH));
-                    if (b.Width < BalloonOcrDetect.MinClusterSize || b.Height < BalloonOcrDetect.MinClusterSize)
-                        continue;
-                    mapped.Add(new DetectedTextRegion
-                    {
-                        Bounds = b,
-                        WinOcrText = r.WinOcrText
-                    });
-                }
-
-                if (mapped.Count == 0)
-                {
-                    result.Add(region);
-                    continue;
-                }
-
-                // Mild pad + scrap-only coalesce so line scraps rejoin, balloons stay split
-                mapped = ImproveDetectedRegions(mapped, capW, capH);
-                mapped = CoalesceIntoReadingBlocks(mapped, capW, capH, aggressive: false);
-                mapped = FilterDeadDetectRegions(mapped, pipelineImage, detail);
-
-                // Only replace mega if we truly got multiple islands
-                if (mapped.Count < 2)
-                {
-                    detail.AppendLine(
-                        $"mega-split keep (pieces={mapped.Count}) " +
-                        $"@{region.Bounds.X},{region.Bounds.Y} " +
-                        $"{region.Bounds.Width}x{region.Bounds.Height}");
-                    result.Add(region);
-                    continue;
-                }
-
-                // Safety: pieces must not explode past budget
-                if (result.Count + mapped.Count > MaxTextRegions)
-                {
-                    int room = Math.Max(1, MaxTextRegions - result.Count);
-                    mapped = mapped.Take(room).ToList();
-                }
-
-                detail.AppendLine(
-                    $"mega-split @{region.Bounds.X},{region.Bounds.Y} " +
-                    $"{region.Bounds.Width}x{region.Bounds.Height} ? {mapped.Count} islands");
-                foreach (var p in mapped)
-                {
-                    detail.AppendLine(
-                        $"    piece @{p.Bounds.X},{p.Bounds.Y} " +
-                        $"{p.Bounds.Width}x{p.Bounds.Height} " +
-                        $"\"{Truncate(p.WinOcrText, 36)}\"");
-                }
-
-                result.AddRange(mapped);
-                splitCount++;
-            }
-
-            if (splitCount == 0)
-                return regions;
-
-            return SortComicReadingOrderRegions(result);
-        }
-#endif
 
         /// <summary>
         /// Merge WinOCR <b>line scraps of the same balloon</b> only.
@@ -9430,8 +8929,10 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// After expand-retry / tiny pre-expand: trim only the *expanded* margin so
-        /// we do not swallow neighbors, but never smaller than <paramref name="core"/>.
+        /// <summary>
+        /// After expand-retry / tiny pre-expand: trim only the extra margin so we
+        /// do not swallow neighbors, never smaller than <paramref name="core"/>.
+        /// Leftover size is spent on the free side (up when the bottom is blocked).
         /// </summary>
         private static Rectangle ClampExpandedAwayFromNeighbors(
             Rectangle expanded,
@@ -9440,11 +8941,16 @@ namespace SpeakRect
             int capW,
             int capH)
         {
-            // Start from expanded, always cover core
             int left = Math.Min(expanded.Left, core.Left);
             int top = Math.Min(expanded.Top, core.Top);
             int right = Math.Max(expanded.Right, core.Right);
             int bottom = Math.Max(expanded.Bottom, core.Bottom);
+            int wantW = right - left;
+            int wantH = bottom - top;
+            int limitL = 0;
+            int limitT = 0;
+            int limitR = capW;
+            int limitB = capH;
 
             if (neighbors != null)
             {
@@ -9465,17 +8971,17 @@ namespace SpeakRect
 
                     if (Math.Abs(acy - ocy) >= Math.Abs(acx - ocx))
                     {
-                        // Vertical separation preferred
                         if (ocy < acy)
                         {
-                            // Neighbor above: pull our top down, not past core.Top
                             int limit = Math.Min(core.Top, o.Bottom);
                             top = Math.Max(top, limit);
+                            limitT = Math.Max(limitT, limit);
                         }
                         else
                         {
                             int limit = Math.Max(core.Bottom, o.Top);
                             bottom = Math.Min(bottom, limit);
+                            limitB = Math.Min(limitB, limit);
                         }
                     }
                     else
@@ -9484,17 +8990,43 @@ namespace SpeakRect
                         {
                             int limit = Math.Min(core.Left, o.Right);
                             left = Math.Max(left, limit);
+                            limitL = Math.Max(limitL, limit);
                         }
                         else
                         {
                             int limit = Math.Max(core.Right, o.Left);
                             right = Math.Min(right, limit);
+                            limitR = Math.Min(limitR, limit);
                         }
                     }
                 }
             }
 
-            // Core floor
+            left = Math.Min(left, core.Left);
+            top = Math.Min(top, core.Top);
+            right = Math.Max(right, core.Right);
+            bottom = Math.Max(bottom, core.Bottom);
+
+            int missH = wantH - (bottom - top);
+            if (missH > 0)
+            {
+                int takeUp = Math.Min(missH, Math.Max(0, top - limitT));
+                top -= takeUp;
+                missH -= takeUp;
+                int takeDown = Math.Min(missH, Math.Max(0, limitB - bottom));
+                bottom += takeDown;
+            }
+
+            int missW = wantW - (right - left);
+            if (missW > 0)
+            {
+                int takeLeft = Math.Min(missW, Math.Max(0, left - limitL));
+                left -= takeLeft;
+                missW -= takeLeft;
+                int takeRight = Math.Min(missW, Math.Max(0, limitR - right));
+                right += takeRight;
+            }
+
             left = Math.Min(left, core.Left);
             top = Math.Min(top, core.Top);
             right = Math.Max(right, core.Right);
@@ -9562,8 +9094,7 @@ namespace SpeakRect
                     regions, capture.Width, capture.Height, pad);
 
                 using var overlay = BuildRegionsOverlayBitmap(capture, boxes);
-                // POI path publishes poi_guide instead (same boxes on tone; less confusing).
-                // Non-POI: show WinOCR detect overlay so the user sees balloon boxes.
+                // POI already published poi_guide.
                 if (!SpeakRunSettings.GetComicPoiMarkers())
                 {
                     CaptureAnalyticsImage(
@@ -9589,53 +9120,22 @@ namespace SpeakRect
         private static Task<SoftwareBitmap?> BitmapToSoftwareBitmapAsync(Bitmap bitmap)
             => BalloonOcrDetect.ToSoftwareBitmapAsync(bitmap);
 
-        /// <summary>
-        /// Full-frame prep for Kobold just before the API call.
-        /// Default: native clone (caller already letterbox/upscale/gray or full tone).
-        /// Optional scale+sharpen when <see cref="EnableFullFrameScaleAndSharpen"/>.
-        /// </summary>
+        /// <summary>Clone of already-prepped pixels for the Local-LLM send.</summary>
         private static Bitmap PrepareForLocalLlmOcr(Bitmap source)
-        {
-            if (!EnableFullFrameScaleAndSharpen)
-                return (Bitmap)source.Clone();
-
-            return ScaleToFitAndSharpen(
-                source,
-                OcrTargetWidth,
-                OcrTargetHeight,
-                LightSharpenAmount,
-                SharpenPasses,
-                upscaleOnly: false,
-                maxUpscale: 0);
-        }
+            => (Bitmap)source.Clone();
 
         /// <summary>
-        /// Region crop for Local-LLM: plain clone of the tone cut, then optional
-        /// Balloons <see cref="AppSettings.ComicIslandZoom"/> (Mag-style enlarge).
-        /// Legacy full scale+unsharp only when <see cref="EnableCropScaleAndSharpen"/>
-        /// is re-enabled (and Zoom is off).
+        /// Region crop for Local-LLM: clone of the tone cut, then Island Zoom if on.
         /// </summary>
         private static Bitmap PrepareCropForLocalLlmOcr(Bitmap source)
         {
-            // Mag-style zoom for per-island / recovery crops (Lanczos progressive).
             if (SpeakRunSettings.GetComicIslandZoom())
             {
                 return ComicPoiGuide.ApplyIslandZoomIfEnabled(
                     (Bitmap)source.Clone(),
                     scaleToSize: IslandZoomScaleToSize);
             }
-
-            if (!EnableCropScaleAndSharpen)
-                return (Bitmap)source.Clone();
-
-            return ScaleToFitAndSharpen(
-                source,
-                CropTargetWidth,
-                CropTargetHeight,
-                CropSharpenAmount,
-                CropSharpenPasses,
-                upscaleOnly: true,
-                maxUpscale: MaxCropUpscale);
+            return (Bitmap)source.Clone();
         }
 
         /// <summary>
@@ -9781,79 +9281,6 @@ namespace SpeakRect
 
             return CropRegionClamped(
                 pipeCapture, pipeBounds, ActiveCropPadPx, neighborBoxes);
-        }
-
-        /// <summary>
-        /// Fit inside target box (aspect preserved), then N unsharp passes.
-        /// When <paramref name="upscaleOnly"/> is true, never shrink - only enlarge
-        /// (or clone + sharpen) so large crops stay cheap for the VL model.
-        /// <paramref name="maxUpscale"/> &gt; 0 caps enlargement (avoids mushy 5x+ bicubic).
-        /// Crop upscales use Lanczos-3 (sharper lettering); full-frame uses GDI bicubic.
-        /// </summary>
-        private static Bitmap ScaleToFitAndSharpen(
-            Bitmap source,
-            int targetW,
-            int targetH,
-            float sharpenAmount,
-            int sharpenPasses,
-            bool upscaleOnly,
-            double maxUpscale)
-        {
-            int w = source.Width;
-            int h = source.Height;
-            if (w < 1 || h < 1)
-                return (Bitmap)source.Clone();
-
-            double scale = Math.Min((double)targetW / w, (double)targetH / h);
-            if (upscaleOnly && scale < 1.0)
-                scale = 1.0;
-            if (upscaleOnly && maxUpscale > 0 && scale > maxUpscale)
-                scale = maxUpscale;
-
-            int tw = Math.Max(1, (int)Math.Round(w * scale));
-            int th = Math.Max(1, (int)Math.Round(h * scale));
-            if (!upscaleOnly)
-            {
-                tw = Math.Min(tw, targetW);
-                th = Math.Min(th, targetH);
-            }
-
-            Bitmap working;
-            bool skipSharpen = false;
-            if (tw == w && th == h)
-            {
-                working = (Bitmap)source.Clone();
-            }
-            else if (upscaleOnly)
-            {
-                double up = Math.Max((double)tw / w, (double)th / h);
-                // Pixel-art / game UI fonts: nearest-neighbor keeps glyphs blocky
-                // (Lanczos blurs FF-style text into mush).
-                if (up >= 2.2 && LooksLikePixelOrUiText(source))
-                {
-                    working = ScaleBitmapNearestNeighbor(source, tw, th);
-                    skipSharpen = true;
-                }
-                else
-                {
-                    // Smooth print / comic lettering: Lanczos-3 progressive
-                    working = ScaleBitmapLanczosProgressive(source, tw, th);
-                }
-            }
-            else
-            {
-                working = ScaleBitmapBicubic(source, tw, th);
-            }
-
-            int passes = skipSharpen ? 0 : Math.Max(0, sharpenPasses);
-            for (int pass = 0; pass < passes; pass++)
-            {
-                var sharp = LightUnsharp(working, sharpenAmount);
-                working.Dispose();
-                working = sharp;
-            }
-
-            return working;
         }
 
         /// <summary>
@@ -10297,9 +9724,11 @@ namespace SpeakRect
             Bitmap bmp,
             string? promptOverride = null,
             int maxTokens = CropMaxTokens,
-            double temperature = KoboldPrimaryTemperature)
+            double temperature = KoboldPrimaryTemperature,
+            CancellationToken token = default)
         {
             Bitmap? scaledOwned = null;
+            CancellationToken cancel = token;
             try
             {
                 // Final stage: optional long-edge cap from Image tab (default 640).
@@ -10379,13 +9808,21 @@ namespace SpeakRect
                 string prompt = promptOverride ?? LocalLlmTaskPrompt;
                 string dataUrl = $"data:{mime};base64,{base64}";
 
-                // Build content with JsonNode only — never anonymous types.
-                // Prefer JsonObject over anonymous types for stable vision JSON
-                // (empty Kobold → WinOCR failsafe → fast/bad speech).
+                if (!cancel.CanBeCanceled)
+                {
+                    lock (_ttsLock)
+                        cancel = _processingCts?.Token ?? default;
+                }
                 return await LocalLlmClient.ChatAsync(
                     LocalLlmClient.BuildUserContent(dataUrl, prompt),
                     maxTokens,
-                    temperature).ConfigureAwait(false);
+                    temperature,
+                    cancel).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                cancel.IsCancellationRequested || token.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

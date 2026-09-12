@@ -1283,12 +1283,10 @@ namespace SpeakRect
         {
             bool ready = HasSource && !_speakBusy;
             bool hasSel = ready && _refine.SelectedIndex >= 0;
-            bool hasAny = ready && _refine.RegionCount > 0;
             _btnRegionUp.Enabled = hasSel && _refine.SelectedIndex > 0;
             _btnRegionDown.Enabled = hasSel && _refine.SelectedIndex < _refine.RegionCount - 1;
             _btnRegionDelete.Enabled = hasSel;
             _btnRedetect.Enabled = ready;
-            _ = hasAny; // speak works with 0 (falls back to auto detect)
         }
 
         private void UpdateRefineStatus()
@@ -1430,7 +1428,7 @@ namespace SpeakRect
             try { _onModeChanged?.Invoke(); } catch { /* host refresh */ }
         }
 
-        /// <summary>POI guide on tone (same DrawRegionGuides as live). Stack is Speak-only.</summary>
+        /// <summary>POI guide on tone (DrawRegionGuides). Island canvases are Speak-only.</summary>
         private void ApplyPoiPreviewUi()
         {
             bool poi = _chkPoiMarkers.Checked;
@@ -1439,9 +1437,6 @@ namespace SpeakRect
             {
                 _refine.ShowPoiMarkers = poi;
                 _refine.ShowPoiOutsideFog = outside;
-                // Never swap preview to island canvas — user edits full page only.
-                _refine.ShowPoiAutoStack = false;
-                _refine.PoiAutoStackGapPx = _trkPoiAutoStackGap.Value;
                 _refine.Invalidate();
             }
             catch { /* ignore */ }

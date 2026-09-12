@@ -13,7 +13,7 @@ namespace SpeakRect
     /// </summary>
     public static class ComicBestOfFusion
     {
-        /// <summary>Minimum words for a speak unit to be kept (matches live pipeline).</summary>
+        /// <summary>Keep one-word balloons ("No!", "OK!") after merge.</summary>
         public const int MinSpeakUnitWords = 1;
 
         private static string Truncate(string? s, int max)
@@ -50,6 +50,8 @@ namespace SpeakRect
         {
             int fullWords = fullParts.Sum(ComicRegionGeometry.CountWords);
             int cropWordsRaw = cropReads.Sum(c => ComicRegionGeometry.CountWords(c.Text));
+            // One leftover word is not a usable full-frame read (MinSpeakUnitWords
+            // is the per-balloon floor, not this gate).
             bool fullOk = fullParts.Count > 0 && fullWords >= 2;
             bool cropsOk = cropReads.Count > 0 && cropWordsRaw >= 4;
 

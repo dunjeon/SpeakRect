@@ -182,8 +182,6 @@ namespace SpeakRect
 
             _keyMap = new frm_HotkeyMap(
                 onHotkeysChanged: () => _onHotkeysChanged(),
-                onBeforeProfileSave: null,
-                onAfterProfileLoad: null,
                 embedded: true,
                 onRequestClose: () => Close());
             _keyMap.CaptureStateChanged += (_, e) =>
@@ -240,7 +238,6 @@ namespace SpeakRect
             EmbedChild(_analytics, tabAnalytics);
 
             _help = new frm_Help(
-                goToTab: tab => SelectTab(tab),
                 embedded: true,
                 onRequestClose: () => Close(),
                 onAfterRestoreAllDefaults: AfterRestoreAllDefaults);

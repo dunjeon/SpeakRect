@@ -10,8 +10,7 @@ namespace SpeakRect
 {
     /// <summary>
     /// Local-LLM vision HTTP client (OpenAI-compatible chat on localhost).
-    /// JSON is built with <see cref="JsonObject"/> indexers only — never anonymous
-    /// types (stable property names; easy to unit-test).
+    /// Request JSON uses <see cref="JsonObject"/> indexers so property names stay stable.
     /// Host process lifecycle stays in <see cref="LocalLlmHost"/>.
     /// </summary>
     public static class LocalLlmClient
@@ -31,9 +30,7 @@ namespace SpeakRect
         /// <summary>Model id for chat requests (from ocr.kcpps / host).</summary>
         public static string ModelApiId => LocalLlmHost.ModelApiId;
 
-        /// <summary>
-        /// OpenAI-vision user content array. Indexer keys are explicit runtime strings.
-        /// </summary>
+        /// <summary>OpenAI-vision user content: image_url plus optional text prompt.</summary>
         public static JsonArray BuildUserContent(string dataUrl, string prompt)
         {
             var imagePart = new JsonObject
@@ -57,9 +54,7 @@ namespace SpeakRect
             return content;
         }
 
-        /// <summary>
-        /// Chat Completions body as <see cref="JsonObject"/> (not anonymous types).
-        /// </summary>
+        /// <summary>Chat Completions body as <see cref="JsonObject"/>.</summary>
         public static string BuildChatRequestJson(
             JsonArray userContent,
             int maxTokens,
@@ -86,14 +81,15 @@ namespace SpeakRect
         public static async Task<string> ChatAsync(
             JsonArray userContent,
             int maxTokens,
-            double temperature = 0)
+            double temperature = 0,
+            CancellationToken token = default)
         {
             string json = BuildChatRequestJson(userContent, maxTokens, temperature);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             string url = ApiBaseUrl + "chat/completions";
-            var response = await Http.PostAsync(url, content).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var response = await Http.PostAsync(url, content, token).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -118,13 +114,8 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// First-pass scrub of Local-LLM message content, before CleanForSpeech /
-        /// fusion / quality gates. Wire text is UTF-8 JSON; this is not re-encoding —
-        /// it maps common typography to ASCII then keeps only:
-        /// Latin letters (basic + Latin-1 / Latin Extended-A), digits, whitespace,
-        /// and basic punctuation used by English comic OCR / TTS.
-        /// Drops CJK, emoji, private-use, exotic scripts, and other junk the VL
-        /// sometimes emits on hard crops.
+        /// First-pass scrub before CleanForSpeech: map curly quotes/dashes to ASCII,
+        /// keep Latin letters/digits/basic punct, drop CJK/emoji/private-use junk.
         /// </summary>
         public static string SanitizeModelText(string? text)
         {

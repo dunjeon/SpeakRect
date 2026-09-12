@@ -17,9 +17,8 @@ using Windows.Storage.Streams;
 namespace SpeakRect
 {
     /// <summary>
-    /// Windows.Media.Ocr balloon / line detect: engine acquisition, one-pass
-    /// recognize + line cluster, and pure box helpers. Multi-pass / orphan /
-    /// mega-split orchestration remains on <see cref="OcrProcessor"/>.
+    /// Windows.Media.Ocr engine, one-pass recognize, and line clustering.
+    /// Multi-pass detect still lives on <see cref="OcrProcessor"/>.
     /// </summary>
     public static class BalloonOcrDetect
     {
@@ -41,13 +40,16 @@ namespace SpeakRect
 
         /// <summary>
         /// Lazy OCR engine from profile languages, else any available pack, else en-US.
+        /// Failed init is latched so detect passes do not keep calling TryCreate.
         /// </summary>
         public static OcrEngine? GetEngine()
         {
             lock (EngineLock)
             {
-                if (_tried)
+                if (_engine != null)
                     return _engine;
+                if (_tried)
+                    return null;
 
                 _tried = true;
                 try

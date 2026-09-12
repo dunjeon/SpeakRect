@@ -8,10 +8,10 @@ using System.Windows.Forms;
 namespace SpeakRect
 {
     /// <summary>
-    /// Balloons preview surface: zoomed base image + interactive reading islands.
-    /// Base is the detect view when Find-boxes fog is on (so Softness is visible),
-    /// otherwise tone when POI markers are on. Rects are <b>pipeline image
-    /// coordinates</b> (display-final grow + crop pad). List order is crop / reading order.
+    /// Balloons preview: zoomed base image plus editable reading islands.
+    /// Base is the detect view when Find-boxes fog is on (Softness visible),
+    /// otherwise tone when POI is on. Rects are pipeline pixels (grow + crop pad).
+    /// List order is crop / reading order.
     /// </summary>
     public sealed class RegionRefineSurface : Control
     {
@@ -37,7 +37,7 @@ namespace SpeakRect
         private bool _showPoiMarkers;
         private bool _showPoiOutsideFog;
 
-        /// <summary>Same bitmap compose as live/analytics: DrawRegionGuides.</summary>
+        /// <summary>Cached DrawRegionGuides bitmap (live / Analytics compose).</summary>
         private Bitmap? _poiGuideCache;
         private string _poiGuideSig = "";
 
@@ -106,38 +106,9 @@ namespace SpeakRect
             }
         }
 
-        /// <summary>
-        /// Kept for Balloons API compat. Preview always edits full-page islands;
-        /// live Speak uses orange island VL when Island canvases is on (not shown here).
-        /// </summary>
-        [Browsable(false)]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public bool ShowPoiAutoStack
-        {
-            get => false;
-            set { /* preview never swaps to island canvas */ }
-        }
-
-        /// <summary>
-        /// Kept for Balloons API compat. Preview never swaps to stack canvas, so this
-        /// is stored but unused for paint (Speak uses AppSettings / SpeakRunSettings).
-        /// </summary>
-        [Browsable(false)]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int PoiAutoStackGapPx
-        {
-            get => _poiAutoStackGapPx;
-            set => _poiAutoStackGapPx = Math.Clamp(value, 0, 64);
-        }
-
-        private int _poiAutoStackGapPx = ComicPoiGuide.DefaultAutoStackGapPx;
-
-        /// <summary>True when preview is showing the full-page POI guide (tone compose).</summary>
+        /// <summary>True when preview is showing the full-page POI guide.</summary>
         public bool IsShowingPoiGuidePreview =>
             TryGetPoiGuidePreview(out _);
-
-        /// <summary>Always false — preview is full-page edit map, never stack canvas.</summary>
-        public bool IsShowingPoiStackPreview => false;
 
         public event EventHandler? RegionsChanged;
         public event EventHandler? SelectionChanged;
@@ -177,7 +148,7 @@ namespace SpeakRect
             _selected = _regions.Count > 0 ? 0 : -1;
             _dirty = false;
             _drag = DragMode.None;
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             Invalidate();
             // Do NOT RaiseChanged — SetSeed is auto-detect, not a user edit.
             RaiseSelection();
@@ -191,7 +162,7 @@ namespace SpeakRect
         {
             DisposeBase();
             _baseImage = baseImage;
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             for (int i = 0; i < _regions.Count; i++)
                 _regions[i] = ClampToImage(_regions[i]);
             if (_selected >= _regions.Count)
@@ -264,7 +235,7 @@ namespace SpeakRect
             _regions.Insert(dest, r);
             _selected = dest;
             _dirty = true;
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             Invalidate();
             RaiseChanged();
             RaiseSelection();
@@ -281,7 +252,7 @@ namespace SpeakRect
             else
                 _selected = Math.Min(_selected, _regions.Count - 1);
             _dirty = true;
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             Invalidate();
             RaiseChanged();
             RaiseSelection();
@@ -399,9 +370,7 @@ namespace SpeakRect
                 g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
         }
 
-        /// <summary>
-        /// Honest multi-island speak path for the overlay banner (reads live settings).
-        /// </summary>
+        /// <summary>Overlay banner when POI is on and more than one island is present.</summary>
         private static string BuildPoiMultiSpeakBanner()
         {
             var s = AppSettings.Current;
@@ -411,8 +380,8 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Full-page POI guide — <b>same</b> <see cref="ComicPoiGuide.DrawRegionGuides"/>
-        /// as live OCR and Analytics (no separate bullseye paint path).
+        /// Full-page POI guide via <see cref="ComicPoiGuide.DrawRegionGuides"/>
+        /// (same pixels as live / Analytics).
         /// </summary>
         private bool TryGetPoiGuidePreview(out Bitmap? guide)
         {
@@ -479,22 +448,6 @@ namespace SpeakRect
             return new Rectangle(x, y, w, h);
         }
 
-        /// <summary>
-        /// Stack canvas is never shown in Balloons preview (edit full page only).
-        /// Live Speak still builds the stack when AutoStack is on.
-        /// </summary>
-        private bool TryGetPoiStackPreview(out Bitmap? stack)
-        {
-            stack = null;
-            return false;
-        }
-
-        private void InvalidatePoiStackCache()
-        {
-            // Stack canvas is never cached for preview — only guide map.
-            InvalidatePoiGuideCache();
-        }
-
         private Rectangle GetDisplayRectFor(int imgW, int imgH)
         {
             if (imgW < 1 || imgH < 1 || ClientSize.Width < 2 || ClientSize.Height < 2)
@@ -538,11 +491,6 @@ namespace SpeakRect
             base.OnMouseDown(e);
             Focus();
             if (_baseImage == null || e.Button != MouseButtons.Left)
-                return;
-
-            // Stack preview is display-only (pipe coords ≠ stack coords).
-            // Turn auto-stack off to edit green boxes on the full page.
-            if (IsShowingPoiStackPreview)
                 return;
 
             var disp = GetImageDisplayRect();
@@ -713,7 +661,7 @@ namespace SpeakRect
 
             _drag = DragMode.None;
             Capture = false;
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             Invalidate();
         }
 
@@ -904,7 +852,7 @@ namespace SpeakRect
 
         private void DisposeBase()
         {
-            InvalidatePoiStackCache();
+            InvalidatePoiGuideCache();
             if (_baseImage != null)
             {
                 try { _baseImage.Dispose(); } catch { /* ignore */ }

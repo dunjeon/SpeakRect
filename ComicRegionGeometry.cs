@@ -262,8 +262,7 @@ namespace SpeakRect
                             {
                                 if (TrySeparateVertical(
                                         i, j, a, b, coreArr, coresDisjoint,
-                                        preferShrinkA, preferShrinkB,
-                                        aIsUpper: true, Floor,
+                                        preferShrinkA, preferShrinkB, Floor,
                                         out var na, out var nb))
                                 {
                                     boxes[i] = na;
@@ -275,8 +274,7 @@ namespace SpeakRect
                             {
                                 if (TrySeparateVertical(
                                         j, i, b, a, coreArr, coresDisjoint,
-                                        preferShrinkB, preferShrinkA,
-                                        aIsUpper: true, Floor,
+                                        preferShrinkB, preferShrinkA, Floor,
                                         out var nb2, out var na2))
                                 {
                                     boxes[i] = na2;
@@ -293,8 +291,7 @@ namespace SpeakRect
                             {
                                 if (TrySeparateHorizontal(
                                         i, j, a, b, coreArr, coresDisjoint,
-                                        preferShrinkA, preferShrinkB,
-                                        aIsLeft: true, Floor,
+                                        preferShrinkA, preferShrinkB, Floor,
                                         out var na, out var nb))
                                 {
                                     boxes[i] = na;
@@ -306,8 +303,7 @@ namespace SpeakRect
                             {
                                 if (TrySeparateHorizontal(
                                         j, i, b, a, coreArr, coresDisjoint,
-                                        preferShrinkB, preferShrinkA,
-                                        aIsLeft: true, Floor,
+                                        preferShrinkB, preferShrinkA, Floor,
                                         out var nb2, out var na2))
                                 {
                                     boxes[i] = na2;
@@ -406,12 +402,10 @@ namespace SpeakRect
             bool coresDisjoint,
             bool preferShrinkUpper,
             bool preferShrinkLower,
-            bool aIsUpper,
             Func<int, Rectangle, Rectangle> floor,
             out Rectangle newUpper,
             out Rectangle newLower)
         {
-            _ = aIsUpper;
             newUpper = upper;
             newLower = lower;
             var inter = Rectangle.Intersect(upper, lower);
@@ -469,12 +463,10 @@ namespace SpeakRect
             bool coresDisjoint,
             bool preferShrinkLeft,
             bool preferShrinkRight,
-            bool aIsLeft,
             Func<int, Rectangle, Rectangle> floor,
             out Rectangle newLeft,
             out Rectangle newRight)
         {
-            _ = aIsLeft;
             newLeft = left;
             newRight = right;
             var inter = Rectangle.Intersect(left, right);
@@ -521,48 +513,6 @@ namespace SpeakRect
                 newRight = floor(rightIdx, Rectangle.FromLTRB(Math.Max(newRight.Left, fence), newRight.Top, newRight.Right, newRight.Bottom));
             }
             return true;
-        }
-
-        /// <summary>
-        /// Snap Concept Mode: one axis-aligned envelope from the top-left of the
-        /// highest/leftmost WinOCR island to the bottom-right of the lowest/rightmost.
-        /// Combined text is joined in Western reading order. Caller applies Extra
-        /// margin (<c>ComicRegionPadding</c>) as usual on the single box.
-        /// </summary>
-        public static List<DetectedTextRegion> CollapseToSnapEnvelope(
-            List<DetectedTextRegion> regions,
-            int capW,
-            int capH)
-        {
-            if (regions == null || regions.Count <= 1)
-                return regions ?? new List<DetectedTextRegion>();
-
-            var ordered = SortComicReadingOrderRegions(regions);
-            if (ordered.Count == 0)
-                return regions;
-
-            Rectangle bounds = ordered[0].Bounds;
-            var texts = new List<string>();
-            foreach (var r in ordered)
-            {
-                if (r.Bounds.Width > 0 && r.Bounds.Height > 0)
-                    bounds = Rectangle.Union(bounds, r.Bounds);
-                if (!string.IsNullOrWhiteSpace(r.WinOcrText))
-                    texts.Add(r.WinOcrText.Trim());
-            }
-
-            bounds.Intersect(new Rectangle(0, 0, capW, capH));
-            if (bounds.Width < 1 || bounds.Height < 1)
-                return regions;
-
-            return new List<DetectedTextRegion>
-            {
-                new DetectedTextRegion
-                {
-                    Bounds = bounds,
-                    WinOcrText = string.Join(" ", texts)
-                }
-            };
         }
 
         /// <summary>
@@ -739,53 +689,6 @@ namespace SpeakRect
                 current = remaining[pick];
                 ordered.Add(current);
                 remaining.RemoveAt(pick);
-            }
-
-            return ordered;
-        }
-
-        /// <summary>
-        /// Legacy row-band sort kept for smoke/diagnostics. Live path uses
-        /// <see cref="SortComicReadingOrderByProximity"/>.
-        /// </summary>
-        public static List<DetectedTextRegion> SortComicReadingOrderByRows(
-            List<DetectedTextRegion> regions)
-        {
-            if (regions.Count <= 1)
-                return regions.ToList();
-
-            var remaining = regions
-                .OrderBy(r => ReadingOrderTopKey(r.Bounds))
-                .ThenBy(r => r.Bounds.Left)
-                .ToList();
-
-            var ordered = new List<DetectedTextRegion>(regions.Count);
-            while (remaining.Count > 0)
-            {
-                var anchor = remaining[0];
-                var row = new List<DetectedTextRegion> { anchor };
-                remaining.RemoveAt(0);
-
-                bool grew = true;
-                while (grew)
-                {
-                    grew = false;
-                    for (int i = remaining.Count - 1; i >= 0; i--)
-                    {
-                        var cand = remaining[i];
-                        bool joins = row.Any(x =>
-                            IsSameReadingRow(x.Bounds, cand.Bounds));
-                        if (!joins)
-                            continue;
-                        row.Add(cand);
-                        remaining.RemoveAt(i);
-                        grew = true;
-                    }
-                }
-
-                foreach (var r in row.OrderBy(x => x.Bounds.Left)
-                             .ThenBy(x => ReadingOrderTopKey(x.Bounds)))
-                    ordered.Add(r);
             }
 
             return ordered;
@@ -1072,219 +975,5 @@ namespace SpeakRect
             return false;
         }
 
-        /// <summary>
-        /// Light stack preference on top of band order.
-        /// <list type="bullet">
-        /// <item>Same-column stack: upper before lower.</item>
-        /// <item>Same-row: left before right.</item>
-        /// <item>Nested strip vs inner balloon: higher top first.</item>
-        /// </list>
-        /// </summary>
-        public static List<DetectedTextRegion> ApplyLightStackPreference(
-            List<DetectedTextRegion> bandOrdered)
-        {
-            int n = bandOrdered.Count;
-            if (n <= 2)
-                return bandOrdered;
-
-            // Fixed index space matching bandOrdered (tie-break uses this order).
-            var boxes = new Rectangle[n];
-            for (int i = 0; i < n; i++)
-                boxes[i] = bandOrdered[i].Bounds;
-
-            // Edge i ? j means i must be spoken before j.
-            var succ = new List<int>[n];
-            var indeg = new int[n];
-            for (int i = 0; i < n; i++)
-                succ[i] = new List<int>();
-
-            void AddBefore(int earlier, int later)
-            {
-                if (earlier == later) return;
-                // Avoid duplicate edges
-                if (succ[earlier].Contains(later)) return;
-                succ[earlier].Add(later);
-                indeg[later]++;
-            }
-
-            // Pairwise: higher top edge first, then stack + same-row (geometry only).
-            double medianH = boxes.Select(b => (double)b.Height).OrderBy(h => h)
-                .ElementAt(n / 2);
-            int topSlack = Math.Max(24, (int)(medianH * 0.35));
-
-            for (int i = 0; i < n; i++)
-            {
-                for (int j = i + 1; j < n; j++)
-                {
-                    // Nested strip vs inner balloon: higher top always first.
-                    if (BoxesNestedOrMostlyContained(boxes[i], boxes[j]))
-                    {
-                        if (boxes[i].Top + topSlack / 2 < boxes[j].Top)
-                            AddBefore(i, j);
-                        else if (boxes[j].Top + topSlack / 2 < boxes[i].Top)
-                            AddBefore(j, i);
-                        else if (ReadingOrderTopKey(boxes[i]) <= ReadingOrderTopKey(boxes[j]))
-                            AddBefore(i, j);
-                        else
-                            AddBefore(j, i);
-                        continue;
-                    }
-
-                    // Side-by-side balloons: L→R owns order (do not let a slightly
-                    // higher right balloon force right-before-left via top-tier).
-                    bool sidePeers = AreHorizontalReadingPeers(boxes[i], boxes[j]);
-                    if (sidePeers)
-                    {
-                        double iCx = boxes[i].Left + boxes[i].Width / 2.0;
-                        double jCx = boxes[j].Left + boxes[j].Width / 2.0;
-                        if (iCx <= jCx) AddBefore(i, j);
-                        else AddBefore(j, i);
-                        continue;
-                    }
-
-                    // Clear top-tier separation (not nested / not L-R peers)
-                    if (boxes[i].Top + topSlack < boxes[j].Top)
-                        AddBefore(i, j);
-                    else if (boxes[j].Top + topSlack < boxes[i].Top)
-                        AddBefore(j, i);
-
-                    if (IsVerticalStackPair(boxes[i], boxes[j], out bool iAboveJ))
-                    {
-                        if (iAboveJ) AddBefore(i, j);
-                        else AddBefore(j, i);
-                    }
-
-                    if (IsSameRowLeftRight(boxes[i], boxes[j], out bool iLeftOfJ))
-                    {
-                        if (iLeftOfJ) AddBefore(i, j);
-                        else AddBefore(j, i);
-                    }
-                }
-            }
-
-            // Kahn topo; when several are ready, keep band order (stable L→R / top bias)
-            var ready = new List<int>();
-            for (int i = 0; i < n; i++)
-            {
-                if (indeg[i] == 0)
-                    ready.Add(i);
-            }
-
-            var result = new List<DetectedTextRegion>(n);
-            var placed = new bool[n];
-            while (ready.Count > 0)
-            {
-                // Lowest band index among ready = prefer original band order
-                ready.Sort();
-                int u = ready[0];
-                ready.RemoveAt(0);
-                if (placed[u]) continue;
-                placed[u] = true;
-                result.Add(bandOrdered[u]);
-
-                foreach (int v in succ[u])
-                {
-                    indeg[v]--;
-                    if (indeg[v] == 0 && !placed[v])
-                        ready.Add(v);
-                }
-            }
-
-            // Cycle / incomplete (should be rare) - fall back to band order
-            if (result.Count != n)
-                return bandOrdered;
-
-            return result;
-        }
-
-        /// <summary>
-        /// True when <paramref name="a"/> and <paramref name="b"/> form a vertical
-        /// speech stack (same column). <paramref name="aAboveB"/> is set when a is
-        /// the upper balloon.
-        /// </summary>
-        public static bool IsVerticalStackPair(
-            Rectangle a, Rectangle b, out bool aAboveB)
-        {
-            aAboveB = false;
-            // Nested strip / contained balloon is not a column stack pair
-            if (BoxesNestedOrMostlyContained(a, b))
-                return false;
-
-            double aCy = a.Top + a.Height / 2.0;
-            double bCy = b.Top + b.Height / 2.0;
-            double minH = Math.Max(1.0, Math.Min(a.Height, b.Height));
-            double minW = Math.Max(1.0, Math.Min(a.Width, b.Width));
-
-            // Need clear vertical separation (not the same row)
-            double centerDy = Math.Abs(aCy - bCy);
-            if (centerDy < minH * 0.28)
-                return false;
-
-            // Horizontal overlap as a fraction of the narrower box
-            double xOverlap = Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left));
-            if (xOverlap / minW < 0.40)
-                return false;
-
-            // Centers should not be side-by-side dominant
-            double aCx = a.Left + a.Width / 2.0;
-            double bCx = b.Left + b.Width / 2.0;
-            if (Math.Abs(aCx - bCx) > minW * 0.85 && xOverlap / minW < 0.55)
-                return false;
-
-            aAboveB = aCy < bCy;
-            return true;
-        }
-
-        /// <summary>
-        /// True when boxes share a row and one is clearly left of the other.
-        /// Rejects nested / strip-vs-inner pairs (geometry only - no color).
-        /// Side-by-side dialogue peers always count even when tops differ modestly.
-        /// </summary>
-        public static bool IsSameRowLeftRight(
-            Rectangle a, Rectangle b, out bool aLeftOfB)
-        {
-            aLeftOfB = false;
-
-            // Nested or wide-strip-covering-short-balloon → not L/R peers.
-            if (BoxesNestedOrMostlyContained(a, b))
-                return false;
-
-            double aCx = a.Left + a.Width / 2.0;
-            double bCx = b.Left + b.Width / 2.0;
-            double minW = Math.Max(1.0, Math.Min(a.Width, b.Width));
-            if (Math.Abs(aCx - bCx) < minW * 0.20)
-                return false;
-
-            // Explicit L/R dialogue peers (handles elevated short right balloon).
-            if (AreHorizontalReadingPeers(a, b))
-            {
-                aLeftOfB = aCx < bCx;
-                return true;
-            }
-
-            double aCy = a.Top + a.Height / 2.0;
-            double bCy = b.Top + b.Height / 2.0;
-            double minH = Math.Max(1.0, Math.Min(a.Height, b.Height));
-            double maxH = Math.Max(a.Height, b.Height);
-
-            double yOverlap = Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
-            double yOverlapRatio = yOverlap / minH;
-            double centerDy = Math.Abs(aCy - bCy);
-
-            // Distinct top tiers → not the same reading row
-            double topDelta = Math.Abs(a.Top - b.Top);
-            if (topDelta >= Math.Max(40.0, minH * 0.55) &&
-                topDelta >= maxH * 0.18)
-                return false;
-
-            bool sameRow =
-                centerDy <= maxH * 0.55 ||
-                yOverlapRatio >= 0.35;
-            if (!sameRow)
-                return false;
-
-            aLeftOfB = aCx < bCx;
-            return true;
-        }
     }
 }

@@ -150,15 +150,6 @@ namespace SpeakRect
         private static IntPtr _keyboardHookID = IntPtr.Zero;
         private static LowLevelInputHooks.LowLevelKeyboardProc? _keyboardProc;
 
-        /// <summary>Legacy alias for external/Interop consumers of POINT.</summary>
-        public struct POINT
-        {
-            public int X;
-            public int Y;
-            public POINT(int x, int y) { X = x; Y = y; }
-            public POINT(Point pt) { X = pt.X; Y = pt.Y; }
-        }
-
         /// <summary>Follow session active (floating or locked). Overlay paints the box.</summary>
         private bool _followActive;
 
