@@ -218,9 +218,9 @@ namespace SpeakRect
 
         /// <summary>
         /// Watch probe: true if Windows OCR sees any non-junk line.
-        /// Local-LLM Watch still confirms with a real text pull
-        /// (<see cref="RegionWatch.WinOcrPullConfirmsText"/>) before the snap
-        /// is sent — this boolean alone false-positives on junk.
+        /// Local-LLM Watch still confirms with a strong text pull
+        /// (<see cref="RegionWatch.WinOcrPullStrongEnoughForLlm"/>) before the
+        /// snap is sent — this boolean alone false-positives on HUD / junk.
         /// </summary>
         public static async Task<bool> SeesTextAsync(
             OcrEngine engine,

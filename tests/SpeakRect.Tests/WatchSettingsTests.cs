@@ -365,6 +365,79 @@ public class WatchSettingsTests
         Assert.True(RegionWatch.WinOcrPullConfirmsText("Hello"));
         Assert.True(RegionWatch.WinOcrPullConfirmsText("  OK!  "));
         Assert.True(RegionWatch.WinOcrPullConfirmsText("The doors opened."));
+        // Junk floor still lets HUD chips through — strong gate must reject them.
+        Assert.True(RegionWatch.WinOcrPullConfirmsText("MENU"));
+        Assert.True(RegionWatch.WinOcrPullConfirmsText("HP 12"));
+    }
+
+    [Fact]
+    public void Llm_strong_confirm_skips_hud_chips_and_digit_scraps()
+    {
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm(null));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm(""));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("…"));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("HP 12"));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("III"));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("MENU"));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("START"));
+        Assert.False(RegionWatch.WinOcrPullStrongEnoughForLlm("Hello"));
+    }
+
+    [Fact]
+    public void Llm_strong_confirm_accepts_a_line_or_punchy_balloon()
+    {
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("The doors opened."));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("Hello world"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("don't go"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("LEVEL 5"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("OK!"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("NO"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("YES!"));
+        Assert.True(RegionWatch.WinOcrPullStrongEnoughForLlm("oh no"));
+    }
+
+    [Fact]
+    public void Content_tokens_are_letter_words_with_vowels()
+    {
+        Assert.Equal(
+            new[] { "the", "doors", "opened" },
+            RegionWatch.ContentTokens("The doors opened."));
+        Assert.Empty(RegionWatch.ContentTokens("D00RS"));
+        Assert.Empty(RegionWatch.ContentTokens("HP 12"));
+        Assert.Empty(RegionWatch.ContentTokens("NO"));
+        Assert.Empty(RegionWatch.ContentTokens("III"));
+        Assert.Equal(new[] { "menu" }, RegionWatch.ContentTokens("MENU"));
+    }
+
+    [Fact]
+    public void Llm_corroboration_keeps_a_matching_read()
+    {
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr(
+            "The doors opened.", "the doors opened"));
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr(
+            "Hello world", "hello world"));
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr("OK!", "ok"));
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr("NO", "No!"));
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr(
+            "gonna wait here", "going to wait here"));
+        // Extra OCR HUD around a real line is fine if the model read the line.
+        Assert.True(RegionWatch.LlmOutputCorroboratedByOcr(
+            "MENU START the doors opened", "the doors opened"));
+    }
+
+    [Fact]
+    public void Llm_corroboration_rejects_scene_descriptions()
+    {
+        const string desc =
+            "The image shows a man standing in a room looking at a sword on the wall.";
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr("The doors opened.", desc));
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr("MENU", desc));
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr("HP 12", desc));
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr(
+            "NO",
+            "A warrior shouts no while standing on a hill in the background."));
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr("Hello world", ""));
+        Assert.False(RegionWatch.LlmOutputCorroboratedByOcr("", "hello world"));
     }
 
     [Fact]

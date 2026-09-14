@@ -200,7 +200,7 @@ namespace SpeakRect
                 "Independent of MODE. Raw snap skips the Image tab. Image matches Default speak " +
                 "(prep, then one full-frame read). Image + Balloon matches Comic Book speak " +
                 "(prep + balloons). Every check still asks OCR yes/no first; no text → stop. " +
-                "Local-LLM also requires OCR to return words, or the model is not called."), 72);
+                "Local-LLM also needs a real line of OCR words (not a HUD chip), or the model is not called."), 72);
 
             AddFull(MakeSection("TEXT SOURCE"), 28);
             _cmbTextSource = new ComboBox
@@ -221,8 +221,9 @@ namespace SpeakRect
                 "Watch override of Settings → Speech text source. Local-LLM is the Watch default. " +
                 "OCR reads the same pipeline bitmap without calling the model. OCR agreement " +
                 "(need X of Y) is the Speech setting — Watch does not override it. Local-LLM is skipped " +
-                "when that OCR pull is empty (no describing a blank snap). Image prep, balloons, " +
-                "speech rules, pauses, and voice still apply either way."), 64);
+                "when that OCR pull is empty or only a HUD chip. After a Local-LLM read, the line must " +
+                "match those OCR words or Watch stays silent (no image descriptions). Image prep, balloons, " +
+                "speech rules, pauses, and voice still apply either way."), 80);
 
             AddFull(MakeSection("CHECK INTERVAL"), 28);
             _numInterval = new NumericUpDown

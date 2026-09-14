@@ -15,9 +15,10 @@ namespace SpeakRect
         Noise = 0,
 
         /// <summary>
-        /// After optional lowercasing — abbreviations, titles, possessives.
+        /// After optional lowercasing — abbreviations, titles.
         /// Matching is always case-insensitive so Mr./mr. both expand when
-        /// <c>SpeechForceLowercase</c> is off.
+        /// <c>SpeechForceLowercase</c> is off. Apostrophes stay on contractions
+        /// and possessives (not rewritten here).
         /// </summary>
         Abbrev = 1,
 
@@ -392,18 +393,8 @@ namespace SpeakRect
 
             // ---- Abbrev (post-lowercase) ----
             // Curly-apostrophe normalize stays in code (char replace, not regex rule).
-
-            Add(list, "abbrev-possessive-s", "Possessive 's → s",
-                SpeechTextRuleStage.Abbrev,
-                @"\b(?!(?:he|she|it|that|what|who|where|how|there|here|one|" +
-                @"someone|somebody|anyone|anybody|everyone|everybody)'s\b)" +
-                @"(\p{L}{2,})'s\b",
-                "$1s", ignoreCase: false);
-
-            Add(list, "abbrev-plural-possessive", "Plural possessive s'",
-                SpeechTextRuleStage.Abbrev,
-                @"(\p{L})s'\b",
-                "$1s", ignoreCase: false);
+            // Do not strip possessive / elision apostrophes ('s, s', ol', '90s) —
+            // TTS handles them, and the punctuation pass keeps letter/digit-adjacent marks.
 
             // Dotted / multi-letter abbreviations (period consumed). Longer first.
             AddAbbrev(list, "abbrev-usa", "U.S.A.",
@@ -567,6 +558,9 @@ namespace SpeakRect
             {
                 "abbrev-max",
                 "abbrev-min",
+                // Possessive apostrophe strips — TTS should keep 's / s' / ol'.
+                "abbrev-possessive-s",
+                "abbrev-plural-possessive",
                 // One-token VL invention gate — removed (kill-list P1); not a category fix.
                 "noise-c-type-uchar",
                 // HTML tag / entity strips: ate comic <WHERE ARE YOU…> as fake tags.

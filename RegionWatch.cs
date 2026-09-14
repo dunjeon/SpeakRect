@@ -13,9 +13,9 @@ namespace SpeakRect
         /// <summary>WinOCR ran and saw no text.</summary>
         NoText = 1,
         /// <summary>
-        /// WinOCR saw text. Local-LLM path also confirmed a speakable OCR pull
-        /// before the snap was sent; spoken words still come from the model
-        /// (and may still be empty).
+        /// WinOCR saw a strong line of words. Local-LLM path confirmed that
+        /// pull before the snap was sent; spoken words still come from the
+        /// model and may still be empty (uncorroborated description).
         /// </summary>
         HasText = 2,
     }
@@ -47,12 +47,21 @@ namespace SpeakRect
 
     /// <summary>
     /// Watch-region helpers: spoken-word compare, pipeline pick, and slot geometry.
-    /// Each idle tick: OCR boolean (is there text?), Local-LLM confirms with an
-    /// OCR text pull (false-positive probe → silent), then the chosen pipeline
-    /// only if yes. Speaks when the recognized words differ from last spoken.
+    /// Each idle tick: OCR boolean (is there text?), Local-LLM confirms with a
+    /// <b>strong</b> OCR pull (HUD chips / vowelless scraps → silent, do not send
+    /// the snap), then the chosen pipeline only if yes. After Local-LLM returns,
+    /// the line must share content tokens with that pull or Watch stays silent
+    /// (scene descriptions do not overlap a real OCR line). Speaks when the
+    /// recognized words differ from last spoken.
     /// </summary>
     public static class RegionWatch
     {
+        /// <summary>
+        /// Fraction of Local-LLM content tokens that must also appear in the
+        /// OCR confirm pull. Kills long scene descriptions that share one
+        /// incidental word with HUD junk.
+        /// </summary>
+        public const double MinLlmOcrContentCovered = 0.4;
         public const int DefaultIntervalMs = 2000;
         public const int MinIntervalMs = 500;
         public const int MaxIntervalMs = 60_000;
@@ -200,16 +209,185 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Local-LLM Watch confirm: after the yes/no probe, the same OCR engine
-        /// must actually return speakable words. Probe-yes + empty/junk pull is
-        /// a false positive — do not send the snap to the model (it will describe
-        /// the picture). OCR text source does not use this (it already speaks the pull).
+        /// Local-LLM Watch confirm, junk floor: after the yes/no probe, the same
+        /// OCR engine must actually return speakable words. Empty / unusable pull
+        /// is a false positive. Prefer <see cref="WinOcrPullStrongEnoughForLlm"/>
+        /// before sending the snap (HUD chips still pass this floor).
+        /// OCR text source does not use this (it already speaks the pull).
         /// </summary>
         public static bool WinOcrPullConfirmsText(string? pulled)
         {
             if (!TryNormalizeSpeakable(pulled, out string n))
                 return false;
             return !SpeechCleaner.IsUnusableOcrText(n);
+        }
+
+        /// <summary>
+        /// Watch Local-LLM gate: speakable OCR pull that looks like a line of
+        /// words, not a HUD chip / digit scrap. Thin pulls skip the model
+        /// (it will describe the picture). Punchy 1–2 word balloons
+        /// (<c>NO</c>, <c>OK</c>, <c>YES</c>, <c>oh no</c>) still count.
+        /// One longer singleton (<c>MENU</c>, <c>Hello</c>, <c>START</c>) does not.
+        /// </summary>
+        public static bool WinOcrPullStrongEnoughForLlm(string? pulled)
+        {
+            if (!WinOcrPullConfirmsText(pulled))
+                return false;
+
+            var content = ContentTokens(pulled);
+            if (content.Count >= 2)
+                return true;
+
+            int words = ComicRegionGeometry.CountWords(pulled);
+            if (words >= 2 && content.Count >= 1)
+                return true;
+
+            return IsPunchyDialoguePull(pulled ?? "");
+        }
+
+        /// <summary>
+        /// Watch Local-LLM output must be explained by the OCR confirm pull.
+        /// Content tokens (letters, length ≥ 3, has a vowel) in the model line
+        /// have to overlap that pull — a scene description will not.
+        /// Punchy OCR (<c>NO</c>) must appear in the model line, and the model
+        /// must not then dump extra content tokens.
+        /// </summary>
+        public static bool LlmOutputCorroboratedByOcr(string? ocrPull, string? llmText)
+        {
+            if (!TryNormalizeSpeakable(llmText, out string llmNorm) ||
+                SpeechCleaner.IsUnusableOcrText(llmNorm))
+                return false;
+            if (!WinOcrPullConfirmsText(ocrPull))
+                return false;
+
+            var ocrContent = ContentTokens(ocrPull);
+            var llmContent = ContentTokens(llmText);
+
+            if (ocrContent.Count == 0)
+            {
+                // Punchy NO / OK / oh no: every short letter-token must appear,
+                // and the model must not have written a caption around it.
+                var ocrShort = LetterTokens(ocrPull, minLen: 2);
+                var llmShort = new HashSet<string>(LetterTokens(llmText, minLen: 2));
+                if (ocrShort.Count == 0)
+                    return false;
+                for (int i = 0; i < ocrShort.Count; i++)
+                {
+                    if (!llmShort.Contains(ocrShort[i]))
+                        return false;
+                }
+                return llmContent.Count <= 2;
+            }
+
+            if (llmContent.Count == 0)
+                return false;
+
+            var ocrSet = new HashSet<string>(ocrContent, StringComparer.Ordinal);
+            int overlap = 0;
+            for (int i = 0; i < llmContent.Count; i++)
+            {
+                if (ocrSet.Contains(llmContent[i]))
+                    overlap++;
+            }
+            if (overlap == 0)
+                return false;
+            double covered = overlap / (double)llmContent.Count;
+            return covered + 1e-9 >= MinLlmOcrContentCovered;
+        }
+
+        /// <summary>
+        /// Unique letter tokens with length ≥ 3 and a vowel. Digits are
+        /// stripped (so <c>HP</c> / <c>12</c> do not count).
+        /// </summary>
+        public static List<string> ContentTokens(string? text)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrWhiteSpace(text))
+                return list;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string w in SpeechCleaner.TokenizeWords(text))
+            {
+                string letters = LettersOnly(w);
+                if (letters.Length < 3 || !HasVowel(letters) || IsAllSameLetter(letters))
+                    continue;
+                if (!seen.Add(letters))
+                    continue;
+                list.Add(letters);
+            }
+            return list;
+        }
+
+        private static bool IsPunchyDialoguePull(string pulled)
+        {
+            var toks = SpeechCleaner.TokenizeWords(pulled);
+            if (toks.Count == 0 || toks.Count > 2)
+                return false;
+            for (int i = 0; i < toks.Count; i++)
+            {
+                string n = LettersOnly(toks[i]);
+                if (n.Length < 2 || n.Length > 3)
+                    return false;
+                if (IsAllSameLetter(n))
+                    return false;
+                if (!ComicBestOfFusion.LooksLikeRealDialogueToken(n))
+                    return false;
+            }
+            return true;
+        }
+
+        private static List<string> LetterTokens(string? text, int minLen)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrWhiteSpace(text))
+                return list;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string w in SpeechCleaner.TokenizeWords(text))
+            {
+                string n = LettersOnly(w);
+                if (n.Length < minLen)
+                    continue;
+                if (!seen.Add(n))
+                    continue;
+                list.Add(n);
+            }
+            return list;
+        }
+
+        private static string LettersOnly(string w)
+        {
+            if (string.IsNullOrEmpty(w))
+                return "";
+            var sb = new System.Text.StringBuilder(w.Length);
+            foreach (char c in w)
+            {
+                if (char.IsLetter(c))
+                    sb.Append(char.ToLowerInvariant(c));
+            }
+            return sb.ToString();
+        }
+
+        private static bool HasVowel(string n)
+        {
+            foreach (char c in n)
+            {
+                char l = char.ToLowerInvariant(c);
+                if (l is 'a' or 'e' or 'i' or 'o' or 'u' or 'y')
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsAllSameLetter(string n)
+        {
+            if (n.Length == 0)
+                return true;
+            char first = char.ToLowerInvariant(n[0]);
+            for (int i = 1; i < n.Length; i++)
+            {
+                if (char.ToLowerInvariant(n[i]) != first)
+                    return false;
+            }
+            return true;
         }
 
         /// <summary>

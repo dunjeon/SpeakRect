@@ -433,7 +433,8 @@ namespace SpeakRect
             s = StripComicSpeechDecorators(s);
 
             // Final punctuation chain (after abbrev expand so "mr." is already "mister"):
-            //   1) strip everything that is not a pause mark (. ! ? ,) or typed pause char
+            //   1) strip everything that is not a pause mark (. ! ? ,), hyphen,
+            //      letter/digit-adjacent apostrophe, or typed pause char
             //   2) collapse adjacent pause marks (!? / !!! / ?! / ,,) down to ONE mark
             //   3) when custom encodings on: keep . ! ? (TTS prosody) and insert
             //      sentence pause mark AFTER each; replace , → comma pause mark
@@ -584,7 +585,8 @@ namespace SpeakRect
                  .Replace('\u2032', '\'')
                  .Replace('\u02BC', '\'');
 
-            // Possessives + abbreviations + titles: Settings → Speech → Text rules.
+            // Abbreviations + titles: Settings → Speech → Text rules.
+            // Apostrophes on contractions / possessives / elisions are left intact.
             s = SpeechTextRulesEngine.Apply(
                 s, SpeakRunSettings.GetSpeechTextRules(), SpeechTextRuleStage.Abbrev);
 
@@ -600,8 +602,10 @@ namespace SpeakRect
         /// <list type="number">
         /// <item><b>Strip</b> non-pause punctuation (quotes, colons, symbols,
         /// semicolons, … → space). Keep <c>.</c> <c>!</c> <c>?</c> <c>,</c>,
-        /// ASCII hyphen (English compounds), typed pause marks, and mid-word
-        /// apostrophes. Orphan hyphens / apostrophes (not letter-bounded) → space.</item>
+        /// ASCII hyphen (English compounds), typed pause marks, and apostrophes
+        /// next to a letter or digit (contractions, possessives, elisions).
+        /// True orphan apostrophes (no letter/digit neighbor) and orphan hyphens
+        /// (not letter-bounded) → space.</item>
         /// <item><b>Collapse</b> adjacent pause marks to the first one only
         /// (<c>!!!</c> → <c>!</c>, <c>!?</c> → <c>!</c>, <c>,,</c> → <c>,</c>).</item>
         /// <item><b>Pause encode</b> <c>,</c> → comma pause mark;
@@ -626,8 +630,10 @@ namespace SpeakRect
             s = Regex.Replace(s,
                 $@"[^\p{{L}}\p{{N}}\s.!?',\-{PauseMarkComma}{PauseMarkSentence}{PauseMarkOther}{PauseMarkBubble}]+",
                 " ");
-            // Drop orphan apostrophes / hyphens that are not mid-word (not letter'letter / letter-letter).
-            s = Regex.Replace(s, @"(?<!\p{L})'|'(?!\p{L})", " ");
+            // Drop only true-orphan apostrophes (no letter/digit on either side).
+            // Keep don't / John's / kids' / ol' / 'tis / '90s.
+            s = Regex.Replace(s, @"(?<![\p{L}\p{N}])'(?![\p{L}\p{N}])", " ");
+            // Drop orphan hyphens that are not mid-word (not letter-letter).
             s = Regex.Replace(s, @"(?<!\p{L})-|-(?!\p{L})", " ");
 
             // ---- 2) Collapse multi pause-marks to the first ----

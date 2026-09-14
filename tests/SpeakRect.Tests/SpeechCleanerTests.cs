@@ -22,6 +22,22 @@ public class SpeechCleanerTests
     }
 
     [Fact]
+    public void Keeps_possessive_and_elision_apostrophes()
+    {
+        string cleaned = SpeechCleaner.CleanForSpeech(
+            "That's John's book. The kids' room. Ol' man from the '90s, 'tis true, anythin' goes.",
+            comicBook: true);
+        Assert.Contains("that's", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("john's", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("kids'", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ol'", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'90s", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'tis", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("anythin'", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(@"(?i)\bjohns\b", cleaned);
+    }
+
+    [Fact]
     public void Empty_is_unusable()
     {
         Assert.True(SpeechCleaner.IsUnusable(""));
@@ -131,7 +147,8 @@ public class SpeechCleanerTests
 
         string cleaned = SpeechCleaner.CleanForSpeech(raw, comicBook: true);
         Assert.Contains("river", cleaned, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("anythin", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wasn't", cleaned, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("anythin'", cleaned, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("text her name", cleaned, StringComparison.OrdinalIgnoreCase);
         // No spoken JSON key as its own lead-in word.
         Assert.False(

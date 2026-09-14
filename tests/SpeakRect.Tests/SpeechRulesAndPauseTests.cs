@@ -86,6 +86,67 @@ public class SpeechRulesAndPauseTests
     }
 
     [Fact]
+    public void Retired_possessive_apostrophe_rules_not_in_defaults()
+    {
+        var ids = SpeechTextRulesCatalog.CreateDefaults()
+            .Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("abbrev-possessive-s", ids);
+        Assert.DoesNotContain("abbrev-plural-possessive", ids);
+
+        var merged = SpeechTextRulesCatalog.MergeWithDefaults(new[]
+        {
+            new SpeechTextRule
+            {
+                Id = "abbrev-possessive-s",
+                Name = "Possessive 's → s",
+                Stage = SpeechTextRuleStage.Abbrev,
+                Pattern = @"(\p{L}{2,})'s\b",
+                Replace = "$1s",
+                Enabled = true,
+                IsBuiltIn = true,
+            },
+            new SpeechTextRule
+            {
+                Id = "abbrev-plural-possessive",
+                Name = "Plural possessive s'",
+                Stage = SpeechTextRuleStage.Abbrev,
+                Pattern = @"(\p{L})s'\b",
+                Replace = "$1s",
+                Enabled = true,
+                IsBuiltIn = true,
+            },
+            new SpeechTextRule
+            {
+                Id = "title-mr",
+                Name = "Mr.",
+                Stage = SpeechTextRuleStage.Abbrev,
+                Pattern = @"\bmr\.?(?!\p{L})",
+                Replace = "mister",
+                Enabled = true,
+                IsBuiltIn = true,
+            },
+        });
+        Assert.DoesNotContain(merged, r =>
+            r.Id.Equals("abbrev-possessive-s", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(merged, r =>
+            r.Id.Equals("abbrev-plural-possessive", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(merged, r =>
+            r.Id.Equals("title-mr", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ToCleanedLookup_keeps_word_apostrophes()
+    {
+        Assert.Equal("don't", SpeechRulesEngine.ToCleanedLookup("don't"));
+        Assert.Equal("john's", SpeechRulesEngine.ToCleanedLookup("John's"));
+        Assert.Equal("kids'", SpeechRulesEngine.ToCleanedLookup("kids'"));
+        Assert.Equal("ol'", SpeechRulesEngine.ToCleanedLookup("Ol'"));
+        Assert.Equal("'tis", SpeechRulesEngine.ToCleanedLookup("'tis"));
+        Assert.Equal("'90s", SpeechRulesEngine.ToCleanedLookup("'90s"));
+        Assert.Equal("hello world", SpeechRulesEngine.ToCleanedLookup("hello ' world"));
+    }
+
+    [Fact]
     public void Retired_html_noise_rules_not_in_defaults()
     {
         var ids = SpeechTextRulesCatalog.CreateDefaults().Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);

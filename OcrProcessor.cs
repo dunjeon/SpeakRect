@@ -1193,10 +1193,12 @@ namespace SpeakRect
 
         /// <summary>
         /// Watch OCR (independent of MODE). OCR yes/no on the pipeline bitmap;
-        /// no text → silent. Local-LLM: probe yes still requires a speakable
-        /// OCR pull, else silent (do not send a blank snap). Then Local-LLM
-        /// or OCR words (Watch text source) via Raw snap / Image / Image +
-        /// balloons. Does not publish Analytics or last-capture.
+        /// no text → silent. Local-LLM: probe yes still requires a <b>strong</b>
+        /// OCR pull (a line of words, not a HUD chip), else silent. After the
+        /// model returns, the line must overlap that pull or Watch stays silent
+        /// (no scene descriptions). Then Local-LLM or OCR words (Watch text
+        /// source) via Raw snap / Image / Image + balloons. Does not publish
+        /// Analytics or last-capture.
         /// </summary>
         public async Task<(WatchTextGate Gate, string Text)> RecognizeWatchWithoutSpeakingAsync(
             CancellationToken token)
@@ -1414,19 +1416,24 @@ namespace SpeakRect
                         engine, llmSource, token).ConfigureAwait(false);
                 }
                 string confirmPull = WatchOcrLinesToSpeakText(confirmLines, detail);
-                if (!RegionWatch.WinOcrPullConfirmsText(confirmPull))
+                if (!RegionWatch.WinOcrPullStrongEnoughForLlm(confirmPull))
                 {
                     _watchTextGate = WatchTextGate.NoText;
                     _lastText = "";
+                    bool junk = !RegionWatch.WinOcrPullConfirmsText(confirmPull);
                     detail.AppendLine(
-                        "watch-gate: probe yes, OCR pull empty → silent (skip LLM)");
+                        junk
+                            ? "watch-gate: probe yes, OCR pull empty → silent (skip LLM)"
+                            : "watch-gate: probe yes, OCR pull weak (HUD/junk) → silent (skip LLM)");
                     Debug.WriteLine(
-                        "[Watch] probe yes but OCR pull empty — skip LLM");
+                        junk
+                            ? "[Watch] probe yes but OCR pull empty — skip LLM"
+                            : "[Watch] probe yes but OCR pull weak — skip LLM");
                     return;
                 }
 
                 _watchTextGate = WatchTextGate.HasText;
-                detail.AppendLine("watch-gate: OCR pull confirms text → LLM");
+                detail.AppendLine("watch-gate: OCR pull strong → LLM");
 
                 try
                 {
@@ -1515,6 +1522,16 @@ namespace SpeakRect
                     _lastText = await WatchFullFrameTextAsync(
                         llmSource, detail, token).ConfigureAwait(false);
                 }
+
+                if (!RegionWatch.LlmOutputCorroboratedByOcr(confirmPull, _lastText))
+                {
+                    detail.AppendLine(
+                        "watch-gate: LLM not corroborated by OCR → silent");
+                    Debug.WriteLine(
+                        "[Watch] LLM output not corroborated by OCR — skip speak");
+                    _lastText = "";
+                    // Keep HasText so last-spoken is not cleared (NoText would).
+                }
                 // Do not WriteLastOcrDebug — Watch must not stomp Analytics last hotkey speak.
             }
             catch (OperationCanceledException)
@@ -1594,7 +1611,8 @@ namespace SpeakRect
         /// <summary>
         /// Speech-clean WinOCR lines and join speakable pieces. Empty when
         /// the engine returned junk / nothing — Watch Local-LLM uses this as
-        /// the post-probe confirm so a blank snap is never sent.
+        /// the post-probe confirm (strong line + token overlap) so a blank
+        /// or HUD-only snap is never sent.
         /// </summary>
         private static string WatchOcrLinesToSpeakText(
             IReadOnlyList<string> lines, StringBuilder detail)

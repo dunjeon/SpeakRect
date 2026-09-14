@@ -171,6 +171,22 @@ Console.WriteLine("--- Speech cleaner ---");
     Check("can't left intact (not expanded to cannot)",
         ambigNorm.Contains("can't", StringComparison.Ordinal) &&
         !ambigNorm.Contains("cannot", StringComparison.Ordinal));
+
+    string poss = OcrProcessor.SmokeCleanForSpeech(
+        "That's John's book. The kids' room. Ol' man from the '90s.", true);
+    Check("possessive John's keeps apostrophe (not Johns)",
+        poss.Contains("john's", StringComparison.Ordinal) &&
+        !Regex.IsMatch(poss, @"\bjohns\b"));
+    Check("plural possessive kids' keeps apostrophe",
+        poss.Contains("kids'", StringComparison.Ordinal));
+    Check("elision Ol' and '90s keep apostrophe",
+        poss.Contains("ol'", StringComparison.Ordinal) &&
+        poss.Contains("'90s", StringComparison.Ordinal));
+    Check("Defaults never ship possessive apostrophe strips",
+        !SpeechTextRulesCatalog.CreateDefaults().Any(r =>
+            r.Id.Equals("abbrev-possessive-s", StringComparison.OrdinalIgnoreCase) ||
+            r.Id.Equals("abbrev-plural-possessive", StringComparison.OrdinalIgnoreCase)));
+
     Check("Expand mrs. → missus",
         normOn.Contains("missus", StringComparison.Ordinal));
     Check("Expand e.g. → for example",
@@ -221,6 +237,21 @@ Console.WriteLine("--- Speech cleaner ---");
         Check("Defaults never ship abbrev-max",
             !SpeechTextRulesCatalog.CreateDefaults().Any(r =>
                 r.Id.Equals("abbrev-max", StringComparison.OrdinalIgnoreCase)));
+        withRetired.Add(new SpeechTextRule
+        {
+            Id = "abbrev-possessive-s",
+            Name = "Possessive 's → s",
+            Stage = SpeechTextRuleStage.Abbrev,
+            Pattern = @"(\p{L}{2,})'s\b",
+            Replace = "$1s",
+            Enabled = true,
+            IsBuiltIn = true,
+        });
+        var mergedPoss = SpeechTextRulesCatalog.MergeWithDefaults(withRetired);
+        Check("Retired possessive 's strip dropped on merge",
+            !mergedPoss.Any(r =>
+                r.Id.Equals("abbrev-possessive-s", StringComparison.OrdinalIgnoreCase) ||
+                r.Id.Equals("abbrev-plural-possessive", StringComparison.OrdinalIgnoreCase)));
     }
 
     // Force lowercase toggle (Settings → Speech). Default on; off keeps OCR casing;

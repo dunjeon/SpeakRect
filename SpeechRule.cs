@@ -211,9 +211,9 @@ namespace SpeakRect
 
         /// <summary>
         /// Map a user-facing Find string to the form used in cleaned OCR after
-        /// <c>CleanForSpeech</c> punctuation normalize: lowercase, mid-word
-        /// apostrophes kept (contractions), other punctuation → space, spaces
-        /// collapsed. Public for tests / UI.
+        /// <c>CleanForSpeech</c> punctuation normalize: lowercase, apostrophes
+        /// next to a letter or digit kept (contractions, possessives, elisions),
+        /// other punctuation → space, spaces collapsed. Public for tests / UI.
         /// </summary>
         public static string ToCleanedLookup(string? match)
         {
@@ -228,8 +228,9 @@ namespace SpeakRect
             // Keep letters, digits, whitespace, apostrophe, hyphen — mirrors
             // NormalizeSpeechPunctuation (other marks become spaces).
             s = Regex.Replace(s, @"[^\p{L}\p{N}\s'\-]+", " ");
-            // Drop orphan apostrophes / hyphens (not letter'letter / letter-letter).
-            s = Regex.Replace(s, @"(?<!\p{L})'|'(?!\p{L})", " ");
+            // Drop only true-orphan apostrophes (no letter/digit neighbor).
+            s = Regex.Replace(s, @"(?<![\p{L}\p{N}])'(?![\p{L}\p{N}])", " ");
+            // Drop orphan hyphens (not letter-letter).
             s = Regex.Replace(s, @"(?<!\p{L})-|-(?!\p{L})", " ");
             s = Regex.Replace(s, @"\s+", " ").Trim();
             return s;
