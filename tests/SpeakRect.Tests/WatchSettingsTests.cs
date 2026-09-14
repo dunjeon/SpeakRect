@@ -348,6 +348,26 @@ public class WatchSettingsTests
     }
 
     [Fact]
+    public void Llm_confirm_rejects_empty_or_junk_pull()
+    {
+        Assert.False(RegionWatch.WinOcrPullConfirmsText(null));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText(""));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText("   "));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText("…"));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText("unreadable"));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText("no text found"));
+        Assert.False(RegionWatch.WinOcrPullConfirmsText("There is no text"));
+    }
+
+    [Fact]
+    public void Llm_confirm_accepts_speakable_pull()
+    {
+        Assert.True(RegionWatch.WinOcrPullConfirmsText("Hello"));
+        Assert.True(RegionWatch.WinOcrPullConfirmsText("  OK!  "));
+        Assert.True(RegionWatch.WinOcrPullConfirmsText("The doors opened."));
+    }
+
+    [Fact]
     public void Spoken_words_match_ignores_case_and_whitespace()
     {
         Assert.True(RegionWatch.SameSpokenWords("Hello  WORLD", "hello world"));

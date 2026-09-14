@@ -37,6 +37,24 @@ namespace SpeakRect
         /// <summary>Port from ocr.kcpps (after last Start). OCR client uses this.</summary>
         public static int Port => _port;
 
+        /// <summary>Child host PID when our process is alive; otherwise null.</summary>
+        public static int? HostProcessId
+        {
+            get
+            {
+                lock (Gate)
+                {
+                    try
+                    {
+                        if (_process is { HasExited: false })
+                            return _process.Id;
+                    }
+                    catch { /* ignore */ }
+                    return null;
+                }
+            }
+        }
+
         /// <summary>
         /// OpenAI chat <c>model</c> id for the active GGUF
         /// (typically <c>koboldcpp/{stem of model_param}</c>).

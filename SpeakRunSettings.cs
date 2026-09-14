@@ -88,6 +88,12 @@ namespace SpeakRect
         /// <summary>Live recognize engine. Watch ignores this (uses WatchTextSource).</summary>
         public WatchTextSource TextSource { get; init; }
 
+        /// <summary>WinOCR agreement need (matching reads). Default 1.</summary>
+        public int OcrAgreeNeed { get; init; } = OcrAgreement.DefaultNeed;
+
+        /// <summary>WinOCR agreement max tries. Default 1.</summary>
+        public int OcrAgreeOf { get; init; } = OcrAgreement.DefaultOf;
+
         /// <summary>
         /// Snapshot live <see cref="AppSettings.Current"/> (after normalize).
         /// Call at the start of a speak path only.
@@ -112,6 +118,7 @@ namespace SpeakRect
             s.NormalizeComicRegionSettings();
             s.NormalizeImagePrepSettings();
             s.NormalizeVoiceSettings();
+            s.NormalizeOcrAgreeSettings();
 
             return new SpeakRunSettings
             {
@@ -175,6 +182,8 @@ namespace SpeakRect
                 SpeechRules = s.SpeechRules.ToList(),
                 SpeechTextRules = s.SpeechTextRules.ToList(),
                 TextSource = RegionWatch.NormalizeTextSource(s.TextSource),
+                OcrAgreeNeed = s.OcrAgreeNeed,
+                OcrAgreeOf = s.OcrAgreeOf,
             };
         }
 
@@ -233,6 +242,15 @@ namespace SpeakRect
         public static WatchTextSource GetTextSource() =>
             RegionWatch.NormalizeTextSource(
                 Active?.TextSource ?? AppSettings.Current.TextSource);
+
+        public static (int Need, int Of) GetOcrAgree()
+        {
+            if (Active != null)
+                return OcrAgreement.NormalizePair(Active.OcrAgreeNeed, Active.OcrAgreeOf);
+            var s = AppSettings.Current;
+            s.NormalizeOcrAgreeSettings();
+            return (s.OcrAgreeNeed, s.OcrAgreeOf);
+        }
 
         public static bool GetComicPoiMarkers() =>
             Active?.ComicPoiMarkers ?? AppSettings.Current.ComicPoiMarkers;

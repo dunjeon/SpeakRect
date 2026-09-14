@@ -93,6 +93,27 @@ namespace SpeakRect
         /// </summary>
         public WatchTextSource TextSource { get; set; } = RegionWatch.DefaultTextSource;
 
+        /// <summary>
+        /// WinOCR text-source agreement: matching reads required (1–7).
+        /// Used with <see cref="OcrAgreeOf"/>. Default 1 (one read).
+        /// Live / Follow / Balloons / Watch OCR share this pair.
+        /// </summary>
+        public int OcrAgreeNeed { get; set; } = OcrAgreement.DefaultNeed;
+
+        /// <summary>
+        /// WinOCR text-source agreement: max tries (1–7). Default 1.
+        /// </summary>
+        public int OcrAgreeOf { get; set; } = OcrAgreement.DefaultOf;
+
+        public void NormalizeOcrAgreeSettings()
+        {
+            int need = OcrAgreeNeed;
+            int of = OcrAgreeOf;
+            OcrAgreement.Normalize(ref need, ref of);
+            OcrAgreeNeed = need;
+            OcrAgreeOf = of;
+        }
+
         // -----------------------------------------------------------------------
         // TTS voice — [VOICE] section
         // Windows = Windows.Media.SpeechSynthesis (UWP/OneCore)
@@ -706,6 +727,22 @@ namespace SpeakRect
         /// (Levenshtein vs last spoken, 0–100). Default 90.
         /// </summary>
         public int WatchMinDifferencePercent { get; set; } = DefaultWatchMinDifferencePercent;
+
+        // -----------------------------------------------------------------------
+        // Overlay underlay — [OVERLAY] section. Both default off.
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// When true, freeze the foreground program's threads while the overlay
+        /// is shown so a game cannot swap to its own pause menu. Default off.
+        /// </summary>
+        public bool OverlayPauseUnderlay { get; set; }
+
+        /// <summary>
+        /// When true, photograph the desktop before the overlay appears and
+        /// draw / OCR that still image. Default off.
+        /// </summary>
+        public bool OverlayDrawOnScreenshot { get; set; }
 
         public void NormalizeWatchSettings()
         {
@@ -1389,6 +1426,8 @@ namespace SpeakRect
         {
             OcrPrompt = "";
             TextSource = RegionWatch.DefaultTextSource;
+            OcrAgreeNeed = OcrAgreement.DefaultNeed;
+            OcrAgreeOf = OcrAgreement.DefaultOf;
             TtsEngine = "Windows";
             VoiceId = "";
             SapiVoiceName = "";
@@ -1417,6 +1456,8 @@ namespace SpeakRect
             WatchTextSource = DefaultWatchTextSource;
             WatchClearLastOnNoText = true;
             WatchMinDifferencePercent = DefaultWatchMinDifferencePercent;
+            OverlayPauseUnderlay = false;
+            OverlayDrawOnScreenshot = false;
             ActiveProfileName = "Default";
             LastSettingsTab = "Help";
             ActiveRegionSlot = 0;
@@ -1435,7 +1476,7 @@ namespace SpeakRect
         /// <summary>
         /// Factory-restore every product setting (mode, image prep, balloons,
         /// voice, speech text source / names / rules / prompt, hotkeys, gamepad,
-        /// custom actions, follow, watch, regions).
+        /// custom actions, follow, watch, overlay, regions).
         /// Keeps the active profile name and last Settings tab so the current profile
         /// file is rewritten on save. Writes main ini + active profile when present.
         /// </summary>
@@ -1505,6 +1546,20 @@ namespace SpeakRect
             if (map.TryGetValue("TextSource", out string? srcRaw))
                 TextSource = RegionWatch.ParseTextSource(srcRaw);
             TextSource = RegionWatch.NormalizeTextSource(TextSource);
+
+            if (map.TryGetValue("OcrAgreeNeed", out string? needRaw) &&
+                int.TryParse(needRaw, out int need))
+                OcrAgreeNeed = need;
+            if (map.TryGetValue("OcrAgreeOf", out string? ofRaw) &&
+                int.TryParse(ofRaw, out int of))
+                OcrAgreeOf = of;
+            if (map.TryGetValue("OcrAgree", out string? pairRaw) &&
+                TryParseOcrAgreePair(pairRaw, out int pairNeed, out int pairOf))
+            {
+                OcrAgreeNeed = pairNeed;
+                OcrAgreeOf = pairOf;
+            }
+            NormalizeOcrAgreeSettings();
             // Legacy FastComic / FasterComic keys are ignored (speed pipes removed).
             //
             // Do NOT NormalizeModeFlags here — POI keys load later in
@@ -1535,6 +1590,17 @@ namespace SpeakRect
             LoadSpeechTextRulesFromMap(map);
             LoadFollowFromMap(map);
             LoadWatchFromMap(map);
+            LoadOverlayFromMap(map);
+        }
+
+        private void LoadOverlayFromMap(Dictionary<string, string> map)
+        {
+            if (map.TryGetValue("OverlayPauseUnderlay", out string? pauseRaw) &&
+                TryParseBool(pauseRaw, out bool pause))
+                OverlayPauseUnderlay = pause;
+            if (map.TryGetValue("OverlayDrawOnScreenshot", out string? snapRaw) &&
+                TryParseBool(snapRaw, out bool snap))
+                OverlayDrawOnScreenshot = snap;
         }
 
         private void LoadFollowFromMap(Dictionary<string, string> map)
@@ -2479,7 +2545,7 @@ namespace SpeakRect
                 sb.AppendLine("; ComicBook=true → Comic Book: tone, fog detect, balloons/crops/POI");
                 sb.AppendLine("; Named profiles (Profiles\\*.ini) store full snapshots:");
                 sb.AppendLine(";   modes, hotkeys, gamepad, custom, regions, prompts, voice,");
-                sb.AppendLine(";   speech rules, comic balloons, image prep, follow, watch.");
+                sb.AppendLine(";   speech rules, comic balloons, image prep, follow, watch, overlay.");
                 sb.AppendLine();
                 sb.AppendLine("[PROFILE]");
                 sb.AppendLine($"ActiveProfile={profileLabel}");
@@ -2491,6 +2557,12 @@ namespace SpeakRect
                 sb.AppendLine("; TextSource: LocalLlm (default) | Ocr. Live / Follow / Balloons.");
                 sb.AppendLine("; Image prep, balloons, speech rules, and TTS still apply. Watch has its own override.");
                 sb.AppendLine($"TextSource={RegionWatch.TextSourceToIni(TextSource)}");
+                NormalizeOcrAgreeSettings();
+                sb.AppendLine("; OcrAgreeNeed / OcrAgreeOf: when text source is OCR, require Need matching");
+                sb.AppendLine("; reads out of Of tries (1–7). Default 1/1. No agreement → silent (no best-of).");
+                sb.AppendLine("; Global — Watch OCR uses this too.");
+                sb.AppendLine($"OcrAgreeNeed={OcrAgreeNeed}");
+                sb.AppendLine($"OcrAgreeOf={OcrAgreeOf}");
                 sb.AppendLine();
                 sb.AppendLine("[HOTKEYS]");
                 sb.AppendLine("; Format: Ctrl / Alt / Shift / Win combined with + then the key.");
@@ -2742,6 +2814,14 @@ namespace SpeakRect
                 sb.AppendLine($"WatchClearLastOnNoText={WatchClearLastOnNoText.ToString().ToLowerInvariant()}");
                 sb.AppendLine($"WatchMinDifferencePercent={WatchMinDifferencePercent}");
                 sb.AppendLine();
+                sb.AppendLine("[OVERLAY]");
+                sb.AppendLine("; PauseUnderlay: freeze the program under the overlay (threads) so a game");
+                sb.AppendLine("; cannot open its own pause menu. DrawOnScreenshot: photograph the desktop");
+                sb.AppendLine("; first and draw/OCR that still image. Both default off. Takes effect the");
+                sb.AppendLine("; next time the overlay is shown.");
+                sb.AppendLine($"OverlayPauseUnderlay={OverlayPauseUnderlay.ToString().ToLowerInvariant()}");
+                sb.AppendLine($"OverlayDrawOnScreenshot={OverlayDrawOnScreenshot.ToString().ToLowerInvariant()}");
+                sb.AppendLine();
 
                 File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
             }
@@ -2899,7 +2979,7 @@ namespace SpeakRect
         /// and even with '|' we keep full slot values intact.
         /// </summary>
         private static bool IsShortSettingKey(string key) =>
-            key is "ComicBook" or "TextSource"
+            key is "ComicBook" or "TextSource" or "OcrAgreeNeed" or "OcrAgreeOf" or "OcrAgree"
                 or "UseWinOcr" or "SkipWinOcrSendFullFrameOnly"
                 or "ToggleOverlay" or "ToggleComicBook" or "ToggleWatch"
                 or "ShapeRect" or "ShapeOval" or "ShapeLasso"
@@ -2934,6 +3014,7 @@ namespace SpeakRect
                 or "WatchIntervalMs" or "WatchIntervalSeconds"
                 or "WatchPipeline" or "WatchTextSource"
                 or "WatchClearLastOnNoText" or "WatchMinDifferencePercent"
+                or "OverlayPauseUnderlay" or "OverlayDrawOnScreenshot"
                 // Region1..Region8 are hotkeys (short). Slot1..Slot8 are geometries (long) — excluded.
                 || (key.StartsWith("Region", StringComparison.OrdinalIgnoreCase)
                     && !key.StartsWith("RegionGeom", StringComparison.OrdinalIgnoreCase)
@@ -2971,6 +3052,36 @@ namespace SpeakRect
             if (s is "1" or "yes" or "y" or "on") { value = true; return true; }
             if (s is "0" or "no" or "n" or "off") { value = false; return true; }
             return false;
+        }
+
+        /// <summary>Parse "2/3" or "2 of 3" into need/of.</summary>
+        private static bool TryParseOcrAgreePair(string? raw, out int need, out int of)
+        {
+            need = OcrAgreement.DefaultNeed;
+            of = OcrAgreement.DefaultOf;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            string t = raw.Trim();
+            int sep = t.IndexOf('/');
+            if (sep < 0)
+            {
+                int ofWord = t.IndexOf(" of ", StringComparison.OrdinalIgnoreCase);
+                if (ofWord < 0)
+                    return false;
+                if (!int.TryParse(t[..ofWord].Trim(), out need))
+                    return false;
+                if (!int.TryParse(t[(ofWord + 4)..].Trim(), out of))
+                    return false;
+            }
+            else
+            {
+                if (!int.TryParse(t[..sep].Trim(), out need))
+                    return false;
+                if (!int.TryParse(t[(sep + 1)..].Trim(), out of))
+                    return false;
+            }
+            OcrAgreement.Normalize(ref need, ref of);
+            return true;
         }
     }
 }

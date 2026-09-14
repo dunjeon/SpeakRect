@@ -45,13 +45,27 @@ namespace SpeakRect
                 // Bundled Local-LLM host: start with SpeakRect, die with SpeakRect
                 // (explicit Stop + Job Object KILL_ON_JOB_CLOSE).
                 LocalLlmHost.Start();
-                Application.ApplicationExit += (_, _) => LocalLlmHost.Stop();
-                AppDomain.CurrentDomain.ProcessExit += (_, _) => LocalLlmHost.Stop();
+                Application.ApplicationExit += (_, _) =>
+                {
+                    OverlayUnderlay.EndForOverlay();
+                    LocalLlmHost.Stop();
+                };
+                AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+                {
+                    OverlayUnderlay.EndForOverlay();
+                    LocalLlmHost.Stop();
+                };
+                AppDomain.CurrentDomain.UnhandledException += (_, _) =>
+                    OverlayUnderlay.EndForOverlay();
+
+                OverlayUnderlay.NoteForegroundCandidate();
+                OverlayUnderlay.BeginForOverlay(overlayAlreadyVisible: false);
 
                 Application.Run(new frm_SpeakRect());
             }
             finally
             {
+                OverlayUnderlay.EndForOverlay();
                 LocalLlmHost.Stop();
                 // Release the mutex when the application exits
                 _mutex.ReleaseMutex();

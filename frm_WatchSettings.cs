@@ -199,7 +199,8 @@ namespace SpeakRect
             AddFull(MakeHint(
                 "Independent of MODE. Raw snap skips the Image tab. Image matches Default speak " +
                 "(prep, then one full-frame read). Image + Balloon matches Comic Book speak " +
-                "(prep + balloons). Every check still asks OCR yes/no first; no text → stop."), 56);
+                "(prep + balloons). Every check still asks OCR yes/no first; no text → stop. " +
+                "Local-LLM also requires OCR to return words, or the model is not called."), 72);
 
             AddFull(MakeSection("TEXT SOURCE"), 28);
             _cmbTextSource = new ComboBox
@@ -218,8 +219,10 @@ namespace SpeakRect
             AddFull(WrapField(_cmbTextSource), 40);
             AddFull(MakeHint(
                 "Watch override of Settings → Speech text source. Local-LLM is the Watch default. " +
-                "OCR reads the same pipeline bitmap without calling the model. Image prep, balloons, " +
-                "speech rules, pauses, and voice still apply either way."), 48);
+                "OCR reads the same pipeline bitmap without calling the model. OCR agreement " +
+                "(need X of Y) is the Speech setting — Watch does not override it. Local-LLM is skipped " +
+                "when that OCR pull is empty (no describing a blank snap). Image prep, balloons, " +
+                "speech rules, pauses, and voice still apply either way."), 64);
 
             AddFull(MakeSection("CHECK INTERVAL"), 28);
             _numInterval = new NumericUpDown
@@ -284,11 +287,11 @@ namespace SpeakRect
             AddFull(MakeSection("HOW IT WORKS"), 28);
             AddFull(MakeHint(
                 "1. Each check: OCR answers yes/no — is there text? It does not read the line. No → silent (no LLM).\n" +
-                "2. Yes → Local-LLM or OCR (Text source) using the pipeline you picked. Those words are what Watch compares and speaks.\n" +
+                "2. Yes → Local-LLM or OCR (Text source) using the pipeline you picked. OCR uses Speech OCR agreement (need X of Y; no match → silent). Those words are what Watch compares and speaks.\n" +
                 "3. First successful read after enable/slot change is a silent baseline. After a no-text gap (if forget-last is on), returning dialogue is spoken.\n" +
                 "4. Otherwise it speaks only if the new line differs enough (see percent above) and nothing else is being read.\n" +
                 "5. Opening the overlay stops Watch immediately and cancels a check in flight.\n" +
-                "6. A region hotkey, Follow speak, or Stop speech also cancels a Watch check so your action wins."), 156);
+                "6. A region hotkey, Follow speak, or Stop speech also cancels a Watch check so your action wins."), 168);
 
             AddFull(MakeSection("LIVE"), 28);
             _lblLive = new Label
@@ -557,7 +560,10 @@ namespace SpeakRect
         {
             string on = s.WatchEnabled ? "On" : "Off";
             double sec = s.WatchIntervalMs / 1000.0;
-            return $"{on}  ·  region {s.WatchRegionSlot + 1}  ·  {RegionWatch.PipelineDisplayName(s.WatchPipeline)}  ·  {RegionWatch.TextSourceDisplayName(s.WatchTextSource)}  ·  every {sec.ToString("0.0", CultureInfo.CurrentCulture)} s  ·  ≥{s.WatchMinDifferencePercent}% different";
+            string agree = s.WatchTextSource == WatchTextSource.Ocr
+                ? $"  ·  OCR {OcrAgreement.ToDisplay(s.OcrAgreeNeed, s.OcrAgreeOf)}"
+                : "";
+            return $"{on}  ·  region {s.WatchRegionSlot + 1}  ·  {RegionWatch.PipelineDisplayName(s.WatchPipeline)}  ·  {RegionWatch.TextSourceDisplayName(s.WatchTextSource)}{agree}  ·  every {sec.ToString("0.0", CultureInfo.CurrentCulture)} s  ·  ≥{s.WatchMinDifferencePercent}% different";
         }
 
         private void LayoutBottomButtons(Panel bottom)

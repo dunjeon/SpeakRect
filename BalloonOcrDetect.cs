@@ -217,7 +217,10 @@ namespace SpeakRect
             => ComicBestOfFusion.IsJunkWinOcrText(text, MinWinOcrAlnumChars);
 
         /// <summary>
-        /// Watch gate: true if Windows OCR sees any non-junk line.
+        /// Watch probe: true if Windows OCR sees any non-junk line.
+        /// Local-LLM Watch still confirms with a real text pull
+        /// (<see cref="RegionWatch.WinOcrPullConfirmsText"/>) before the snap
+        /// is sent — this boolean alone false-positives on junk.
         /// </summary>
         public static async Task<bool> SeesTextAsync(
             OcrEngine engine,

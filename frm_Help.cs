@@ -230,17 +230,18 @@ namespace SpeakRect
             Feature(sb, "8 regions", "Fixed slots (default Shift+F1\u2013F8) for dialogue, choices, menus\u2026");
             Feature(sb, "Follow", "Slot 9 \u2014 floating box at the mouse. Speak with Shift+F9. Enter locks/unlocks; it does not speak.");
             Feature(sb, "Watch", "Settings \u2192 Watch: OCR yes/no, then Raw snap / Image / Image + Balloon. Local-LLM (default) or OCR. Independent of MODE. Overlay open stops it. Saved with your profile.");
+            Feature(sb, "Overlay", "Settings \u2192 Overlay: freeze the program underneath so a game cannot swap to its pause menu, or draw on a screenshot taken before the overlay appears. Both default off.");
             Feature(sb, "Shapes", "Rectangle, oval, or freehand lasso (R / O / L on the overlay).");
             Feature(sb, "Modes", "Default for games/UI \u00b7 Comic Book for panels and balloons.");
             Feature(sb, "Key Map", "Remap keyboard and gamepad; add custom actions.");
-            Feature(sb, "Profiles", "Save regions, hotkeys, modes, Watch, Follow, voice, speech, Image, and Balloons per game.");
+            Feature(sb, "Profiles", "Save regions, hotkeys, modes, Watch, Follow, Overlay, voice, speech, Image, and Balloons per game.");
             Feature(sb, "Voice", "Windows TTS by default. Optional SAPI 5 for adapters (see README).");
-            Feature(sb, "Speech", "Settings \u2192 Speech: Local-LLM or OCR for live speak, Follow, and Balloons (Watch has its own), name rules, text cleanup, and the reading prompt. Saved with your profile.");
+            Feature(sb, "Speech", "Settings \u2192 Speech: Local-LLM or OCR for live speak, Follow, and Balloons (Watch has its own), OCR agreement (need X matching reads of Y tries; default 1 of 1; no match \u2192 silent), name rules, text cleanup, and the reading prompt. Saved with your profile.");
             Feature(sb, "Balloons", "Settings \u2192 Balloons: find and edit speech-balloon boxes for Comic Book. Saved with your profile.");
             Feature(sb, "Image", "Settings \u2192 Image: clean up the capture before reading, with live preview. Saved with your profile.");
             Feature(sb, "Regions map", "Settings \u2192 Regions shows where every slot sits on screen.");
             Feature(sb, "Analytics", "Settings \u2192 Analytics shows the last spoken text, pictures from that run, and timings. Export saves a zip.");
-            Feature(sb, "Restore all defaults", "This Help tab \u2014 reset mode, Image, Balloons, Voice, Speech (text source, names, rules, prompt), Key Map, Follow, Watch, and all region slots (asks first). Keeps the profile name.");
+            Feature(sb, "Restore all defaults", "This Help tab \u2014 reset mode, Image, Balloons, Voice, Speech (text source, names, rules, prompt), Key Map, Follow, Watch, Overlay, and all region slots (asks first). Keeps the profile name.");
             sb.Append(@"\par ");
 
             // Hotkeys
@@ -264,6 +265,7 @@ namespace SpeakRect
             // Tips
             Section(sb, "TIPS");
             Tip(sb, "Prefer borderless windowed or windowed mode for games \u2014 exclusive fullscreen often cannot be captured.");
+            Tip(sb, "If a game hides its UI when the overlay appears, Settings \u2192 Overlay: freeze the program underneath, or draw on a screenshot. Both default off.");
             Tip(sb, "Use one profile per game so regions and hotkeys stay out of the way of controls.");
             Tip(sb, "Open the Regions tab to see a map of every slot you have set.");
             Tip(sb, "Ctrl+click FOLLOW on the overlay to open Follow size and offset settings.");
@@ -364,7 +366,7 @@ namespace SpeakRect
                 "• Mode (Default) · Image prep · Balloons\n" +
                 "• Voice · Speech (text source, names, text rules, prompt)\n" +
                 "• Key Map (keyboard defaults; gamepad and custom actions cleared)\n" +
-                "• Follow · Watch · all region slots\n\n" +
+                "• Follow · Watch · Overlay · all region slots\n\n" +
                 "Your active profile name is kept, and the reset is written to disk.\n\n" +
                 "This cannot be undone from here.",
                 "Restore all defaults",

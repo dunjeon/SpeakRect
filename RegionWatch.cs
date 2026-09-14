@@ -12,7 +12,11 @@ namespace SpeakRect
         Unavailable = 0,
         /// <summary>WinOCR ran and saw no text.</summary>
         NoText = 1,
-        /// <summary>WinOCR saw text; LLM words are in the recognize result (may still be empty).</summary>
+        /// <summary>
+        /// WinOCR saw text. Local-LLM path also confirmed a speakable OCR pull
+        /// before the snap was sent; spoken words still come from the model
+        /// (and may still be empty).
+        /// </summary>
         HasText = 2,
     }
 
@@ -43,7 +47,8 @@ namespace SpeakRect
 
     /// <summary>
     /// Watch-region helpers: spoken-word compare, pipeline pick, and slot geometry.
-    /// Each idle tick: OCR boolean (is there text?) then the chosen pipeline
+    /// Each idle tick: OCR boolean (is there text?), Local-LLM confirms with an
+    /// OCR text pull (false-positive probe → silent), then the chosen pipeline
     /// only if yes. Speaks when the recognized words differ from last spoken.
     /// </summary>
     public static class RegionWatch
@@ -173,8 +178,9 @@ namespace SpeakRect
 
         /// <summary>
         /// True when balloon detect reported at least one box that contains
-        /// real words. Watch's cheap gate is <see cref="BalloonOcrDetect.SeesTextAsync"/>;
-        /// this helper is for island lists after detect.
+        /// real words. Watch's cheap probe is <see cref="BalloonOcrDetect.ReadNonJunkLinesAsync"/>;
+        /// Local-LLM then confirms with <see cref="WinOcrPullConfirmsText"/>. This
+        /// helper is for island lists after detect.
         /// </summary>
         public static bool WinOcrFoundSpeakableText(IReadOnlyList<DetectedTextRegion>? regions)
         {
@@ -191,6 +197,19 @@ namespace SpeakRect
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Local-LLM Watch confirm: after the yes/no probe, the same OCR engine
+        /// must actually return speakable words. Probe-yes + empty/junk pull is
+        /// a false positive — do not send the snap to the model (it will describe
+        /// the picture). OCR text source does not use this (it already speaks the pull).
+        /// </summary>
+        public static bool WinOcrPullConfirmsText(string? pulled)
+        {
+            if (!TryNormalizeSpeakable(pulled, out string n))
+                return false;
+            return !SpeechCleaner.IsUnusableOcrText(n);
         }
 
         /// <summary>

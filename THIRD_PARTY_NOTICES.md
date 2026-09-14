@@ -20,6 +20,18 @@ covered by the SpeakRect GPLv2 license; each remains under its own terms.
 - **Model weights license:** MIT (as stated by the model authors)
 - **Role:** Vision / OCR model files (e.g. GGUF + mmproj) used for local recognition
 
+## GamePauser
+
+- **Project:** [dunjeon/GamePauser](https://github.com/dunjeon/GamePauser)
+- **License:** MIT
+- **Copyright:** Copyright (c) 2025 dunjeon
+- **Role:** SpeakRect's optional Overlay “freeze the program underneath” setting
+  reimplements the same idea in C# (enumerate threads with Toolhelp32,
+  `SuspendThread` / `ResumeThread`, release held keys, always resume on exit).
+  SpeakRect does **not** include GamePauser's keystroke capture/replay or its
+  hotkey UI. The MIT notice is included here because that technique is derived
+  from GamePauser.
+
 ## Other
 
 .NET runtime libraries, Windows APIs, and NuGet packages (e.g. NAudio) are used

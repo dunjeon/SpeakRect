@@ -180,6 +180,8 @@ namespace SpeakRect
         private bool _watchSyncedEnabled;
         /// <summary>Set from UI show/hide so the Watch thread never reads <see cref="Control.Visible"/>.</summary>
         private volatile bool _overlayVisible = true;
+        private double _opacityBeforeSnapshot = 0.4;
+        private bool _snapshotLookActive;
 
         public frm_SpeakRect()
         {
@@ -211,6 +213,7 @@ namespace SpeakRect
             Invalidated += (_, _) => InvalidateSidebarChrome();
             // Monitor plug/unplug or resolution change while overlay is up.
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.SessionEnding += OnSessionEnding;
             // Settings already loaded in Program.Main before Application.Run
         }
 
@@ -252,6 +255,11 @@ namespace SpeakRect
                     if (IsDisposed) return;
                     if (!Visible) return;
                     Bounds = GetVirtualDesktopBounds();
+                    // Still-image was taken at the old virtual-desktop size.
+                    // Keep a freeze if we have one; drop the stale photograph.
+                    if (OverlayUnderlay.HasSnapshot)
+                        OverlayUnderlay.DiscardSnapshot();
+                    SyncOverlayAppearance();
                     SyncSidebarChrome();
                     Invalidate();
                 }
@@ -264,6 +272,11 @@ namespace SpeakRect
             {
                 Debug.WriteLine($"[Overlay] DisplaySettingsChanged: {ex.Message}");
             }
+        }
+
+        private static void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+        {
+            OverlayUnderlay.EndForOverlay();
         }
 
         private void frm_SpeakRect_KeyDown(object? sender, KeyEventArgs e)
@@ -329,6 +342,7 @@ namespace SpeakRect
             // slipped off the form after sidebar chrome clicks (WS_EX_NOACTIVATE).
             _keyboardProc = KeyboardHookCallback;
             _keyboardHookID = LowLevelInputHooks.SetKeyboardHook(_keyboardProc);
+            SyncOverlayAppearance();
         }
 
         private void ProfilesMenu_DropDownOpening(object? sender, EventArgs e)
@@ -534,6 +548,7 @@ namespace SpeakRect
                 Invalidate();
 
             SyncWatchFromSettings();
+            ApplyOverlayUnderlayFromSettings();
         }
 
         /// <summary>
@@ -868,6 +883,7 @@ namespace SpeakRect
                     onAfterProfileLoad: ApplyFullProfileFromSettings,
                     onFollowChanged: OnFollowSettingsChanged,
                     onWatchChanged: SyncWatchFromSettings,
+                    onOverlayChanged: ApplyOverlayUnderlayFromSettings,
                     onRegionsChanged: OnRegionsSettingsChanged,
                     onModeChanged: OnModeSettingsChanged,
                     captureActiveRegion: CaptureActiveRegionForPreviewAsync,
@@ -947,9 +963,38 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Start/stop the background Watch timer from [WATCH] knobs.
-        /// Overlay-open always pauses the timer (see <see cref="OnVisibleChanged"/>).
+        /// Apply Overlay tab knobs. Pause/snapshot only while the overlay is up;
+        /// a new screenshot is taken the next time it is shown.
         /// </summary>
+        private void ApplyOverlayUnderlayFromSettings()
+        {
+            if (Visible)
+                OverlayUnderlay.BeginForOverlay(overlayAlreadyVisible: true);
+            else
+                OverlayUnderlay.EndForOverlay();
+            SyncOverlayAppearance();
+        }
+
+        private void SyncOverlayAppearance()
+        {
+            if (IsDisposed)
+                return;
+            bool snap = OverlayUnderlay.HasSnapshot;
+            if (snap && !_snapshotLookActive)
+            {
+                _opacityBeforeSnapshot = Opacity < 0.05 ? 0.4 : Opacity;
+                _snapshotLookActive = true;
+                Opacity = 1.0;
+            }
+            else if (!snap && _snapshotLookActive)
+            {
+                _snapshotLookActive = false;
+                Opacity = _opacityBeforeSnapshot;
+            }
+            if (Visible)
+                Invalidate();
+        }
+
         private void SyncWatchFromSettings()
         {
             var s = AppSettings.Current;
@@ -1464,6 +1509,8 @@ namespace SpeakRect
         {
             try { SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; }
             catch { /* ignore */ }
+            try { SystemEvents.SessionEnding -= OnSessionEnding; }
+            catch { /* ignore */ }
             Cursor = _defaultCursor ?? Cursors.Default;
             UnregisterAllHotkeys();
             try { _gamepadPoller?.Dispose(); } catch { /* ignore */ }
@@ -1482,6 +1529,7 @@ namespace SpeakRect
                 LowLevelInputHooks.UnhookWindowsHookEx(_keyboardHookID);
                 _keyboardHookID = IntPtr.Zero;
             }
+            OverlayUnderlay.EndForOverlay();
             // Real exit (tray Exit / Application.Exit) — tear down Local-LLM host with us.
             // Hide-to-tray does not close the form, so Local-LLM keeps running there.
             LocalLlmHost.Stop();
@@ -2542,7 +2590,11 @@ namespace SpeakRect
 
             Bounds = GetVirtualDesktopBounds();
             WindowState = FormWindowState.Normal;
+            // Tray "Show Overlay" can fire while already visible. Passing false
+            // would CopyFromScreen the overlay itself and replace a good snap.
+            OverlayUnderlay.BeginForOverlay(overlayAlreadyVisible: Visible);
             Show();
+            SyncOverlayAppearance();
 
             // Resume follow preview if a session was still armed (_followBox survives hide).
             if (FollowActive && dynamic_rect)
@@ -2565,6 +2617,8 @@ namespace SpeakRect
             Cursor = _defaultCursor ?? Cursors.Default;
             _current?.Stop();
             Hide();
+            OverlayUnderlay.EndForOverlay();
+            SyncOverlayAppearance();
             SyncSidebarChrome(); // hide opaque tools with the overlay
 
             // Balloons refine one-shot: only if the user edited boxes (pending arm).
@@ -2586,6 +2640,8 @@ namespace SpeakRect
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            OverlayUnderlay.TryDrawSnapshot(e.Graphics, ClientRectangle);
+
             // Tool chrome is a separate fully-opaque window (see OverlaySidebarChromeForm).
             // Only the compact draw hint stays on this translucent veil.
             if (!IsSidebarVisible)
@@ -2938,31 +2994,35 @@ namespace SpeakRect
 
             try
             {
+                bool useSnapshot = OverlayUnderlay.HasSnapshot;
                 // Hide Settings so it is not in the snap (Enter path only dims overlay).
-                if (settingsWasVisible)
+                if (!useSnapshot && settingsWasVisible)
                 {
                     try { settings!.Hide(); } catch { /* ignore */ }
                 }
 
-                // Same chrome hide as PrepareForCapture on Enter speak.
-                void hideChrome()
+                if (!useSnapshot)
                 {
-                    if (IsDisposed) return;
-                    Opacity = 0;
-                    if (_sidebarChrome is { IsDisposed: false, Visible: true })
-                        _sidebarChrome.Hide();
-                }
+                    // Same chrome hide as PrepareForCapture on Enter speak.
+                    void hideChrome()
+                    {
+                        if (IsDisposed) return;
+                        Opacity = 0;
+                        if (_sidebarChrome is { IsDisposed: false, Visible: true })
+                            _sidebarChrome.Hide();
+                    }
 
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    if (InvokeRequired)
-                        Invoke(hideChrome);
-                    else
-                        hideChrome();
-                }
+                    if (IsHandleCreated && !IsDisposed)
+                    {
+                        if (InvokeRequired)
+                            Invoke(hideChrome);
+                        else
+                            hideChrome();
+                    }
 
-                // Compositor settle — same delay as CaptureAndRecognizeAsync.
-                await Task.Delay(80).ConfigureAwait(true);
+                    // Compositor settle — same delay as CaptureAndRecognizeAsync.
+                    await Task.Delay(80).ConfigureAwait(true);
+                }
 
                 Bitmap? snapped = null;
                 try
@@ -2989,13 +3049,10 @@ namespace SpeakRect
                 void restoreChrome()
                 {
                     if (IsDisposed) return;
-                    Opacity = restoreOpacity;
-                    if (overlayWasVisible)
+                    // Do not pop the overlay back if the user hid it during the snap.
+                    if (overlayWasVisible && Visible)
                     {
-                        if (!Visible)
-                        {
-                            try { Show(); } catch { /* ignore */ }
-                        }
+                        Opacity = OverlayUnderlay.HasSnapshot ? 1.0 : restoreOpacity;
                         SyncSidebarChrome();
                         if (dynamic_rect)
                             UpdateDynamicRect(Cursor.Position);
@@ -3061,6 +3118,9 @@ namespace SpeakRect
                 try
                 {
                     if (IsDisposed || !IsHandleCreated) return;
+                    // Still-image overlay: OCR crops the snapshot, not the live screen.
+                    if (OverlayUnderlay.HasSnapshot)
+                        return;
                     void hideChrome()
                     {
                         if (IsDisposed) return;
@@ -3091,13 +3151,15 @@ namespace SpeakRect
                     void restore()
                     {
                         if (IsDisposed) return;
-                        // Overlay stays open — only restore look.
-                        Opacity = restoreOpacity;
+                        // PrepareForCapture only dims (Opacity=0); the form stays
+                        // Visible. If the user hid the overlay (Escape) while OCR
+                        // ran, do not pop it back — and do not re-arm underlay.
                         if (!Visible)
-                        {
-                            Show();
-                            Activate();
-                        }
+                            return;
+                        if (OverlayUnderlay.HasSnapshot)
+                            Opacity = 1.0;
+                        else
+                            Opacity = restoreOpacity;
                         SyncSidebarChrome();
                         if (dynamic_rect)
                             UpdateDynamicRect(Cursor.Position);

@@ -102,6 +102,15 @@ Picking RECT / OVAL / LASSO hides the sidebar so you can draw against the left e
 
 The overlay tint is cleared for the snapshot so the dim does not bake into the picture. Drawing is paused while Settings is open.
 
+Some games hide their own UI (pause menu, HUD) as soon as they lose focus, which makes the overlay useless. Settings → **Overlay** has two optional workarounds, both **off** by default:
+
+| Option | What it does |
+|--------|----------------|
+| **Freeze the program underneath** | Suspends that program's threads while the overlay is shown (same idea as GamePauser). The picture on screen stays put. Resume is guaranteed when you hide the overlay or exit SpeakRect. Some titles with anti-cheat may not like this. |
+| **Draw on a screenshot** | Photographs the whole desktop *before* the overlay appears. You draw on that still image; speaking a region reads those pixels, not the live window. Safer if the game must keep running. |
+
+You can use one, both, or neither. They take effect the next time the overlay is shown. Watch still reads the live window while the overlay is hidden.
+
 ## Regions (slots 1–8)
 
 Eight fixed slots, each with its own hotkey. Defaults are **Shift+F1** … **Shift+F8**. They are remappable.
@@ -144,6 +153,7 @@ Each tick: OCR answers a yes/no — is there text? No → silent, no model call.
 |---------|--|
 | Pipeline | **Raw snap** (default, region pixels only), **Image** (Image-tab cleanup, one full-frame read), or **Image + Balloon** (cleanup + per-balloon reads) |
 | Text source | **Local-LLM** (default) or **OCR** (faster, skips the model) |
+| OCR agreement | When Watch text source is OCR, uses the **Speech** setting (need X of Y). Watch does not override it. |
 | Interval | 0.5–60 seconds (default 2.0) |
 | Forget last on no text | Empty box clears the last line so returning dialogue can be read again (default on) |
 | Min difference | Speak only if the new line differs by at least this percent (default 90) |
@@ -164,6 +174,8 @@ One primary mode at a time. Global hotkeys use **Ctrl**, not Shift, so they do n
 When the overlay is hidden, a mode hotkey is announced with a short spoken phrase.
 
 **Text source** (Settings → Speech) is independent of mode: **Local-LLM** (default) or **OCR**. Image prep, balloons, speech rules, pauses, and voice still apply either way. Watch has its own text source that overrides this.
+
+When the source is OCR, **OCR agreement** (Settings → Speech only) is how many matching reads you need out of how many tries. **1 of 1** (default) is a single read. **2 of 3** keeps sending the snap to OCR until two results agree; if they never do, it stays silent. Watch OCR uses that same global pair.
 
 ### Comic Book
 
@@ -192,7 +204,7 @@ Tray **Settings…**, or **SETTINGS** on the overlay. Profile **Load / Save / Sa
 | **Analytics** | Last read: text, pipeline pictures, timings. Export writes a zip. |
 | **Help** | In-app getting started, plus **Restore all defaults** |
 
-A profile stores regions, hotkeys, modes, Follow, Watch, voice, speech rules, Image, and Balloons. `SpeakRect.ini` next to the exe is the live config; named profiles live under `Profiles\`. Switching games is the point of profiles.
+A profile stores regions, hotkeys, modes, Follow, Watch, Overlay, voice, speech rules, Image, and Balloons. `SpeakRect.ini` next to the exe is the live config; named profiles live under `Profiles\`. Switching games is the point of profiles.
 
 Help → **Restore all defaults** resets the live settings (asks first) and keeps the profile name.
 

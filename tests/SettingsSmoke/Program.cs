@@ -63,12 +63,12 @@ var thread = new Thread(() =>
         Check("Profile combo present", profileCombo != null && profileCombo.Width > 40,
             profileCombo == null ? "missing" : $"w={profileCombo.Width}");
 
-        // Tab control: Key Map, Regions, Follow, Watch, Voice, Speech, Image, Balloons, Analytics, Help
+        // Tab control: Key Map, Regions, Follow, Watch, Overlay, Voice, Speech, Image, Balloons, Analytics, Help
         var tabs = FindControls(settings, c => c is TabControl).OfType<TabControl>().FirstOrDefault();
         Check("TabControl present", tabs != null);
         if (tabs != null)
         {
-            Check("Ten settings tabs (incl. Watch / Speech / Image / Balloons)", tabs.TabPages.Count == 10,
+            Check("Eleven settings tabs (incl. Watch / Overlay / Speech / Image / Balloons)", tabs.TabPages.Count == 11,
                 $"count={tabs.TabPages.Count}");
             var names = string.Join(", ", tabs.TabPages.Cast<TabPage>().Select(p => p.Text));
             Check("Tab names",
@@ -77,6 +77,7 @@ var thread = new Thread(() =>
                 names.Contains("Voice", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Follow", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Watch", StringComparison.OrdinalIgnoreCase) &&
+                names.Contains("Overlay", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Speech", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Image", StringComparison.OrdinalIgnoreCase) &&
                 names.Contains("Balloons", StringComparison.OrdinalIgnoreCase) &&
@@ -107,6 +108,7 @@ var thread = new Thread(() =>
             frm_Settings.SettingsTab.Regions,
             frm_Settings.SettingsTab.Follow,
             frm_Settings.SettingsTab.Watch,
+            frm_Settings.SettingsTab.Overlay,
             frm_Settings.SettingsTab.Voice,
             frm_Settings.SettingsTab.Speech,
             frm_Settings.SettingsTab.Image,
@@ -120,6 +122,7 @@ var thread = new Thread(() =>
             "settings_regions.png",
             "settings_follow.png",
             "settings_watch.png",
+            "settings_overlay.png",
             "settings_voice.png",
             "settings_speech.png",
             "settings_image.png",

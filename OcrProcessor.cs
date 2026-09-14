@@ -1193,9 +1193,10 @@ namespace SpeakRect
 
         /// <summary>
         /// Watch OCR (independent of MODE). OCR yes/no on the pipeline bitmap;
-        /// no text → silent. Yes → Local-LLM or OCR words (Watch text source)
-        /// via Raw snap / Image / Image + balloons. Does not publish Analytics
-        /// or last-capture.
+        /// no text → silent. Local-LLM: probe yes still requires a speakable
+        /// OCR pull, else silent (do not send a blank snap). Then Local-LLM
+        /// or OCR words (Watch text source) via Raw snap / Image / Image +
+        /// balloons. Does not publish Analytics or last-capture.
         /// </summary>
         public async Task<(WatchTextGate Gate, string Text)> RecognizeWatchWithoutSpeakingAsync(
             CancellationToken token)
@@ -1262,10 +1263,11 @@ namespace SpeakRect
         }
 
         /// <summary>
-        /// Watch: snap → (optional Image prep) → OCR yes/no → Local-LLM or OCR
-        /// words (Watch text source). Raw snap / Image = full-frame. Image +
-        /// Balloon = per-island (or full-frame if detect finds no boxes).
-        /// Does not flip live MODE. No Analytics / last-capture stomp.
+        /// Watch: snap → (optional Image prep) → OCR yes/no → (Local-LLM:
+        /// same OCR must pull speakable words, else silent) → Local-LLM or
+        /// OCR words (Watch text source). Raw snap / Image = full-frame.
+        /// Image + Balloon = per-island (or full-frame if detect finds no
+        /// boxes). Does not flip live MODE. No Analytics / last-capture stomp.
         /// </summary>
         private async Task CaptureAndRecognizeWatchAsync(CancellationToken token)
         {
@@ -1353,14 +1355,18 @@ namespace SpeakRect
 
                 if (textSource == WatchTextSource.Ocr)
                 {
-                    _lastText = await WatchOcrSpokenTextAsync(
-                        engine, llmSource, watchPipe, detail, token)
+                    var (need, of) = SpeakRunSettings.GetOcrAgree();
+                    _lastText = await OcrAgreement.RunAsync(
+                            () => WatchOcrSpokenTextAsync(
+                                engine, llmSource, watchPipe, detail, token),
+                            need, of, detail, token)
                         .ConfigureAwait(false);
                     bool ocrHas = !string.IsNullOrEmpty(_lastText);
                     _watchTextGate = ocrHas ? WatchTextGate.HasText : WatchTextGate.NoText;
-                    detail.AppendLine($"watch-gate: ocrHasText={ocrHas} (OCR text source)");
+                    detail.AppendLine(
+                        $"watch-gate: ocrHasText={ocrHas} (OCR text source, {OcrAgreement.ToDisplay(need, of)})");
                     Debug.WriteLine(
-                        $"[Watch] pipe={watchPipe} source=OCR hasText={ocrHas}");
+                        $"[Watch] pipe={watchPipe} source=OCR hasText={ocrHas} agree={OcrAgreement.ToDisplay(need, of)}");
                     return;
                 }
 
@@ -1376,23 +1382,51 @@ namespace SpeakRect
                         ApplyGrayFog);
                     gateSrc = gatePair.Detect;
                 }
-                bool hasText;
+                IReadOnlyList<string> probeLines;
                 try
                 {
-                    hasText = await BalloonOcrDetect.SeesTextAsync(
+                    probeLines = await BalloonOcrDetect.ReadNonJunkLinesAsync(
                         engine, gateSrc, token).ConfigureAwait(false);
                 }
                 finally
                 {
                     try { gatePair?.Dispose(); } catch { /* ignore */ }
                 }
-                _watchTextGate = hasText ? WatchTextGate.HasText : WatchTextGate.NoText;
-                detail.AppendLine($"watch-gate: winocrHasText={hasText}");
+                bool hasText = probeLines.Count > 0;
+                detail.AppendLine(
+                    $"watch-gate: winocrHasText={hasText} probeLines={probeLines.Count}");
                 Debug.WriteLine(
                     $"[Watch] pipe={watchPipe} source=LLM winocrHasText={hasText}");
 
                 if (!hasText)
+                {
+                    _watchTextGate = WatchTextGate.NoText;
                     return;
+                }
+
+                // Probe is a boolean on (possibly fogged) detect pixels and
+                // false-positives. Pull words from the snap the model would
+                // get; empty/junk → silent, do not send the picture.
+                IReadOnlyList<string> confirmLines = probeLines;
+                if (watchPipe == WatchPipeline.ImageBalloon)
+                {
+                    confirmLines = await BalloonOcrDetect.ReadNonJunkLinesAsync(
+                        engine, llmSource, token).ConfigureAwait(false);
+                }
+                string confirmPull = WatchOcrLinesToSpeakText(confirmLines, detail);
+                if (!RegionWatch.WinOcrPullConfirmsText(confirmPull))
+                {
+                    _watchTextGate = WatchTextGate.NoText;
+                    _lastText = "";
+                    detail.AppendLine(
+                        "watch-gate: probe yes, OCR pull empty → silent (skip LLM)");
+                    Debug.WriteLine(
+                        "[Watch] probe yes but OCR pull empty — skip LLM");
+                    return;
+                }
+
+                _watchTextGate = WatchTextGate.HasText;
+                detail.AppendLine("watch-gate: OCR pull confirms text → LLM");
 
                 try
                 {
@@ -1554,7 +1588,18 @@ namespace SpeakRect
             var lines = await BalloonOcrDetect.ReadNonJunkLinesAsync(
                 engine, source, token).ConfigureAwait(false);
             detail.AppendLine($"watch-ocr-lines={lines.Count}");
-            if (lines.Count == 0)
+            return WatchOcrLinesToSpeakText(lines, detail);
+        }
+
+        /// <summary>
+        /// Speech-clean WinOCR lines and join speakable pieces. Empty when
+        /// the engine returned junk / nothing — Watch Local-LLM uses this as
+        /// the post-probe confirm so a blank snap is never sent.
+        /// </summary>
+        private static string WatchOcrLinesToSpeakText(
+            IReadOnlyList<string> lines, StringBuilder detail)
+        {
+            if (lines == null || lines.Count == 0)
                 return "";
             var cleaned = new List<string>(lines.Count);
             for (int i = 0; i < lines.Count; i++)
@@ -1645,9 +1690,16 @@ namespace SpeakRect
             bool alreadyDucked)
         {
             var sw = Stopwatch.StartNew();
-            var rawParts = await CollectOcrSpeakPartsAsync(
-                pipelineImage, regions, detail, token).ConfigureAwait(false);
-            pipeTimer.Mark("ocr-text-source collect", sw);
+            var (need, of) = SpeakRunSettings.GetOcrAgree();
+            var rawParts = await OcrAgreement.RunAsync(
+                    () => CollectOcrSpeakPartsAsync(
+                        pipelineImage, regions, detail, token),
+                    p => JoinWatchSpokenParts(p),
+                    new List<string>(),
+                    need, of, detail, token)
+                .ConfigureAwait(false);
+            pipeTimer.Mark(
+                $"ocr-text-source collect ({OcrAgreement.ToDisplay(need, of)})", sw);
 
             var speakPieces = SpeechCleaner.ExpandToSpeakPieces(rawParts);
             if (speakPieces.Count >= 2)
@@ -10267,6 +10319,19 @@ namespace SpeakRect
             r = ClampToVirtualScreen(r);
             if (r.Width < 1 || r.Height < 1)
                 return new Bitmap(1, 1, PixelFormat.Format32bppArgb);
+
+            var fromSnap = OverlayUnderlay.TryCloneRegion(r);
+            if (fromSnap != null)
+                return fromSnap;
+            if (OverlayUnderlay.HasSnapshot)
+            {
+                // Still-image session but this rect missed the snapshot — do not
+                // photograph overlay chrome / a live pause menu instead.
+                var miss = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(miss))
+                    g.Clear(Color.White);
+                return miss;
+            }
 
             var b = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
             try

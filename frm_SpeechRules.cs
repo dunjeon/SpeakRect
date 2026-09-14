@@ -41,6 +41,8 @@ namespace SpeakRect
 
         // ---- Global recognize engine (live / Follow / Balloons; Watch overrides) ----
         private readonly ComboBox _cmbTextSource;
+        private readonly NumericUpDown _numOcrAgreeNeed;
+        private readonly NumericUpDown _numOcrAgreeOf;
 
         // ---- Prompt (single OCR instruction for all VL paths) ----
         private readonly TextBox _txtPrompt;
@@ -107,7 +109,7 @@ namespace SpeakRect
                 Padding = new Padding(10, 8, 10, 8),
                 BackColor = UiTheme.Bg,
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f)); // text source
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 128f)); // text source + OCR agree
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 62f)); // inner tabs
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 38f)); // test
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // status bar
@@ -139,7 +141,9 @@ namespace SpeakRect
             _innerTabs.TabPages.Add(tabNames);
             _innerTabs.TabPages.Add(tabText);
             _innerTabs.TabPages.Add(tabPrompts);
-            root.Controls.Add(BuildTextSourceBar(out _cmbTextSource), 0, 0);
+            root.Controls.Add(
+                BuildTextSourceBar(out _cmbTextSource, out _numOcrAgreeNeed, out _numOcrAgreeOf),
+                0, 0);
             root.Controls.Add(_innerTabs, 0, 1);
 
             // ---- Test panel (shared) ----
@@ -233,18 +237,22 @@ namespace SpeakRect
             ForeColor = UiTheme.Fg,
         };
 
-        private Control BuildTextSourceBar(out ComboBox combo)
+        private Control BuildTextSourceBar(
+            out ComboBox combo,
+            out NumericUpDown need,
+            out NumericUpDown of)
         {
             var wrap = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 2,
+                RowCount = 3,
                 BackColor = UiTheme.Bg,
                 Padding = new Padding(0, 0, 0, 4),
             };
-            wrap.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100f));
+            wrap.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118f));
             wrap.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            wrap.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
             wrap.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
             wrap.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
@@ -277,18 +285,109 @@ namespace SpeakRect
             };
             wrap.Controls.Add(combo, 1, 0);
 
+            var lblAgree = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "OCR AGREEMENT",
+                ForeColor = UiTheme.FgHeader,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            wrap.Controls.Add(lblAgree, 0, 1);
+
+            var agreeRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = UiTheme.Bg,
+                Padding = new Padding(0, 2, 0, 0),
+            };
+            need = MakeAgreeNud();
+            of = MakeAgreeNud();
+            var lblNeed = new Label
+            {
+                Text = "Need",
+                AutoSize = true,
+                ForeColor = UiTheme.FgMuted,
+                Margin = new Padding(0, 6, 6, 0),
+            };
+            var lblOf = new Label
+            {
+                Text = "matching reads of",
+                AutoSize = true,
+                ForeColor = UiTheme.FgMuted,
+                Margin = new Padding(10, 6, 6, 0),
+            };
+            var lblTries = new Label
+            {
+                Text = "tries",
+                AutoSize = true,
+                ForeColor = UiTheme.FgMuted,
+                Margin = new Padding(8, 6, 0, 0),
+            };
+            need.ValueChanged += (_, _) => OnOcrAgreeChanged();
+            of.ValueChanged += (_, _) => OnOcrAgreeChanged();
+            agreeRow.Controls.Add(lblNeed);
+            agreeRow.Controls.Add(need);
+            agreeRow.Controls.Add(lblOf);
+            agreeRow.Controls.Add(of);
+            agreeRow.Controls.Add(lblTries);
+            wrap.Controls.Add(agreeRow, 1, 1);
+
             var hint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "Live speak, Follow, and Balloons. Image prep, balloon boxes, names, " +
-                       "text rules, pauses, and voice still apply. Watch has its own text source.",
+                Text = "Live speak, Follow, and Balloons. OCR agreement (default 1 of 1) is global: " +
+                       "Watch uses it too when Watch text source is OCR — Watch does not have its own. " +
+                       "No match after the tries → silent (nothing spoken). Image prep, balloon boxes, " +
+                       "names, text rules, pauses, and voice still apply.",
                 ForeColor = UiTheme.FgMuted,
                 Font = new Font("Segoe UI", 8.5f),
                 TextAlign = ContentAlignment.TopLeft,
             };
-            wrap.Controls.Add(hint, 0, 1);
+            wrap.Controls.Add(hint, 0, 2);
             wrap.SetColumnSpan(hint, 2);
             return wrap;
+        }
+
+        private static NumericUpDown MakeAgreeNud()
+        {
+            var n = new NumericUpDown
+            {
+                Minimum = OcrAgreement.Min,
+                Maximum = OcrAgreement.MaxOf,
+                DecimalPlaces = 0,
+                Increment = 1,
+                Value = 1,
+                Width = 52,
+                Height = 26,
+                BackColor = UiTheme.BgInput,
+                ForeColor = UiTheme.Fg,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            return n;
+        }
+
+        private void OnOcrAgreeChanged()
+        {
+            if (_loading) return;
+            int need = (int)_numOcrAgreeNeed.Value;
+            int of = (int)_numOcrAgreeOf.Value;
+            OcrAgreement.Normalize(ref need, ref of);
+            _loading = true;
+            try
+            {
+                _numOcrAgreeNeed.Value = need;
+                _numOcrAgreeOf.Value = of;
+            }
+            finally
+            {
+                _loading = false;
+            }
+            PersistAll(saveDisk: true);
+            SetStatus($"Saved OCR agreement · {OcrAgreement.ToDisplay(need, of)}.");
         }
 
         private sealed class TextSourceItem
@@ -725,6 +824,9 @@ namespace SpeakRect
                 _chkTitleCaseAllCaps.Checked = AppSettings.Current.SpeechTitleCaseAllCaps;
                 _chkForceLowercase.Checked = AppSettings.Current.SpeechForceLowercase;
                 SelectTextSourceInCombo(AppSettings.Current.TextSource);
+                AppSettings.Current.NormalizeOcrAgreeSettings();
+                _numOcrAgreeNeed.Value = AppSettings.Current.OcrAgreeNeed;
+                _numOcrAgreeOf.Value = AppSettings.Current.OcrAgreeOf;
 
                 // Names
                 _listNames.BeginUpdate();
@@ -819,6 +921,11 @@ namespace SpeakRect
             AppSettings.Current.SpeechTitleCaseAllCaps = _chkTitleCaseAllCaps.Checked;
             AppSettings.Current.SpeechForceLowercase = _chkForceLowercase.Checked;
             AppSettings.Current.TextSource = SelectedTextSource();
+            int need = (int)_numOcrAgreeNeed.Value;
+            int of = (int)_numOcrAgreeOf.Value;
+            OcrAgreement.Normalize(ref need, ref of);
+            AppSettings.Current.OcrAgreeNeed = need;
+            AppSettings.Current.OcrAgreeOf = of;
             AppSettings.Current.SetSpeechRules(CollectNameRules());
             SyncTextRulesFromListViewTags();
             AppSettings.Current.SetSpeechTextRules(_textRules);
